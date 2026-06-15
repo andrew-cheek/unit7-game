@@ -1,0 +1,105 @@
+import * as THREE from 'three'
+
+export interface GroundHit {
+  y: number
+  normal: THREE.Vector3
+}
+
+/**
+ * Collision + terrain following. Two responsibilities:
+ *  - resolveHorizontal: push a capsule (treated as a vertical circle) out of the
+ *    world's AABB colliders and cancel the velocity component into the wall, so
+ *    nothing passes through buildings (and entities slide along them).
+ *  - sampleGround: a downward raycast against terrain + ramp + platform meshes,
+ *    returning the surface height and world normal so entities can climb slopes
+ *    and vehicles can align their pitch. This is what makes ramps drivable -
+ *    Y follows the hit point every frame instead of being pinned at 0.
+ */
+export class Physics {
+  private ray = new THREE.Raycaster()
+  private readonly down = new THREE.Vector3(0, -1, 0)
+  private normalMat = new THREE.Matrix3()
+  private groundMeshes: THREE.Mesh[]
+  colliders: THREE.Box3[]
+
+  constructor(groundMeshes: THREE.Mesh[], colliders: THREE.Box3[]) {
+    this.groundMeshes = groundMeshes
+    this.colliders = colliders
+  }
+
+  /** Swap the active collision/ground surfaces (on zone change). */
+  setSurfaces(groundMeshes: THREE.Mesh[], colliders: THREE.Box3[]) {
+    this.groundMeshes = groundMeshes
+    this.colliders = colliders
+  }
+
+  /** Highest ground surface directly below (x, z), searched from `fromY` down. */
+  sampleGround(x: number, z: number, fromY: number): GroundHit | null {
+    this.ray.set(new THREE.Vector3(x, fromY, z), this.down)
+    this.ray.far = fromY + 200
+    const hits = this.ray.intersectObjects(this.groundMeshes, false)
+    if (hits.length === 0) return null
+    const hit = hits[0] // nearest from above = topmost surface
+    let normal = new THREE.Vector3(0, 1, 0)
+    if (hit.face) {
+      this.normalMat.getNormalMatrix(hit.object.matrixWorld)
+      normal = hit.face.normal.clone().applyMatrix3(this.normalMat).normalize()
+      if (normal.y < 0) normal.negate()
+    }
+    return { y: hit.point.y, normal }
+  }
+
+  /**
+   * Push a capsule (feet at pos.y, of given radius/height) out of any AABB it
+   * overlaps in XZ, and remove the velocity component driving it into the wall.
+   */
+  resolveHorizontal(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, height: number) {
+    const r2 = radius * radius
+    for (const box of this.colliders) {
+      // Skip boxes the capsule doesn't vertically overlap (e.g. standing on top).
+      if (pos.y >= box.max.y || pos.y + height <= box.min.y) continue
+
+      const cx = Math.min(Math.max(pos.x, box.min.x), box.max.x)
+      const cz = Math.min(Math.max(pos.z, box.min.z), box.max.z)
+      const dx = pos.x - cx
+      const dz = pos.z - cz
+      const d2 = dx * dx + dz * dz
+
+      if (d2 >= r2) continue
+
+      if (d2 > 1e-8) {
+        const d = Math.sqrt(d2)
+        const nx = dx / d
+        const nz = dz / d
+        const pen = radius - d
+        pos.x += nx * pen
+        pos.z += nz * pen
+        const vdot = vel.x * nx + vel.z * nz
+        if (vdot < 0) {
+          vel.x -= vdot * nx
+          vel.z -= vdot * nz
+        }
+      } else {
+        // Center is inside the footprint: eject along the nearest face.
+        const toMinX = pos.x - box.min.x
+        const toMaxX = box.max.x - pos.x
+        const toMinZ = pos.z - box.min.z
+        const toMaxZ = box.max.z - pos.z
+        const minPen = Math.min(toMinX, toMaxX, toMinZ, toMaxZ)
+        if (minPen === toMinX) {
+          pos.x = box.min.x - radius
+          if (vel.x > 0) vel.x = 0
+        } else if (minPen === toMaxX) {
+          pos.x = box.max.x + radius
+          if (vel.x < 0) vel.x = 0
+        } else if (minPen === toMinZ) {
+          pos.z = box.min.z - radius
+          if (vel.z > 0) vel.z = 0
+        } else {
+          pos.z = box.max.z + radius
+          if (vel.z < 0) vel.z = 0
+        }
+      }
+    }
+  }
+}

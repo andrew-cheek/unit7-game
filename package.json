@@ -1,0 +1,26 @@
+{
+  "name": "unit7-game",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Unit 7 — a polished futuristic third-person sci-fi browser game in Three.js, packaged as a single embeddable React component <Unit7Game />.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
+    "@types/three": "0.160.0",
+    "@vitejs/plugin-react": "4.2.1",
+    "typescript": "5.4.5",
+    "vite": "5.2.11"
+  }
+}

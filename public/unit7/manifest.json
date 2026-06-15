@@ -1,0 +1,23 @@
+{
+  "useAssets": false,
+  "_README": "Set useAssets to true after dropping the CC0 files below into public/unit7/<path>. Anything missing falls back to a procedural placeholder, so the game always runs. Sources: env+textures = polyhaven.com (glTF/4K), models = quaternius.com (glTF/GLB), alt kits = kenney.nl.",
+  "env": "env/night_city.hdr",
+  "models": {
+    "player": "models/player_robot.glb",
+    "npcMen": "models/npc_men.glb",
+    "npcWomen": "models/npc_women.glb",
+    "alien": "models/alien.glb",
+    "hovercar": "models/vehicle_hovercar.glb",
+    "spaceship": "models/spaceship.glb",
+    "rocket": "models/rocket.glb",
+    "townA": "models/town/building_a.glb",
+    "townB": "models/town/building_b.glb",
+    "rampA": "models/streets/ramp_a.glb",
+    "animLib": "anim/universal_animations.glb"
+  },
+  "textures": {
+    "asphalt": { "map": "textures/asphalt/albedo.jpg", "normal": "textures/asphalt/normal.jpg", "rough": "textures/asphalt/rough.jpg" },
+    "metal": { "map": "textures/metal/albedo.jpg", "normal": "textures/metal/normal.jpg", "rough": "textures/metal/rough.jpg" },
+    "concrete": { "map": "textures/concrete/albedo.jpg", "normal": "textures/concrete/normal.jpg", "rough": "textures/concrete/rough.jpg" }
+  }
+}
