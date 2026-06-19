@@ -99,3 +99,59 @@ on a simpler, smooth path; extend the tier system where levers were missing.
   by `tier.*` booleans), so they cost nothing rather than being created and
   skipped.
 
+
+## Phase 2 — Third-person follow camera
+
+**Goal:** a camera that trails behind and slightly above the robot, smoothly
+follows movement and turning, and never clips through walls/terrain — modern
+action-game feel.
+
+### What changed and why
+
+- **`Camera.ts` rewritten** around a new `FollowState` the orchestrator passes
+  each frame:
+  - **Auto-follow yaw.** When the look input (mouse/touch) has been idle for
+    `autoFollowDelay` and the subject is moving, the camera eases `input.yaw`
+    toward the subject heading so it trails *behind* the robot (or the vehicle).
+    Crucially this also fixes vehicle turning: previously the hovercar/shuttle
+    turned with `moveX` but the camera yaw never followed unless you mouse-looked.
+    Any manual look instantly reclaims control (we only nudge while idle).
+  - **Look-ahead.** The look target leads along movement (scaled by speed) so you
+    see more of where you're going; damped so it doesn't jitter.
+  - **Speed pull-back.** Camera distance extends ~22% at full speed.
+  - **Better collision.** Desktop sweeps a 5-ray cross (center + 4 offsets) from
+    the subject to the desired camera spot and takes the nearest blocker, which
+    catches thin building edges the old single ray slipped through. Snaps in,
+    eases out.
+  - **Ground clearance.** A downward ray under the final camera position clamps
+    it above terrain so steep downward pitch can't bury the camera underground.
+- **`Input`** tracks `lastLookMs` (set on real mouse/touch look) and exposes
+  `sinceLook`, which gates auto-follow.
+- **`Game.buildFollowState()`** assembles the hints for whichever subject is
+  active (robot / plane / vehicle).
+- New `config.camera` levers: `autoFollowLambda`, `autoFollowDelay`, `lookAhead`,
+  `lookAheadLambda`, `speedPullback`, `returnLambda`, `minGroundClearance`.
+
+### Design decisions made on your behalf
+
+- **Auto-follow is a gentle nudge, not a lock.** Lambda 3.0 with a 0.5s idle
+  delay means it eases in only when you stop steering with the mouse, so it never
+  fights manual aim. This is the Zelda/GTA-style "camera settles behind you"
+  behavior rather than a rigid chase cam.
+- **Collision probe count is tier-aware** (5 rays desktop, 1 mobile) so mobile
+  doesn't pay for the extra raycasts against every building each frame.
+
+### Build & test results
+
+- `npm run typecheck`: clean. `npm run build`: succeeds.
+
+### Performance notes
+
+- Desktop: 5 collision rays + 1 ground ray per frame against the solids set.
+  Cheap relative to the render. Mobile: 1 + 1, essentially the prior cost.
+
+### Needs real-device / browser testing
+
+- The *feel* of auto-follow timing (lambda/delay) and look-ahead distance is
+  tuned blind — it compiles and the math is sound, but the exact numbers want a
+  human eye. They're all in `config.camera` for quick tweaking.

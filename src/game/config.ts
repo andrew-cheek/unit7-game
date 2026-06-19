@@ -103,6 +103,20 @@ export const config = {
     mouseSensitivity: 0.0022,
     touchSensitivity: 0.006,
     collisionPadding: 0.4,
+    // Modern action-cam feel: when the player moves and the look stick/mouse has
+    // been idle for `autoFollowDelay`, the camera eases its yaw to trail behind
+    // the subject's heading. Manual look instantly takes priority again.
+    autoFollowLambda: 3.0,
+    autoFollowDelay: 0.5,
+    // Push the look target ahead along movement so you see more of where you go.
+    lookAhead: 2.2,
+    lookAheadLambda: 6,
+    // Pull the camera back when moving fast (sprint / boost).
+    speedPullback: 1.22,
+    // Collision pull-in eases back out at this rate; snaps in instantly.
+    returnLambda: 7,
+    // Keep the camera at least this far above whatever ground is below it.
+    minGroundClearance: 0.6,
   },
 
   vehicle: {

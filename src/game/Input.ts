@@ -46,6 +46,7 @@ export class Input {
   private virtualMove = new THREE.Vector2(0, 0)
   private usingVirtualMove = false
   private lockEnabled = true
+  private lastLookMs = -1e9
 
   constructor(dom: HTMLElement) {
     this.dom = dom
@@ -161,8 +162,14 @@ export class Input {
     this.usingVirtualMove = x !== 0 || y !== 0
   }
   setVirtualLook(dx: number, dy: number) {
+    if (dx !== 0 || dy !== 0) this.lastLookMs = performance.now()
     this.yaw -= dx * config.camera.touchSensitivity
     this.pitch = clamp(this.pitch - dy * config.camera.touchSensitivity, config.camera.pitchMin, config.camera.pitchMax)
+  }
+
+  /** Seconds since the player last actively moved the camera (mouse / touch). */
+  get sinceLook() {
+    return (performance.now() - this.lastLookMs) / 1000
   }
   pressAction(action: GameAction, down: boolean) {
     if (HELD.includes(action)) {
@@ -177,6 +184,7 @@ export class Input {
   update() {
     // Apply mouse-look deltas captured since last frame.
     if (this.lookDX !== 0 || this.lookDY !== 0) {
+      this.lastLookMs = performance.now()
       this.yaw -= this.lookDX * config.camera.mouseSensitivity
       this.pitch = clamp(
         this.pitch - this.lookDY * config.camera.mouseSensitivity,

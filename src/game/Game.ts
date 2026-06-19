@@ -454,7 +454,7 @@ export class Game {
     if (onEarth) this.events.update(dt, this.player.position)
     this.updateEffects(dt)
     this.zones.update(dt, this.zone)
-    this.camera.update(dt, this.input, this.focus, this.vehicles.current ? 1.8 : 1)
+    this.camera.update(dt, this.input, this.focus, this.buildFollowState())
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
     this.world.update(dt, this.focus)
@@ -468,6 +468,37 @@ export class Game {
 
     this.fpsSmooth = lerp(this.fpsSmooth, 1 / Math.max(dt, 1e-4), 0.08)
     this.pushHud(dt)
+  }
+
+  /** Assemble the modern-cam follow hints for the current control subject. */
+  private buildFollowState(): import('./Camera').FollowState {
+    const v = this.vehicles.current
+    const idle = this.input.sinceLook > config.camera.autoFollowDelay
+    if (v) {
+      const sp = Math.hypot(v.velocity.x, v.velocity.z)
+      const inv = sp > 0.1 ? 1 / sp : 0
+      return {
+        distanceScale: 1.8,
+        followYaw: v.yaw,
+        moveX: v.velocity.x * inv,
+        moveZ: v.velocity.z * inv,
+        speed01: this.vehicles.speedFraction,
+        canAutoFollow: idle && sp > 1.5,
+      }
+    }
+    const p = this.player
+    const sp = Math.hypot(p.velocity.x, p.velocity.z)
+    const inv = sp > 0.1 ? 1 / sp : 0
+    const onFoot = p.mode === 'robot' || p.mode === 'plane'
+    return {
+      distanceScale: p.mode === 'plane' ? 1.35 : 1,
+      followYaw: p.yaw,
+      moveX: p.velocity.x * inv,
+      moveZ: p.velocity.z * inv,
+      speed01: clamp(sp / config.player.runSpeed, 0, 1),
+      // Trail the robot when it is moving and grounded; planes auto-follow too.
+      canAutoFollow: idle && sp > 1.2 && onFoot && (p.grounded || p.mode === 'plane'),
+    }
   }
 
   private computeRadar(): RadarBlip[] {
