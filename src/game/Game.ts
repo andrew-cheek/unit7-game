@@ -12,7 +12,8 @@ import { Events } from './Events'
 import { Intro } from './Intro'
 import { CameraController } from './Camera'
 import { config } from './config'
-import { clamp, isTouchDevice, lerp } from './utils'
+import { detectTier, TIERS } from './tiers'
+import { clamp, lerp } from './utils'
 import type { HudState, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
@@ -72,23 +73,29 @@ export class Game {
   private scratchFwd = new THREE.Vector3()
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
+    // Resolve the quality tier once at startup (GPU/UA probe + manual override),
+    // then make it the single object every system reads from.
+    const tierName = detectTier(userConfig.quality)
+    const tier = TIERS[tierName]
+    config.quality = tierName
+    config.tier = tier
+
     this.cfg = {
       startInIntro: userConfig.startInIntro ?? true,
-      quality: userConfig.quality ?? (isTouchDevice() ? 'low' : 'high'),
+      quality: tierName,
       initialZone: userConfig.initialZone ?? 'earth',
     }
-    config.quality = this.cfg.quality
     this.zone = this.cfg.initialZone
     this.hudListener = hudListener
 
-    this.engine = new Engine(container, this.cfg.quality)
+    this.engine = new Engine(container, tier)
     this.world = new World(this.engine.scene, this.zone)
     this.input = new Input(this.engine.renderer.domElement)
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
     this.player = new Player(this.engine.scene)
     this.player.object.position.copy(this.world.spawn)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
-    const npcCount = this.cfg.quality === 'high' ? config.npc.count : Math.round(config.npc.count * 0.5)
+    const npcCount = Math.round(config.npc.count * tier.densityScale)
     this.npcs = new NPCManager(this.engine.scene, this.physics, this.capturables, npcCount)
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
@@ -448,6 +455,8 @@ export class Game {
     this.updateEffects(dt)
     this.zones.update(dt, this.zone)
     this.camera.update(dt, this.input, this.focus, this.vehicles.current ? 1.8 : 1)
+    // Keep the (desktop-only) depth-of-field focused on the subject.
+    this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
     this.world.update(dt, this.focus)
 
     if (this.netTimer > 0) {

@@ -1,8 +1,14 @@
 import type { AssetQuality, Zone } from './types'
+import { TIERS, type QualityTier } from './tiers'
 
 // Central tunables. Engine systems read from here so balancing lives in one place.
 export const config = {
   quality: 'high' as AssetQuality,
+
+  // The resolved quality tier every system reads from. Game overwrites this at
+  // startup via detectTier(); defaults to the high preset so non-Game callers
+  // (tests, asset previews) still have a valid object.
+  tier: TIERS.high as QualityTier,
 
   render: {
     pixelRatioCap: 2,

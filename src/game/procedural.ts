@@ -414,7 +414,7 @@ export interface SkyModel {
 }
 
 /** Gradient sky dome + a twinkling starfield (both fog-immune so they stay visible). */
-export function createSky(top = 0x05070f, horizon = 0x150a28): SkyModel {
+export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500): SkyModel {
   const group = new THREE.Group()
   const geo = new THREE.SphereGeometry(900, 32, 18)
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3), 3))
@@ -438,7 +438,7 @@ export function createSky(top = 0x05070f, horizon = 0x150a28): SkyModel {
   }
   setColors(top, horizon)
 
-  const N = 1500
+  const N = Math.max(100, Math.floor(starCount))
   const sp = new Float32Array(N * 3)
   const sc = new Float32Array(N * 3)
   for (let i = 0; i < N; i++) {

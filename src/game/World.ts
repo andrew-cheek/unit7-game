@@ -51,7 +51,7 @@ export class World {
     this.bounds = new THREE.Box3(new THREE.Vector3(-half, -10, -half), new THREE.Vector3(half, 260, half))
 
     this.buildMaterials()
-    this.sky = createSky()
+    this.sky = createSky(0x05070f, 0x150a28, config.tier.starCount)
     scene.add(this.sky.group) // sky persists across zones (just recolored)
     this.buildGround()
     this.buildRoads()
@@ -76,8 +76,12 @@ export class World {
     this.groundMat = this.own(
       new THREE.MeshStandardMaterial({ color: config.palette.asphalt, roughness: 0.3, metalness: 0.55 }), // wet sheen via env reflection
     )
+    this.groundMat.envMapIntensity = config.tier.envMapIntensity
     this.windowTex = [createWindowTexture(3), createWindowTexture(11), createWindowTexture(27), createWindowTexture(54)]
-    this.windowTex.forEach((t) => this.ownedTex.push(t))
+    this.windowTex.forEach((t) => {
+      t.anisotropy = config.tier.anisotropy
+      this.ownedTex.push(t)
+    })
   }
 
   private buildGround() {
@@ -117,6 +121,7 @@ export class World {
     const facade = [0x12151f, 0x171b27, 0x1d2230, 0x10131c][Math.floor(hash01(seed * 1.7) * 4)]
     const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
     tex.needsUpdate = true
+    tex.anisotropy = config.tier.anisotropy
     tex.repeat.set(Math.max(2, Math.round(fx / 6)), Math.max(3, Math.round(h / 8)))
     this.ownedTex.push(tex)
     const mat = this.own(
@@ -127,6 +132,7 @@ export class World {
         emissive: 0xffffff,
         emissiveMap: tex,
         emissiveIntensity: 1.25,
+        envMapIntensity: config.tier.envMapIntensity,
       }),
     )
     const mesh = new THREE.Mesh(this.boxGeo, mat)
@@ -262,8 +268,8 @@ export class World {
 
     this.sun = new THREE.DirectionalLight(0xbfd2ff, 1.0)
     this.sun.position.set(60, 90, 40)
-    this.sun.castShadow = true
-    const shadowSize = config.quality === 'high' ? config.render.shadowMapSize : 1024
+    this.sun.castShadow = config.tier.shadows
+    const shadowSize = config.tier.shadowMapSize
     this.sun.shadow.mapSize.set(shadowSize, shadowSize)
     const s = 70
     this.sun.shadow.camera.left = -s
@@ -278,9 +284,12 @@ export class World {
     this.sun.target = this.sunTarget
 
     // A few colored accent fills near neon hotspots (no shadows - cheap).
-    const accents: Array<[number, number, number, number]> = [
-      [0, 8, 0, config.palette.cyan], [30, 6, 8, config.palette.magenta], [-34, 6, -20, config.palette.purple], [44, 6, -60, config.palette.orange],
-    ]
+    // Desktop only; mobile leans on the emissive + IBL alone to save draw cost.
+    const accents: Array<[number, number, number, number]> = config.tier.accentLights
+      ? [
+          [0, 8, 0, config.palette.cyan], [30, 6, 8, config.palette.magenta], [-34, 6, -20, config.palette.purple], [44, 6, -60, config.palette.orange],
+        ]
+      : []
     for (const [x, y, z, c] of accents) {
       const pl = new THREE.PointLight(c, 42, 50, 2)
       pl.position.set(x, y, z)

@@ -77,7 +77,7 @@ export class Events {
     this.onPowerup = onPowerup
     scene.add(this.root)
 
-    const q = config.quality === 'high' ? 1 : 0.5
+    const q = config.tier.densityScale
     for (let i = 0; i < config.events.powerupCount; i++) this.spawnPowerup(POWERUP_KINDS[i % 4])
     for (let i = 0; i < Math.round(config.events.droneCount * q); i++) this.spawnDrone(i)
     for (let i = 0; i < Math.round(config.events.trafficCount * q); i++) this.spawnTraffic(i)
