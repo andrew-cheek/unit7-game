@@ -195,3 +195,61 @@ camera (Phase 2) already follows naturally.
 
 - Exact accel/decel/gravity numbers are tuned by feel-reasoning, not playtest.
   They're conservative and all live in `config.player` / `config.vehicle`.
+
+## Phase 4 — Engine quality check
+
+**Goal:** confirm the Three.js setup can deliver great desktop and smooth mobile;
+rework subsystems / add libraries where it raises quality without breaking the
+mobile budget; note the cost.
+
+### Findings (audit)
+
+The renderer/scene setup is solid: ACES tonemapping + sRGB output, HDR HalfFloat
+composer target, PMREM IBL probe, proper disposal on teardown. The two real gaps
+against CLAUDE.md were (1) no centralized tier object — fixed in Phase 1 — and
+(2) **the loop was variable-timestep**, which CLAUDE.md calls out as the single
+most important rule to get right ("Physics must never be tied to frame rate…
+Same physics outcome at any frame rate").
+
+### What changed and why
+
+- **Fixed-timestep simulation loop (`Engine.loop`).** rAF still drives rendering,
+  but simulation now advances in fixed `1/60s` steps via an accumulator, with a
+  `maxSubSteps` cap (5) so a hitch can't trigger a spiral of death. Frame time is
+  clamped before accumulating. This makes physics/gameplay deterministic and
+  identical at 30/60/144 fps, exactly as required.
+- **FPS metering moved to `Engine`.** Because the sim dt is now constant, the old
+  `1/dt` FPS estimate would have read a flat 60 forever. FPS is now smoothed from
+  the *real* pre-clamp frame time in the render loop and exposed as `engine.fps`;
+  `Game` reads that for the HUD. Removed the dead `fpsSmooth` plumbing in `Game`.
+
+### Design decisions made on your behalf
+
+- **Did NOT migrate physics to Rapier (the CLAUDE.md "target").** The current
+  physics is a lightweight raycast-ground + AABB-pushout system that is cheap and
+  already frame-rate-independent now that it runs on a fixed step. Dropping in
+  Rapier (Rust/WASM) is a large, risky rewrite of Player/Vehicles/NPC integration
+  with a WASM payload cost on mobile — not justified for this pass and not needed
+  to hit the quality/cinematic goals. I've left it as the documented future
+  target. **If you want it, that's its own dedicated phase.**
+- **Left the ~918 kB bundle as one chunk.** Code-splitting Three into its own
+  chunk would help repeat-load caching, but the deliverable is a single embedded
+  `<Unit7Game/>` component and I didn't want to risk the consumer's bundler
+  setup. Recommendation only — see "future work".
+
+### Cost note
+
+- Fixed timestep on a 30 fps device means ~2 sim substeps per rendered frame. The
+  per-step logic (a handful of raycasts + integration) is cheap relative to the
+  render, so this is well within budget. The substep cap bounds worst case.
+
+### Build & test results
+
+- `npm run typecheck`: clean. `npm run build`: succeeds.
+
+### Needs real-device / browser testing
+
+- Confirm no visible stutter from the accumulator on a real 30 fps mobile device
+  (the math is standard fixed-timestep; render interpolation was intentionally
+  not added since positions are written straight to the scene graph — see
+  future work if you ever see micro-jitter at low fps).

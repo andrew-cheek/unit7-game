@@ -13,7 +13,7 @@ import { Intro } from './Intro'
 import { CameraController } from './Camera'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
-import { clamp, lerp } from './utils'
+import { clamp } from './utils'
 import type { HudState, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
@@ -63,10 +63,10 @@ export class Game {
   private hudListener: (s: HudState) => void
   private hud: HudState
   private hudAccum = 0
-  private fpsSmooth = 60
   private paused = false
   private radar: RadarBlip[] = []
   private focus = new THREE.Vector3()
+  // FPS is measured on the real render frame in Engine (sim runs at fixed dt).
 
   private netLine: THREE.Line
   private netTimer = 0
@@ -399,7 +399,6 @@ export class Game {
       this.intro.update(dt)
       this.world.update(dt, this.introFocus)
       if (this.intro.done) this.finishIntro()
-      this.fpsSmooth = lerp(this.fpsSmooth, 1 / Math.max(dt, 1e-4), 0.08)
       this.pushHud(dt)
       return
     }
@@ -414,7 +413,6 @@ export class Game {
 
     if (this.launch.active) {
       this.updateLaunch(dt)
-      this.fpsSmooth = lerp(this.fpsSmooth, 1 / Math.max(dt, 1e-4), 0.08)
       this.pushHud(dt)
       return
     }
@@ -466,7 +464,6 @@ export class Game {
       if (this.netTimer <= 0) this.netLine.visible = false
     }
 
-    this.fpsSmooth = lerp(this.fpsSmooth, 1 / Math.max(dt, 1e-4), 0.08)
     this.pushHud(dt)
   }
 
@@ -548,7 +545,7 @@ export class Game {
       if (near) prompt = `Press G - ${near.name}`
     }
 
-    this.hud.fps = Math.round(this.fpsSmooth)
+    this.hud.fps = Math.round(this.engine.fps)
     this.hud.stamina = this.player.stamina / config.player.staminaMax
     this.hud.fuel = this.player.fuel / config.jetpack.fuelMax
     this.hud.speed = piloting ? this.vehicles.currentSpeed : this.player.speed

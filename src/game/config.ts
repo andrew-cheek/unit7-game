@@ -17,6 +17,12 @@ export const config = {
     shadowMapSize: 2048,
     // Frame dt is clamped to this so a backgrounded tab can't fling entities.
     maxFrameDelta: 0.05,
+    // Fixed-timestep simulation: physics + game logic always advance in steps of
+    // exactly `fixedDelta` regardless of render frame rate, so outcomes are the
+    // same at 30/60/144fps (CLAUDE.md's core rule). `maxSubSteps` caps catch-up
+    // work per frame to avoid a spiral of death on a hitch.
+    fixedDelta: 1 / 60,
+    maxSubSteps: 5,
   },
 
   world: {

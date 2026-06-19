@@ -28,9 +28,12 @@ export class Engine {
 
   /** Driven by Game; receives clamped delta + total elapsed seconds. */
   onUpdate: ((dt: number, elapsed: number) => void) | null = null
+  /** Smoothed real render frame rate (the sim now always steps at a fixed dt). */
+  fps = 60
 
   private clock = new THREE.Clock()
   private elapsed = 0
+  private accumulator = 0
   private rafId = 0
   private running = false
   private disposed = false
@@ -153,16 +156,34 @@ export class Engine {
   private loop = () => {
     if (!this.running) return
     this.rafId = requestAnimationFrame(this.loop)
-    let dt = this.clock.getDelta()
-    if (dt > config.render.maxFrameDelta) dt = config.render.maxFrameDelta
-    this.elapsed += dt
-    if (this.onUpdate) {
-      try {
-        this.onUpdate(dt, this.elapsed)
-      } catch (err) {
-        console.error('[Unit7] update error:', err)
+
+    // rAF drives rendering; a fixed-timestep accumulator drives simulation. Frame
+    // time is clamped first so a long stall (backgrounded tab) can't dump a huge
+    // backlog of substeps in one go.
+    const raw = this.clock.getDelta()
+    // Smoothed FPS from the *real* frame time (raw, pre-clamp).
+    this.fps += ((1 / Math.max(raw, 1e-4)) - this.fps) * 0.1
+    let frame = raw
+    if (frame > config.render.maxFrameDelta) frame = config.render.maxFrameDelta
+    this.accumulator += frame
+
+    const fixed = config.render.fixedDelta
+    let steps = 0
+    while (this.accumulator >= fixed && steps < config.render.maxSubSteps) {
+      this.elapsed += fixed
+      if (this.onUpdate) {
+        try {
+          this.onUpdate(fixed, this.elapsed)
+        } catch (err) {
+          console.error('[Unit7] update error:', err)
+        }
       }
+      this.accumulator -= fixed
+      steps++
     }
+    // Hit the catch-up cap: drop the leftover so we don't spiral after a hitch.
+    if (steps === config.render.maxSubSteps) this.accumulator = 0
+
     this.composer.render()
   }
 
