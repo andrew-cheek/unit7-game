@@ -253,3 +253,79 @@ Same physics outcome at any frame rate").
   (the math is standard fixed-timestep; render interpolation was intentionally
   not added since positions are written straight to the scene graph — see
   future work if you ever see micro-jitter at low fps).
+
+## Phase 5 — Opening cinematic
+
+**Goal:** a skippable, self-contained, sci-fi neon opening that fits the
+mode-system, hitting every requested beat and handing off to the follow camera.
+
+### What changed and why
+
+- **`Intro.ts` fully rewritten** from the old factory-assembly sequence into the
+  requested multi-beat cinematic. It stays architecturally clean: owns a single
+  `THREE.Group` + the camera while `done` is false, exposes `fade` (0..1) for the
+  orchestrator to drive the black overlay, and disposes all geometry/materials on
+  exit — exactly the contract the mode manager already used.
+- **Beats (timeline in seconds, total ~23.4, skippable at any point):**
+  1. **0–5 Plane interior assembly.** A ribbed neon fuselage; the robot's parts
+     (torso, legs, arms, jetpack, head) fly in from offsets and lock into the
+     silhouette one by one with spark bursts + a weld light, then a power-on
+     flash reveals the polished rigged robot. Deliberate, staged — not instant.
+  2. **5–7 Cargo hatch** lowers open at the rear; the robot walks to the edge.
+  3. **7–8 Leap** into open sky.
+  4. **8–12.5 Freefall** with upward-drifting speed streaks, belly-to-earth
+     spread pose, city far below.
+  5. **12.5–14.5 Canopy descent** that blends the robot precisely onto the live
+     position of the moving bike seat.
+  6. **14.5–16.5 Lands exactly on the moving hover-bike** (verified: the freefall
+     target equals the bike seat at the landing instant).
+  7. **16.5–22.6 Two full vertical loops** on a sci-fi tube track with glowing
+     rails and support pylons (Hot Wheels style, neon not plastic), side-chase
+     camera.
+  8. **22.6–end** camera settles into a third-person trail behind the bike,
+     matching the gameplay follow-cam framing, fades to black.
+- **Handoff:** `Game.finishIntro()` now fades back in from black (reuses the
+  zone-transition 'in' phase) as it snaps the player in behind the follow camera,
+  so cinematic→gameplay reads as one continuous shot. `introFocus` moved to the
+  cinematic's airspace so the star/sky dome surrounds it.
+
+### How it was verified (given no browser)
+
+- `npm run typecheck` + `npm run build`: clean.
+- **Standalone math check** (`scratchpad/introcheck.mjs`) replicated the track
+  path + scripted `bikeS(t)` and confirmed: the bike distance is continuous and
+  monotonic (no teleport/reverse), the loop apex is exactly 2·R, the whole track
+  stays at z ≤ -306 (the city begins at z > -220, so nothing intersects), and the
+  robot's freefall target equals the bike seat at the landing beat (precise
+  landing, by construction).
+
+### Design decisions made on your behalf
+
+- **The track is built so vertical loops don't advance Z** (a loop returns to its
+  entry z), which is what keeps the entire stage in its own pocket of space clear
+  of the city. Two loops with a short straight between them.
+- **Assembly uses fly-in proxies + a flash reveal of the real rig**, rather than
+  scaling the production robot part-by-part (which isn't individually
+  addressable). Reads as "parts converge and lock", then the hero robot powers
+  on. Reused the existing `createRobot()` rig for the skydive/ride poses so the
+  jointed animation is consistent with gameplay.
+- **The landing is scripted, not physically simulated.** "Lands precisely on a
+  moving bike" is guaranteed by interpolating the robot onto the live seat
+  transform — robust and exact, where a physics toss would be flaky.
+- **Bike rides on top of a thin deck tube** (radius 0.7) with the seat above it,
+  so it doesn't clip inside the track.
+
+### Build & test results
+
+- `npm run typecheck`: clean. `npm run build`: succeeds. Bundle ~924 kB.
+
+### Needs real-device / browser testing
+
+- **This is the phase most needing a human eye.** The math/geometry is verified
+  but camera framing, pacing, and the assembly readability are tuned blind. All
+  timing constants are named at the top of `Intro.ts` (`T_ASSEMBLE`, `T_HATCH`,
+  `T_JUMP`, `T_CHUTE`, `T_LAND`, `T_LOOP1/2`, `DURATION`) for quick adjustment.
+  Watch specifically: (a) does the robot read clearly during freefall against the
+  sky; (b) loop side-camera distance (offset `(20,5,-4)` in `updateCamera`); (c)
+  the fuselage interior framing during assembly. The cinematic is fully
+  skippable, so it can never block play if pacing feels off.

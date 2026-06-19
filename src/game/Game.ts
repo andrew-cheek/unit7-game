@@ -48,7 +48,8 @@ export class Game {
   private fx = { speed: 0, shield: 0, score: 0 }
   private scoreMul = 1
   private intro: Intro | null = null
-  private introFocus = new THREE.Vector3(0, 0, -380)
+  // Sit the sky/star dome around the cinematic's pocket of airspace.
+  private introFocus = new THREE.Vector3(0, 50, -390)
 
   // zone transition (fade out -> swap -> fade in) + rocket launch sequence
   private trans: { phase: 'none' | 'out' | 'in'; t: number; target: Zone } = { phase: 'none', t: 0, target: 'earth' }
@@ -169,6 +170,10 @@ export class Game {
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
+    // The cinematic ended on black; fade back in on the gameplay side so the
+    // hand-off to the follow camera reads as one continuous shot.
+    this.hud.fade = 1
+    this.trans = { phase: 'in', t: 0, target: this.zone }
     this.hud.banner = 'WELCOME TO UNIT 7'
     this.bannerTimer = 2.4
   }
@@ -398,6 +403,7 @@ export class Game {
     if (this.intro) {
       this.intro.update(dt)
       this.world.update(dt, this.introFocus)
+      this.hud.fade = this.intro.fade // cinematic drives the black overlay
       if (this.intro.done) this.finishIntro()
       this.pushHud(dt)
       return
