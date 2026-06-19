@@ -6,6 +6,8 @@ import { Player } from './Player'
 import { Physics } from './Physics'
 import { Vehicles } from './Vehicles'
 import { NPCManager } from './NPC'
+import { Patrols } from './Patrols'
+import { Sky } from './Sky'
 import { AssetLoader } from './AssetLoader'
 import { Zones } from './Zones'
 import { Events } from './Events'
@@ -37,6 +39,8 @@ export class Game {
   readonly player: Player
   readonly vehicles: Vehicles
   readonly npcs: NPCManager
+  readonly patrols: Patrols
+  readonly sky: Sky
   readonly assets: AssetLoader
   readonly zones: Zones
   readonly events: Events
@@ -112,6 +116,8 @@ export class Game {
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
+    this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
+    this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
     this.camera.snap(this.player.position)
 
@@ -148,6 +154,7 @@ export class Game {
       skipIntro: () => this.intro?.skip(),
       requestPointerLock: () => this.input.requestLock(),
       exitMinigame: () => this.exitBeamWars(),
+      restartIntro: () => this.restartIntro(),
     }
 
     this.hud = {
@@ -174,7 +181,28 @@ export class Game {
       this.hud.intro = true
       this.player.setVisible(false)
       this.input.setLockEnabled(false)
+      // Hide the city's ambient life until the cinematic hands off.
+      this.patrols.setVisible(false)
+      this.sky.setVisible(false)
+      this.beamPortal && (this.beamPortal.visible = false)
     }
+  }
+
+  /** Replay the opening cinematic from the top (triggered by the HUD button). */
+  private restartIntro() {
+    if (this.intro || this.inMinigame || this.paused) return
+    if (this.vehicles.current) this.player.exitVehicle(this.player.position)
+    // The cinematic stages over Earth and hands off at the Earth spawn.
+    if (this.zone !== 'earth') this.doTravel('earth')
+    this.intro = new Intro(this.engine.scene, this.engine.camera)
+    this.hud.intro = true
+    this.player.setVisible(false)
+    this.input.setLockEnabled(false)
+    this.input.exitLock()
+    this.patrols.setVisible(false)
+    this.sky.setVisible(false)
+    this.beamPortal.visible = false
+    this.hudListener({ ...this.hud, radar: this.radar })
   }
 
   private finishIntro() {
@@ -185,6 +213,9 @@ export class Game {
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
+    // Bring the city's ambient life back for gameplay.
+    this.patrols.setVisible(this.zone === 'earth')
+    this.sky.setVisible(this.zone !== 'moon')
     // The cinematic ended on black; fade back in on the gameplay side so the
     // hand-off to the follow camera reads as one continuous shot.
     this.hud.fade = 1
@@ -327,6 +358,8 @@ export class Game {
     this.vehicles.setVisible(zone === 'earth')
     this.npcs.setVisible(zone === 'earth')
     this.events.setVisible(zone === 'earth')
+    this.patrols.setVisible(zone === 'earth')
+    this.sky.setVisible(zone !== 'moon') // ships fly over Earth and Mars
 
     this.zone = zone
     this.player.exitVehicle(new THREE.Vector3(spawn.x, spawn.y, spawn.z))
@@ -577,8 +610,10 @@ export class Game {
       if (onEarth && this.trans.phase === 'none') this.checkBeamPortal()
     }
 
-    if (onEarth) this.npcs.update(dt)
+    if (onEarth) this.npcs.update(dt, this.player.position)
     if (onEarth) this.events.update(dt, this.player.position)
+    if (onEarth) this.patrols.update(dt)
+    if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
     this.zones.update(dt, this.zone)
     this.camera.update(dt, this.input, this.focus, this.buildFollowState())
@@ -663,7 +698,9 @@ export class Game {
       if (pp) add(pp.x, pp.z, 'vehicle')
       this.npcs.forEachAlive((x, z) => add(x, z, 'npc'))
       this.events.forEachAlien((x, z) => add(x, z, 'alien'))
+      this.patrols.forEach((x, z, big) => add(x, z, big ? 'alien' : 'vehicle'))
     }
+    if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') add(this.beamPortalPos.x, this.beamPortalPos.z, 'portal')
     return blips
@@ -710,6 +747,8 @@ export class Game {
     this.player.dispose()
     this.vehicles.dispose()
     this.npcs.dispose()
+    this.patrols.dispose()
+    this.sky.dispose()
     this.zones.dispose()
     this.events.dispose()
     this.intro?.dispose()

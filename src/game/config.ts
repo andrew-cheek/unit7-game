@@ -137,6 +137,7 @@ export const config = {
 
   vehicle: {
     hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
+    speeder: { accel: 56, maxSpeed: 58, reverse: 12, turn: 2.4, hoverHeight: 0.9, bob: 0.1 },
     spaceship: { accel: 30, maxSpeed: 50, turn: 1.5, hoverHeight: 2.2 },
     enterRange: 6,
   },
@@ -147,6 +148,21 @@ export const config = {
     separationRadius: 2.2,
     separationForce: 4.0,
     wanderRadius: 90,
+  },
+
+  // City life tuning. Counts are the desktop baseline; the mobile tier scales
+  // them by tier.densityScale. Bump `density` to make the whole city busier, or
+  // zero out a line to drop that kind of life entirely. One place to tune feel.
+  city: {
+    density: 1, // global multiplier applied on top of tier.densityScale
+    robotRatio: 0.35, // fraction of the street crowd that are humanoid robots
+    smallAlienRatio: 0.16, // fraction that are small aliens (the rest are citizens)
+    bigAlienChance: 0.18, // chance a spawned alien is a large one
+    fleeRadius: 9, // aliens scatter when the player gets this close
+    quadrupeds: 4, // four-legged robot walkers patrolling
+    mechs: 2, // big mech walkers patrolling slowly
+    smallShips: 6, // small ships looping between the towers
+    bigShipInterval: 24, // seconds between big-ship flyovers
   },
 
   events: {

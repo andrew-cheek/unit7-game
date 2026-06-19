@@ -50,7 +50,9 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
-      {hud && !hud.intro && !hud.minigame && <HUD hud={hud} touch={touch} />}
+      {hud && !hud.intro && !hud.minigame && (
+        <HUD hud={hud} touch={touch} onRestart={() => controlsRef.current?.restartIntro()} />
+      )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}

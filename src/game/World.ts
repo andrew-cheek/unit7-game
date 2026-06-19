@@ -37,6 +37,7 @@ export class World {
   private windowTex: THREE.CanvasTexture[] = []
   private ownedMats: THREE.Material[] = []
   private ownedTex: THREE.Texture[] = []
+  private ownedGeos: THREE.BufferGeometry[] = []
   private billboards: Billboard[] = []
   private accentLights: THREE.PointLight[] = []
   private sky!: SkyModel
@@ -59,6 +60,7 @@ export class World {
     this.buildSignage()
     this.buildElevatedPlatform()
     this.buildPlazaNeon()
+    this.buildExtras()
     this.buildLights()
     this.addBoundaryColliders()
     this.applyZone(zone)
@@ -67,6 +69,10 @@ export class World {
   private own<T extends THREE.Material>(m: T): T {
     this.ownedMats.push(m)
     return m
+  }
+  private ownG<T extends THREE.BufferGeometry>(g: T): T {
+    this.ownedGeos.push(g)
+    return g
   }
   private glow(color: number, intensity = 3) {
     return this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: intensity, roughness: 0.4 }))
@@ -152,6 +158,18 @@ export class World {
       trim.position.set(cx, h + 0.1, cz)
       this.group.add(trim)
     }
+    // Rooftop antenna mast with a glowing tip on some towers (adds verticality).
+    if (hash01(seed * 8.3) > 0.6) {
+      const mast = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.5 })))
+      const mh = 4 + hash01(seed * 9.1) * 8
+      mast.scale.set(0.25, mh, 0.25)
+      mast.position.set(cx, h + mh / 2, cz)
+      this.group.add(mast)
+      const tip = new THREE.Mesh(this.boxGeo, this.glow(config.palette.magenta, 3))
+      tip.scale.set(0.5, 0.5, 0.5)
+      tip.position.set(cx, h + mh, cz)
+      this.group.add(tip)
+    }
   }
 
   private buildCity() {
@@ -166,7 +184,7 @@ export class World {
         const seed = (i + 50) * 131 + (j + 50)
         if (hash01(seed) < 0.1) continue
         const distNorm = Math.min(1, Math.hypot(i, j) / cells)
-        const maxH = 84 * (1 - distNorm) + 16
+        const maxH = 120 * (1 - distNorm) + 20 // taller glowing towers
         const usable = config.world.block - config.world.sidewalk * 2
         const n = hash01(seed * 7) < 0.45 ? 2 : 1
         for (let k = 0; k < n; k++) {
@@ -257,6 +275,91 @@ export class World {
       this.group.add(pylon)
       this.solidMeshes.push(pylon)
       this.colliders.push(new THREE.Box3(new THREE.Vector3(x - 0.4, 0, z - 0.4), new THREE.Vector3(x + 0.4, h, z + 0.4)))
+    }
+  }
+
+  /**
+   * Extra sci-fi dressing: walkable floating platforms, ground landing pads,
+   * walk-through energy gates and scattered glow crates. Static meshes only, so
+   * it's cheap; counts scale loosely with config.city.density.
+   */
+  private buildExtras() {
+    const d = Math.max(0, config.city.density)
+    const neon = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime]
+    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a1f2c, metalness: 0.6, roughness: 0.4 }))
+
+    // Floating platforms you can jetpack up to and land on.
+    const platSpots: Array<[number, number, number]> = [
+      [-70, 18, 40], [60, 26, -30], [-40, 15, -84], [92, 22, 70], [22, 31, -112], [-104, 17, -44],
+    ]
+    for (let i = 0; i < platSpots.length; i++) {
+      if (i / platSpots.length > d) break
+      const [x, y, z] = platSpots[i]
+      const p = new THREE.Mesh(this.boxGeo, deckMat)
+      p.scale.set(13, 1, 13)
+      p.position.set(x, y, z)
+      p.castShadow = true
+      p.receiveShadow = true
+      this.group.add(p)
+      this.groundMeshes.push(p)
+      this.solidMeshes.push(p)
+      const edge = new THREE.Mesh(this.boxGeo, this.glow(neon[i % neon.length], 2.6))
+      edge.scale.set(13.6, 0.28, 13.6)
+      edge.position.set(x, y - 0.55, z)
+      this.group.add(edge)
+    }
+
+    // Ground landing pads (lit rings).
+    const padGeo = this.ownG(new THREE.CylinderGeometry(5, 5.4, 0.18, 28))
+    const padSpots: Array<[number, number]> = [[34, 30], [-46, 26], [70, -50], [-80, -16]]
+    for (let i = 0; i < padSpots.length; i++) {
+      const [x, z] = padSpots[i]
+      const pad = new THREE.Mesh(padGeo, this.glow(neon[i % neon.length], 2.2))
+      pad.position.set(x, 0.1, z)
+      this.group.add(pad)
+    }
+
+    // Walk-through energy gates (arch + translucent field).
+    const fieldGeo = this.ownG(new THREE.PlaneGeometry(5.6, 8))
+    const gateSpots: Array<[number, number, number]> = [[0, 36, 1.1], [-28, -8, 0.4], [40, -42, 2.2]]
+    for (let i = 0; i < gateSpots.length; i++) {
+      const [x, z, rot] = gateSpots[i]
+      const c = neon[i % neon.length]
+      const post = (sx: number) => {
+        const m = new THREE.Mesh(this.boxGeo, this.glow(c, 2.6))
+        m.scale.set(0.5, 9, 0.5)
+        m.position.set(x + Math.cos(rot) * sx * 3, 4.5, z - Math.sin(rot) * sx * 3)
+        this.group.add(m)
+      }
+      post(-1); post(1)
+      const bar = new THREE.Mesh(this.boxGeo, this.glow(c, 2.6))
+      bar.scale.set(6.6, 0.5, 0.5)
+      bar.position.set(x, 9, z)
+      bar.rotation.y = rot
+      this.group.add(bar)
+      const field = new THREE.Mesh(fieldGeo, this.own(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.16, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })))
+      field.position.set(x, 4.6, z)
+      field.rotation.y = rot
+      this.group.add(field)
+    }
+
+    // Scattered glow crates near the central plaza.
+    const crateMat = this.own(new THREE.MeshStandardMaterial({ color: 0x12161f, metalness: 0.6, roughness: 0.5 }))
+    for (let i = 0; i < Math.round(10 * d); i++) {
+      const a = hash01(i * 3.7) * Math.PI * 2
+      const r = 10 + hash01(i * 6.1) * 22
+      const x = Math.cos(a) * r
+      const z = Math.sin(a) * r
+      const crate = new THREE.Mesh(this.boxGeo, crateMat)
+      const s = 0.9 + hash01(i * 2.3) * 0.6
+      crate.scale.set(s, s, s)
+      crate.position.set(x, s / 2, z)
+      crate.castShadow = true
+      this.group.add(crate)
+      const cap = new THREE.Mesh(this.boxGeo, this.glow(neon[i % neon.length], 2.4))
+      cap.scale.set(s * 0.5, 0.08, s * 0.5)
+      cap.position.set(x, s + 0.04, z)
+      this.group.add(cap)
     }
   }
 
@@ -351,5 +454,6 @@ export class World {
     this.sky.dispose()
     this.ownedMats.forEach((m) => m.dispose())
     this.ownedTex.forEach((t) => t.dispose())
+    this.ownedGeos.forEach((g) => g.dispose())
   }
 }

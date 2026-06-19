@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { config } from './config'
+import { createMech } from './procedural'
 import { randRange } from './utils'
 import type { Zone } from './types'
 
@@ -188,7 +189,74 @@ export class Zones {
     }
     this.addBoundary(env.colliders)
     this.scatterRocks(group, env, displace, 0x612e16, 26)
+    this.buildMarsLife(group, displace)
     return env
+  }
+
+  /**
+   * Mars-only dressing so it reads alien, not just "city minus buildings":
+   * glowing monolith ruins, clusters of alien pods, and a couple of dormant
+   * mech walkers standing in the dust. All static (no per-frame cost) and
+   * disposed with the planet group.
+   */
+  private buildMarsLife(group: THREE.Group, displace: (x: number, z: number) => number) {
+    const glyph = config.palette.lime
+    // Leaning monolith ruins with glowing glyph bands.
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x3a1c12, roughness: 0.95, metalness: 0.05 })
+    const glyphMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: glyph, emissiveIntensity: 2.4, roughness: 0.5 })
+    for (let i = 0; i < 7; i++) {
+      const x = randRange(-150, 150)
+      const z = randRange(-150, 150)
+      if (Math.hypot(x, z) < 24) continue
+      const y = displace(x, z)
+      const h = randRange(8, 20)
+      const mono = new THREE.Mesh(new THREE.BoxGeometry(randRange(2, 4), h, randRange(2, 4)), stoneMat)
+      mono.position.set(x, y + h / 2, z)
+      mono.rotation.set(randRange(-0.12, 0.12), randRange(0, 6.28), randRange(-0.12, 0.12))
+      mono.castShadow = true
+      mono.receiveShadow = true
+      group.add(mono)
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.6, h * 0.5, 0.2), glyphMat)
+      band.position.set(x, y + h * 0.55, z + 1.1)
+      band.rotation.copy(mono.rotation)
+      group.add(band)
+    }
+    // Broken ring arches half-sunk in the dust.
+    for (let i = 0; i < 3; i++) {
+      const x = randRange(-130, 130)
+      const z = randRange(-130, 130)
+      if (Math.hypot(x, z) < 24) continue
+      const y = displace(x, z)
+      const arch = new THREE.Mesh(new THREE.TorusGeometry(6, 0.6, 10, 28, Math.PI * 1.3), new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 1.8, roughness: 0.5 }))
+      arch.position.set(x, y + 2, z)
+      arch.rotation.set(Math.PI / 2 + randRange(-0.2, 0.2), 0, randRange(0, 6.28))
+      group.add(arch)
+    }
+    // Clusters of glowing alien pods.
+    const podMat = new THREE.MeshStandardMaterial({ color: 0x0b2a1c, emissive: 0x2bff8a, emissiveIntensity: 1.6, roughness: 0.4, metalness: 0.2 })
+    for (let c = 0; c < 3; c++) {
+      const cx = randRange(-120, 120)
+      const cz = randRange(-120, 120)
+      if (Math.hypot(cx, cz) < 24) continue
+      for (let i = 0; i < 5; i++) {
+        const px = cx + randRange(-4, 4)
+        const pz = cz + randRange(-4, 4)
+        const pod = new THREE.Mesh(new THREE.SphereGeometry(randRange(0.7, 1.3), 12, 10), podMat)
+        pod.scale.y = 1.4
+        pod.position.set(px, displace(px, pz) + 0.8, pz)
+        pod.castShadow = true
+        group.add(pod)
+      }
+    }
+    // Dormant mech walkers as scenery (static - no behavior, just presence).
+    for (let i = 0; i < 2; i++) {
+      const mech = createMech(config.palette.orange)
+      const x = randRange(-90, 90)
+      const z = randRange(-90, 90)
+      mech.group.position.set(x, displace(x, z), z)
+      mech.group.rotation.y = randRange(0, 6.28)
+      group.add(mech.group)
+    }
   }
 
   private buildMoon(): PlanetEnv {

@@ -298,12 +298,15 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
 }
 
 /** Spindly big-headed alien with glowing eyes - distinct from the citizens. */
-export function createAlien(): CharacterModel {
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3ba86a, roughness: 0.5, metalness: 0.1 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x205a3c, roughness: 0.6 })
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xff2bd0, emissiveIntensity: 3.2, roughness: 0.4 })
+export function createAlien(opts: { big?: boolean; color?: number; eye?: number } = {}): CharacterModel {
+  const base = opts.color ?? 0x3ba86a
+  const bodyMat = new THREE.MeshStandardMaterial({ color: base, roughness: 0.5, metalness: 0.1 })
+  const darkMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(base).multiplyScalar(0.6).getHex(), roughness: 0.6 })
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: opts.eye ?? 0xff2bd0, emissiveIntensity: 3.2, roughness: 0.4 })
   const mats: THREE.Material[] = [bodyMat, darkMat, eyeMat]
   const group = new THREE.Group()
+  // Large aliens are simply scaled up (cheap variety, distinct silhouette).
+  group.scale.setScalar(opts.big ? 1.9 : 1)
   const core = new THREE.Group()
   group.add(core)
 
@@ -527,18 +530,20 @@ export interface CitizenColors {
   outfit?: number
   accent?: number
   female?: boolean
+  robot?: boolean // metallic humanoid robot pedestrian instead of a citizen
 }
 
 /** Lightweight animated townsperson (feet at origin, faces +Z). ~7 meshes. */
 export function createCitizen(opts: CitizenColors = {}): CharacterModel {
-  const skin = opts.skin ?? 0xc9a88a
-  const outfit = opts.outfit ?? 0x2b3a6b
+  const robot = opts.robot ?? false
+  const skin = opts.skin ?? (robot ? 0x9fb0c4 : 0xc9a88a)
+  const outfit = opts.outfit ?? (robot ? 0x39414f : 0x2b3a6b)
   const accent = opts.accent ?? config.palette.cyan
   const female = opts.female ?? false
 
-  const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.7, metalness: 0 })
-  const outfitMat = new THREE.MeshStandardMaterial({ color: outfit, roughness: 0.6, metalness: 0.1 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: accent, emissiveIntensity: 1.8, roughness: 0.5 })
+  const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: robot ? 0.35 : 0.7, metalness: robot ? 0.85 : 0 })
+  const outfitMat = new THREE.MeshStandardMaterial({ color: outfit, roughness: robot ? 0.4 : 0.6, metalness: robot ? 0.7 : 0.1 })
+  const accentMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: accent, emissiveIntensity: robot ? 2.6 : 1.8, roughness: 0.5 })
   const mats: THREE.Material[] = [skinMat, outfitMat, accentMat]
   const group = new THREE.Group()
   const core = new THREE.Group()
@@ -553,9 +558,19 @@ export function createCitizen(opts: CitizenColors = {}): CharacterModel {
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.155, 12, 12), skinMat)
   head.position.y = 1.5
   core.add(head)
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), outfitMat)
-  hair.position.y = 1.52
-  core.add(hair)
+  if (robot) {
+    // Glowing visor band + antenna so it reads as a humanoid robot.
+    const visor = box(0.26, 0.07, 0.06, accentMat)
+    visor.position.set(0, 1.51, 0.13)
+    core.add(visor)
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.14, 6), skinMat)
+    ant.position.set(0.07, 1.66, 0)
+    core.add(ant)
+  } else {
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), outfitMat)
+    hair.position.y = 1.52
+    core.add(hair)
+  }
 
   const makeLeg = (sx: number) => {
     const hip = new THREE.Group()
@@ -856,4 +871,226 @@ export function createRocket(): VehicleModel {
     },
     dispose: () => disposeGroup(group, mats),
   }
+}
+
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
+
+/** Four-legged robot walker (~1.5m tall). CharacterModel; legs trot-animate. */
+export function createQuadruped(accent = config.palette.orange): CharacterModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const body = new THREE.MeshStandardMaterial({ color: 0x2a3342, metalness: 0.85, roughness: 0.35 })
+  mats.push(body)
+  const trim = glowMat(mats, accent, 2.8)
+  const core = new THREE.Group()
+  group.add(core)
+  const hull = box(0.9, 0.5, 1.7, body)
+  hull.position.y = 1.05
+  core.add(hull)
+  const neck = box(0.34, 0.3, 0.5, body)
+  neck.position.set(0, 1.2, 1.0)
+  core.add(neck)
+  const eye = box(0.3, 0.1, 0.08, trim)
+  eye.position.set(0, 1.24, 1.25)
+  core.add(eye)
+  const legs: THREE.Group[] = []
+  const mkLeg = (sx: number, sz: number) => {
+    const hip = new THREE.Group()
+    hip.position.set(sx, 0.92, sz)
+    const up = box(0.13, 0.5, 0.13, body)
+    up.position.y = -0.26
+    const lo = box(0.1, 0.5, 0.1, body)
+    lo.position.y = -0.72
+    hip.add(up, lo)
+    core.add(hip)
+    legs.push(hip)
+  }
+  mkLeg(-0.5, 0.6); mkLeg(0.5, 0.6); mkLeg(-0.5, -0.6); mkLeg(0.5, -0.6)
+  shadowAll(group)
+  let phase = 0
+  return {
+    group,
+    update: (dt, s01) => {
+      const s = clamp01(s01)
+      phase += dt * (3 + s * 6)
+      // Diagonal trot gait.
+      legs.forEach((l, i) => { l.rotation.x = Math.sin(phase + (i === 0 || i === 3 ? 0 : Math.PI)) * (0.18 + s * 0.5) })
+      core.position.y = Math.abs(Math.sin(phase * 2)) * 0.04 * s
+    },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/** Big bipedal mech walker (~5m). Slow, heavy stomp; glowing cockpit core. */
+export function createMech(accent = config.palette.magenta): CharacterModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const body = new THREE.MeshStandardMaterial({ color: 0x222a38, metalness: 0.88, roughness: 0.34 })
+  const plate = new THREE.MeshStandardMaterial({ color: 0x3a4456, metalness: 0.8, roughness: 0.4 })
+  mats.push(body, plate)
+  const trim = glowMat(mats, accent, 3)
+  const core = new THREE.Group()
+  group.add(core)
+  const torso = box(1.8, 1.6, 1.2, body)
+  torso.position.y = 3.6
+  core.add(torso)
+  const cockpit = box(1.0, 0.6, 0.3, trim)
+  cockpit.position.set(0, 3.9, 0.65)
+  core.add(cockpit)
+  const head = box(0.7, 0.5, 0.7, plate)
+  head.position.set(0, 4.6, 0)
+  core.add(head)
+  // Shoulder cannons.
+  for (const sx of [-1.2, 1.2]) {
+    const sh = box(0.5, 0.6, 0.6, plate)
+    sh.position.set(sx, 4.0, 0)
+    core.add(sh)
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.0, 10), body)
+    barrel.rotation.x = Math.PI / 2
+    barrel.position.set(sx, 4.0, 0.7)
+    core.add(barrel)
+  }
+  // Legs (pivot at hip, geometry hung down).
+  const legs: THREE.Group[] = []
+  const mkLeg = (sx: number) => {
+    const hip = new THREE.Group()
+    hip.position.set(sx, 2.8, 0)
+    const thigh = box(0.5, 1.4, 0.6, body)
+    thigh.position.y = -0.7
+    const shin = box(0.42, 1.4, 0.5, plate)
+    shin.position.y = -2.0
+    const foot = box(0.6, 0.3, 1.0, body)
+    foot.position.set(0, -2.75, 0.2)
+    hip.add(thigh, shin, foot)
+    core.add(hip)
+    legs.push(hip)
+  }
+  mkLeg(-0.55); mkLeg(0.55)
+  shadowAll(group)
+  let phase = 0
+  return {
+    group,
+    update: (dt, s01) => {
+      const s = clamp01(s01)
+      phase += dt * (1.4 + s * 2.2)
+      legs.forEach((l, i) => { l.rotation.x = Math.sin(phase + (i ? Math.PI : 0)) * (0.1 + s * 0.4) })
+      core.position.y = Math.abs(Math.sin(phase)) * 0.12 * s // heavy bob
+      core.rotation.z = Math.sin(phase) * 0.02 * s
+    },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/** Small sleek flier with a glowing engine. VehicleModel; Sky positions it. */
+export function createSmallShip(accent = config.palette.cyan): VehicleModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const body = new THREE.MeshStandardMaterial({ color: 0x252e40, metalness: 0.9, roughness: 0.25 })
+  mats.push(body)
+  const hull = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.6, 12), body)
+  hull.rotation.x = Math.PI / 2
+  group.add(hull)
+  const wing = box(2.6, 0.1, 0.7, body)
+  wing.position.z = -0.3
+  group.add(wing)
+  for (const sx of [-1.3, 1.3]) {
+    const tip = box(0.2, 0.1, 0.5, glowMat(mats, accent, 3))
+    tip.position.set(sx, 0, -0.3)
+    group.add(tip)
+  }
+  const engine = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 10), glowMat(mats, accent, 3.5))
+  engine.scale.z = 0.5
+  engine.position.z = -1.3
+  group.add(engine)
+  shadowAll(group)
+  const engMat = engine.material as THREE.MeshStandardMaterial
+  let t = 0
+  return {
+    group,
+    update: (dt) => { t += dt; engMat.emissiveIntensity = 3 + Math.sin(t * 12) * 1.2 },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/** Big capital ship for flyovers - low detail, large, lit window strip + engines. */
+export function createBigShip(): VehicleModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const body = new THREE.MeshStandardMaterial({ color: 0x1b2230, metalness: 0.85, roughness: 0.35 })
+  mats.push(body)
+  const hull = box(8, 3, 22, body)
+  group.add(hull)
+  const fin = box(3, 5, 6, body)
+  fin.position.set(0, 2.5, -8)
+  group.add(fin)
+  const strip = box(8.1, 0.5, 16, glowMat(mats, config.palette.cyan, 2.2))
+  strip.position.y = 0.4
+  group.add(strip)
+  for (const sx of [-2.5, 0, 2.5]) {
+    const eng = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 1.2, 14), glowMat(mats, config.palette.magenta, 3))
+    eng.rotation.x = Math.PI / 2
+    eng.position.set(sx, 0, -11.4)
+    group.add(eng)
+  }
+  shadowAll(group)
+  return { group, update: () => {}, dispose: () => disposeGroup(group, mats) }
+}
+
+/** Sleek single-seat speeder bike (origin at chassis center; hovers via Vehicles). */
+export function createSpeederBike(): VehicleModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const body = new THREE.MeshStandardMaterial({ color: 0x2a2050, metalness: 0.9, roughness: 0.28 })
+  mats.push(body)
+  const spine = box(0.5, 0.34, 3.4, body)
+  group.add(spine)
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.4, 12), body)
+  nose.rotation.x = Math.PI / 2
+  nose.position.set(0, 0.05, 2.2)
+  group.add(nose)
+  const seat = box(0.42, 0.18, 1.0, new THREE.MeshStandardMaterial({ color: 0x14101f, metalness: 0.5, roughness: 0.6 }))
+  ;(seat.material as THREE.Material) && mats.push(seat.material as THREE.Material)
+  seat.position.set(0, 0.28, -0.4)
+  group.add(seat)
+  const under = box(0.42, 0.06, 3.0, glowMat(mats, config.palette.magenta, 4))
+  under.position.y = -0.22
+  group.add(under)
+  for (const sx of [-0.5, 0.5]) {
+    const fin = box(0.06, 0.5, 1.1, glowMat(mats, config.palette.cyan, 2.8))
+    fin.position.set(sx, 0.1, -1.4)
+    fin.rotation.z = sx * 0.25
+    group.add(fin)
+  }
+  const thr = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.3, 14), glowMat(mats, config.palette.cyan, 3.4))
+  thr.rotation.x = Math.PI / 2
+  thr.position.set(0, 0, -1.9)
+  group.add(thr)
+  shadowAll(group)
+  const underMat = under.material as THREE.MeshStandardMaterial
+  let t = 0
+  return {
+    group,
+    update: (dt) => { t += dt; underMat.emissiveIntensity = 3.4 + Math.sin(t * 5) * 1.0 },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/** Glowing sci-fi crate prop (returns a group; static, used for street dressing). */
+export function createGlowCrate(accent = config.palette.lime): { group: THREE.Group; dispose(): void } {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const shell = new THREE.MeshStandardMaterial({ color: 0x12161f, metalness: 0.6, roughness: 0.5 })
+  mats.push(shell)
+  const crate = box(1.1, 1.1, 1.1, shell)
+  crate.position.y = 0.55
+  crate.castShadow = true
+  group.add(crate)
+  const edge = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 8, 4), glowMat(mats, accent, 2.6))
+  edge.rotation.x = Math.PI / 2
+  edge.position.y = 0.55
+  group.add(edge)
+  const top = box(0.5, 0.06, 0.5, glowMat(mats, accent, 2.6))
+  top.position.y = 1.12
+  group.add(top)
+  return { group, dispose: () => disposeGroup(group, mats) }
 }

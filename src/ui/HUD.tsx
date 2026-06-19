@@ -21,11 +21,14 @@ const BLIP_COLOR: Record<BlipKind, string> = {
   ship: '#ffffff',
 }
 
-export function HUD({ hud, touch }: { hud: HudState; touch: boolean }) {
+export function HUD({ hud, touch, onRestart }: { hud: HudState; touch: boolean; onRestart: () => void }) {
   return (
     <div style={wrap}>
+      {/* top-left restart (replays the opening cinematic) */}
+      <button style={restartBtn} onClick={onRestart}>RESTART ↺</button>
+
       {/* top-left meters */}
-      <div style={{ ...panel, top: 14, left: 14 }}>
+      <div style={{ ...panel, top: 52, left: 14 }}>
         <Logo />
         <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
         <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
@@ -160,6 +163,21 @@ const barTrack: CSSProperties = {
   overflow: 'hidden',
 }
 const statRow: CSSProperties = { display: 'flex', gap: 14, marginTop: 4 }
+const restartBtn: CSSProperties = {
+  position: 'absolute',
+  top: 14,
+  left: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '6px 12px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  boxShadow: '0 0 14px rgba(39,231,255,0.25)',
+}
 const chip: CSSProperties = {
   marginTop: 4,
   alignSelf: 'flex-start',

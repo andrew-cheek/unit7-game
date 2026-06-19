@@ -66,6 +66,7 @@ export interface GameControls {
   skipIntro(): void
   requestPointerLock(): void
   exitMinigame(): void // leave a minigame and return to the city
+  restartIntro(): void // replay the opening cinematic from the start
 }
 
 export type GameAction =

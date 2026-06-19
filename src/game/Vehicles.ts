@@ -1,11 +1,11 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createHovercar, createSpaceship, createRocket, type VehicleModel } from './procedural'
+import { createHovercar, createSpaceship, createRocket, createSpeederBike, type VehicleModel } from './procedural'
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
 
-export type VehicleKind = 'hovercar' | 'spaceship' | 'rocket'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket'
 type DriveMode = 'hover' | 'fly' | 'rocket'
 
 interface Vehicle {
@@ -52,6 +52,8 @@ export class Vehicles {
     // Parked right by the player spawn so there's an obvious car to hop into
     // straight after the intro.
     this.spawn('hovercar', createHovercar(), new THREE.Vector3(6, 0, 8), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    // A speeder bike parked just the other side of the spawn for fast travel.
+    this.spawn('speeder', createSpeederBike(), new THREE.Vector3(-6, 0, 8), config.vehicle.speeder.hoverHeight, 1.1, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
     this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -30), 0, 1.4, 'rocket')
   }
@@ -63,7 +65,7 @@ export class Vehicles {
     this.scene.add(model.group)
     this.list.push({
       kind,
-      name: kind === 'hovercar' ? 'HOVERCAR' : kind === 'spaceship' ? 'SHUTTLE' : 'ROCKET',
+      name: kind === 'hovercar' ? 'HOVERCAR' : kind === 'speeder' ? 'SPEEDER' : kind === 'spaceship' ? 'SHUTTLE' : 'ROCKET',
       model,
       position,
       velocity: new THREE.Vector3(),
@@ -149,7 +151,7 @@ export class Vehicles {
   }
 
   private driveHover(v: Vehicle, dt: number, input: Input) {
-    const cfg = config.vehicle.hovercar
+    const cfg = v.kind === 'speeder' ? config.vehicle.speeder : config.vehicle.hovercar
     const boost = input.held.boost ? 1.4 : 1
     const maxSpeed = cfg.maxSpeed * boost
 

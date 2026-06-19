@@ -1,9 +1,11 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createCitizen, type CharacterModel } from './procedural'
+import { createAlien, createCitizen, type CharacterModel } from './procedural'
 import { clamp, dampAngle, hash01, randRange } from './utils'
 import type { Physics } from './Physics'
 import type { Capturable } from './Game'
+
+type AgentKind = 'citizen' | 'robot' | 'alien'
 
 interface Agent {
   pos: THREE.Vector3
@@ -14,6 +16,9 @@ interface Agent {
   alive: boolean
   respawn: number
   cap: Capturable
+  kind: AgentKind
+  flee: boolean // aliens scatter when the player closes in
+  value: number // score for catching this one
 }
 
 const NPC_RADIUS = 0.4
@@ -64,11 +69,29 @@ export class NPCManager {
   }
 
   private makeAgent(i: number): Agent {
-    const female = hash01(i * 3.1) > 0.5
-    const outfit = [0x2b3a6b, 0x6b2b4a, 0x2b6b58, 0x6b5a2b, 0x3a2b6b, 0x444b5a][Math.floor(hash01(i * 7.7) * 6)]
+    // Mix of citizens, humanoid robots and (occasionally large) aliens by ratio.
+    const roll = hash01(i * 1.7)
     const accent = [config.palette.cyan, config.palette.magenta, config.palette.lime, config.palette.orange][Math.floor(hash01(i * 5.3) * 4)]
-    const skin = [0xc9a88a, 0xa9805f, 0x8a6646, 0xe0c0a0][Math.floor(hash01(i * 2.9) * 4)]
-    const model = createCitizen({ female, outfit, accent, skin })
+    let kind: AgentKind
+    let model: CharacterModel
+    let value: number
+    if (roll < config.city.smallAlienRatio) {
+      kind = 'alien'
+      const big = hash01(i * 4.2) < config.city.bigAlienChance
+      model = createAlien({ big, color: [0x3ba86a, 0x6a3ba8, 0xa83b6a][Math.floor(hash01(i * 8.1) * 3)], eye: accent })
+      value = big ? 140 : 90
+    } else if (roll < config.city.smallAlienRatio + config.city.robotRatio) {
+      kind = 'robot'
+      model = createCitizen({ robot: true, accent, outfit: [0x39414f, 0x2f3a4a, 0x444b5a][Math.floor(hash01(i * 7.7) * 3)] })
+      value = 70
+    } else {
+      kind = 'citizen'
+      const female = hash01(i * 3.1) > 0.5
+      const outfit = [0x2b3a6b, 0x6b2b4a, 0x2b6b58, 0x6b5a2b, 0x3a2b6b, 0x444b5a][Math.floor(hash01(i * 7.7) * 6)]
+      const skin = [0xc9a88a, 0xa9805f, 0x8a6646, 0xe0c0a0][Math.floor(hash01(i * 2.9) * 4)]
+      model = createCitizen({ female, outfit, accent, skin })
+      value = 60
+    }
     const pos = this.randomPoint()
     const g = this.physics.sampleGround(pos.x, pos.z, 40)
     pos.y = g ? g.y : 0
@@ -82,6 +105,9 @@ export class NPCManager {
       model,
       alive: true,
       respawn: 0,
+      kind,
+      flee: kind === 'alien',
+      value,
       cap: {
         position: pos,
         alive: true,
@@ -90,7 +116,7 @@ export class NPCManager {
           agent.cap.alive = false
           agent.respawn = 4 + Math.random() * 4
           model.group.visible = false
-          return 60
+          return agent.value
         },
       },
     }
@@ -103,10 +129,11 @@ export class NPCManager {
     for (const a of this.agents) a.model.group.visible = v && a.alive
   }
 
-  update(dt: number) {
+  update(dt: number, playerPos?: THREE.Vector3) {
     if (!this.visible) return
     const speed = config.npc.walkSpeed
     const sepR = config.npc.separationRadius
+    const fleeR = config.city.fleeRadius
     for (const a of this.agents) {
       if (!a.alive) {
         a.respawn -= dt
@@ -114,12 +141,26 @@ export class NPCManager {
         continue
       }
 
-      // Seek the wander target; pick a new one when close.
-      const tx = a.target.x - a.pos.x
-      const tz = a.target.z - a.pos.z
-      const td = Math.hypot(tx, tz)
-      if (td < 3) a.target = this.randomPoint()
-      this.desired.set(td > 0.01 ? (tx / td) * speed : 0, 0, td > 0.01 ? (tz / td) * speed : 0)
+      // Flee: if this agent panics and the player is close, sprint directly away.
+      let fled = false
+      if (a.flee && playerPos) {
+        const fx = a.pos.x - playerPos.x
+        const fz = a.pos.z - playerPos.z
+        const fd = Math.hypot(fx, fz)
+        if (fd < fleeR && fd > 0.01) {
+          this.desired.set((fx / fd) * speed * 1.7, 0, (fz / fd) * speed * 1.7)
+          fled = true
+        }
+      }
+
+      // Otherwise seek the wander target; pick a new one when close.
+      if (!fled) {
+        const tx = a.target.x - a.pos.x
+        const tz = a.target.z - a.pos.z
+        const td = Math.hypot(tx, tz)
+        if (td < 3) a.target = this.randomPoint()
+        this.desired.set(td > 0.01 ? (tx / td) * speed : 0, 0, td > 0.01 ? (tz / td) * speed : 0)
+      }
 
       // Boids separation from neighbors.
       this.sep.set(0, 0, 0)
