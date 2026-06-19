@@ -526,6 +526,8 @@ export class Game {
         if (blips.length >= 36) break
       }
       for (const v of this.vehicles.list) add(v.position.x, v.position.z, 'vehicle')
+      const pp = this.events.policePos
+      if (pp) add(pp.x, pp.z, 'vehicle')
       this.npcs.forEachAlive((x, z) => add(x, z, 'npc'))
       this.events.forEachAlien((x, z) => add(x, z, 'alien'))
     }

@@ -12,8 +12,10 @@ export const config = {
 
   render: {
     pixelRatioCap: 2,
-    exposure: 1.05,
-    bloom: { strength: 0.85, radius: 0.55, threshold: 0.78 },
+    exposure: 0.98,
+    // Toned down on feedback that the neon was too bright: lower strength + a
+    // higher threshold so only genuinely bright sources bloom, not everything.
+    bloom: { strength: 0.5, radius: 0.5, threshold: 0.85 },
     shadowMapSize: 2048,
     // Frame dt is clamped to this so a backgrounded tab can't fling entities.
     maxFrameDelta: 0.05,
@@ -97,8 +99,8 @@ export const config = {
   },
 
   net: {
-    range: 14,
-    arcHeight: 4,
+    range: 9,
+    arcHeight: 1.6,
     cooldown: 0.8,
   },
 

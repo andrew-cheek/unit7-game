@@ -693,6 +693,74 @@ export function createHovercar(): VehicleModel {
   }
 }
 
+/**
+ * Police hover-cruiser (origin at chassis center). Reads as a cop car: dark
+ * livery, white door panels, headlights, and a roof light bar whose red/blue
+ * halves flash alternately in `update` so the siren is on. Bloom makes the bar
+ * pop. Used by Events for the ambient patrol.
+ */
+export function createPoliceCar(): VehicleModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x10131c, metalness: 0.85, roughness: 0.3 })
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0xdfe6f0, metalness: 0.5, roughness: 0.45 })
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x0a1830, metalness: 0.5, roughness: 0.1, emissive: 0x0a2540, emissiveIntensity: 0.6, transparent: true, opacity: 0.85,
+  })
+  mats.push(bodyMat, panelMat, glassMat)
+
+  const chassis = box(2.0, 0.5, 4.4, bodyMat)
+  group.add(chassis)
+  const cabin = box(1.7, 0.6, 2.2, glassMat)
+  cabin.position.set(0, 0.5, -0.1)
+  group.add(cabin)
+  // White door panels down each side.
+  for (const sx of [-1.01, 1.01]) {
+    const door = box(0.04, 0.34, 2.0, panelMat)
+    door.position.set(sx, -0.02, 0)
+    group.add(door)
+  }
+  const hood = box(1.8, 0.16, 1.2, bodyMat)
+  hood.position.set(0, 0.22, 1.7)
+  group.add(hood)
+  // Headlights + under-glow.
+  for (const sx of [-0.7, 0.7]) {
+    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), glowMat(mats, 0xfff2cf, 3))
+    hl.position.set(sx, 0.1, 2.2)
+    group.add(hl)
+  }
+  const under = box(1.6, 0.06, 3.8, glowMat(mats, 0x27e7ff, 2.4))
+  under.position.y = -0.34
+  group.add(under)
+
+  // Roof light bar: two halves we flash alternately.
+  const redMat = glowMat(mats, 0xff2b3c, 4)
+  const blueMat = glowMat(mats, 0x2b6cff, 4)
+  const barBase = box(1.2, 0.12, 0.5, bodyMat)
+  barBase.position.set(0, 0.86, -0.1)
+  group.add(barBase)
+  const redLamp = box(0.5, 0.18, 0.42, redMat)
+  redLamp.position.set(-0.3, 0.96, -0.1)
+  group.add(redLamp)
+  const blueLamp = box(0.5, 0.18, 0.42, blueMat)
+  blueLamp.position.set(0.3, 0.96, -0.1)
+  group.add(blueLamp)
+
+  shadowAll(group)
+  let t = 0
+  return {
+    group,
+    update: (dt) => {
+      t += dt
+      // ~3 Hz alternating red/blue strobe.
+      const phase = Math.sin(t * 18)
+      redMat.emissiveIntensity = phase > 0 ? 5.5 : 0.4
+      blueMat.emissiveIntensity = phase > 0 ? 0.4 : 5.5
+    },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
 /** Flying-saucer / shuttle (origin at hull center). Distinct from the hovercar. */
 export function createSpaceship(): VehicleModel {
   const group = new THREE.Group()

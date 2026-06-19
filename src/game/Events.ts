@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createAlien, createDrone, createHovercar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
+import { createAlien, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { dampAngle, randRange } from './utils'
 import type { Physics } from './Physics'
 import type { Capturable } from './Game'
@@ -37,6 +37,14 @@ interface Traffic {
   dir: THREE.Vector3
   speed: number
 }
+interface Police {
+  model: VehicleModel
+  pos: THREE.Vector3
+  yaw: number
+  waypoints: THREE.Vector3[]
+  wp: number
+  speed: number
+}
 
 const POWERUP_COLOR: Record<PowerupKind, number> = { speed: 0x27e7ff, shield: 0x8a5cff, fuel: 0x9bff4d, score: 0xff8a1e }
 const POWERUP_KINDS: PowerupKind[] = ['speed', 'shield', 'fuel', 'score']
@@ -59,6 +67,7 @@ export class Events {
   private aliens: Alien[] = []
   private drones: Drone[] = []
   private traffic: Traffic[] = []
+  private police: Police | null = null
   private ownedMats: THREE.Material[] = []
 
   private shipModel: VehicleModel
@@ -81,6 +90,7 @@ export class Events {
     for (let i = 0; i < config.events.powerupCount; i++) this.spawnPowerup(POWERUP_KINDS[i % 4])
     for (let i = 0; i < Math.round(config.events.droneCount * q); i++) this.spawnDrone(i)
     for (let i = 0; i < Math.round(config.events.trafficCount * q); i++) this.spawnTraffic(i)
+    this.spawnPolice()
 
     this.shipModel = createSpaceship()
     this.shipModel.group.visible = false
@@ -159,6 +169,27 @@ export class Events {
     this.traffic.push({ model, pos, dir, speed: randRange(14, 26) })
   }
 
+  /**
+   * A single police cruiser that loops a rectangular beat through the streets
+   * near spawn (so it's visible right after the intro) with its siren strobing.
+   * Not a chase - just ambient patrol life.
+   */
+  private spawnPolice() {
+    const model = createPoliceCar()
+    this.root.add(model.group)
+    // Rectangle of road-level waypoints around the central plaza.
+    const waypoints = [
+      new THREE.Vector3(38, 0, 38),
+      new THREE.Vector3(38, 0, -38),
+      new THREE.Vector3(-38, 0, -38),
+      new THREE.Vector3(-38, 0, 38),
+    ]
+    const pos = waypoints[0].clone()
+    pos.y = (this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0) + 1.0
+    model.group.position.copy(pos)
+    this.police = { model, pos, yaw: 0, waypoints, wp: 1, speed: 16 }
+  }
+
   // --- per-frame -----------------------------------------------------------
 
   update(dt: number, playerPos: THREE.Vector3) {
@@ -166,8 +197,30 @@ export class Events {
     this.updatePowerups(dt, playerPos)
     this.updateDrones(dt)
     this.updateTraffic(dt)
+    this.updatePolice(dt)
     this.updateShip(dt)
     this.updateAliens(dt)
+  }
+
+  private updatePolice(dt: number) {
+    const p = this.police
+    if (!p) return
+    p.model.update(dt, 1) // strobes the light bar
+    const tgt = p.waypoints[p.wp]
+    const dx = tgt.x - p.pos.x
+    const dz = tgt.z - p.pos.z
+    const d = Math.hypot(dx, dz)
+    if (d < 2) {
+      p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
+    } else {
+      p.pos.x += (dx / d) * p.speed * dt
+      p.pos.z += (dz / d) * p.speed * dt
+      p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
+    }
+    const gy = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? 0
+    p.pos.y = gy + 1.0
+    p.model.group.position.copy(p.pos)
+    p.model.group.rotation.y = p.yaw
   }
 
   private updatePowerups(dt: number, playerPos: THREE.Vector3) {
@@ -338,11 +391,17 @@ export class Events {
     for (const a of this.aliens) if (a.alive) fn(a.pos.x, a.pos.z)
   }
 
+  /** Police cruiser position for the radar (null if none). */
+  get policePos(): THREE.Vector3 | null {
+    return this.police?.pos ?? null
+  }
+
   dispose() {
     this.shipModel.dispose()
     for (const p of this.powerups) p.group.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
     for (const d of this.drones) d.model.dispose()
     for (const c of this.traffic) c.model.dispose()
+    this.police?.model.dispose()
     for (const a of this.aliens) a.model.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }

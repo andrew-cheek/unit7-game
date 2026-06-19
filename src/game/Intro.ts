@@ -27,16 +27,19 @@ const S_END = L0 + LOOP + L2 + LOOP + RUNOFF
 const TRACK_R = 0.7 // deck tube radius; the bike rides on its surface
 const SEAT_H = 0.95 // robot sits this far above the bike along the track's "up"
 
-// Beat timeline (seconds).
-const T_ASSEMBLE = 5.0
-const T_HATCH = 7.0
-const T_JUMP = 8.0
-const T_CHUTE = 12.5
-const T_LAND = 16.5
-const T_LOOP1 = 19.5
-const T_GAP = 20.7
-const T_LOOP2 = 22.6
-const DURATION = 23.4
+// Beat timeline (seconds). Tightened from ~23s to ~14s on feedback that the
+// intro ran long; the beats keep their relative pacing, just compressed.
+const T_ASSEMBLE = 3.2
+const T_HATCH = 4.2
+const T_JUMP = 5.0
+const T_CHUTE = 7.4
+const T_LAND = 9.4
+const T_LOOP1 = 11.2
+const T_GAP = 11.9
+const T_LOOP2 = 13.6
+const DURATION = 14.2
+// When the bike starts rolling along the approach (before the robot lands).
+const T_BIKE_START = 2.5
 
 interface PathPoint {
   pos: THREE.Vector3
@@ -223,7 +226,7 @@ export class Intro {
 
   /** Distance travelled along the track at time t (scripted to hit each beat). */
   private bikeS(t: number): number {
-    if (t < T_LAND) return L0 * smooth(6, T_LAND, t) // approach, accelerating in
+    if (t < T_LAND) return L0 * smooth(T_BIKE_START, T_LAND, t) // approach, accelerating in
     if (t < T_LOOP1) return L0 + LOOP * smooth(T_LAND, T_LOOP1, t)
     if (t < T_GAP) return L0 + LOOP + L2 * smooth(T_LOOP1, T_GAP, t)
     if (t < T_LOOP2) return L0 + LOOP + L2 + LOOP * smooth(T_GAP, T_LOOP2, t)

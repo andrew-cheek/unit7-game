@@ -49,7 +49,9 @@ export class Vehicles {
   constructor(scene: THREE.Scene, physics: Physics) {
     this.scene = scene
     this.physics = physics
-    this.spawn('hovercar', createHovercar(), new THREE.Vector3(16, 0, 20), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    // Parked right by the player spawn so there's an obvious car to hop into
+    // straight after the intro.
+    this.spawn('hovercar', createHovercar(), new THREE.Vector3(6, 0, 8), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
     this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -30), 0, 1.4, 'rocket')
   }

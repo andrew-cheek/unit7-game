@@ -159,10 +159,13 @@ export class Player {
 
   private camRelative(input: Input, out: THREE.Vector3) {
     const yaw = input.yaw
+    // Forward (+moveY) follows the camera heading; strafe (+moveX) is camera-right.
+    // Camera-right is -cross(up, forward), hence the signs on the moveX terms -
+    // getting these wrong is what made "left" steer right.
     out.set(
-      Math.cos(yaw) * input.moveX + Math.sin(yaw) * input.moveY,
+      -Math.cos(yaw) * input.moveX + Math.sin(yaw) * input.moveY,
       0,
-      -Math.sin(yaw) * input.moveX + Math.cos(yaw) * input.moveY,
+      Math.sin(yaw) * input.moveX + Math.cos(yaw) * input.moveY,
     )
     const len = out.length()
     if (len > 1e-3) out.multiplyScalar(1 / len)
