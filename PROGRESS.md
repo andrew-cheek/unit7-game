@@ -329,3 +329,63 @@ mode-system, hitting every requested beat and handing off to the follow camera.
   sky; (b) loop side-camera distance (offset `(20,5,-4)` in `updateCamera`); (c)
   the fuselage interior framing during assembly. The cinematic is fully
   skippable, so it can never block play if pacing feels off.
+
+---
+
+## Final summary (read this first when you land)
+
+All five phases are complete, each committed separately on
+`claude/unit7-quality-cinematic-mi6bkw`. `main` was never touched. The branch
+builds and typechecks clean at every commit.
+
+| Phase | What | State |
+|---|---|---|
+| 1 | Centralized `QualityTier` + SSAO/DoF/SMAA post chain | done, verified build + headless tier check |
+| 2 | Modern third-person follow camera (auto-trail, look-ahead, collision sweep) | done, verified build |
+| 3 | Grounded movement feel (fall gravity, coyote time, snappier accel/decel) | done, verified build |
+| 4 | Fixed-timestep simulation loop + engine audit | done, verified build |
+| 5 | New opening cinematic (plane → assemble → jump → freefall → land on bike → loops) | done, verified build + headless path math |
+
+### Verification summary
+
+- Every phase: `npm run typecheck` clean, `npm run build` succeeds.
+- Tier gating proven headlessly: `detectTier('high'|'low')` resolves correctly;
+  SSAO/DoF/MSAA on high, off on low (SMAA instead), density 1.0 vs 0.5. The
+  Engine only *constructs* the heavy passes when the tier flag is set, so the
+  mobile path doesn't allocate them at all.
+- Cinematic track + timeline math proven headlessly: continuous, monotonic bike
+  motion; loop apex = 2·R; track clear of the city; exact landing on the bike.
+
+### Consolidated "needs real-device / browser testing" (I did NOT verify these)
+
+Because this was a headless container (no browser, no GPU), the following are
+implemented correctly but want a human/device to confirm:
+
+1. **Real FPS / thermal behavior** on a mid-range phone (low tier) and desktop
+   (high tier). The budgets are designed, not measured.
+2. **Touch input on hardware** (the on-screen stick + buttons) — only forced-on
+   desktop emulation was reasonable here.
+3. **Look/feel tuning** that's inherently visual:
+   - Camera auto-follow timing + look-ahead (`config.camera`).
+   - Movement weight (`config.player` fall gravity / accel / decel).
+   - SSAO/DoF strength (`Engine`) — kept conservative to avoid blind over-darkening.
+   - The whole cinematic's framing + pacing (`Intro.ts` timeline constants).
+4. **Mode-switch memory** on mobile over a long session (CLAUDE.md's leak
+   concern). Disposal paths look correct and unchanged, but profile to be sure.
+
+### Things I deliberately did NOT do (with rationale)
+
+- **No Rapier migration.** The existing raycast/AABB physics is cheap and is now
+  frame-rate-independent on the fixed step. Rapier is a large, risky rewrite with
+  a WASM cost on mobile; left as the documented future target — its own phase.
+- **No bundle code-splitting.** The deliverable is a single embedded component;
+  splitting Three into its own chunk would help caching but risks the consumer's
+  bundler. Recommendation only. Current bundle ~924 kB (272 kB gzip).
+
+### Quick dev testing recipe (when you're back)
+
+- `npm run dev`, then:
+  - `?intro` — watch the opening cinematic (Skip button works).
+  - `?tier=low` — force the mobile path; confirm no SSAO/DoF and lighter scene.
+  - `?tier=high` — force desktop quality.
+  - `?touch` — show the touch controls on desktop.
