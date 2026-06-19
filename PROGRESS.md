@@ -155,3 +155,43 @@ action-game feel.
 - The *feel* of auto-follow timing (lambda/delay) and look-ahead distance is
   tuned blind — it compiles and the math is sound, but the exact numbers want a
   human eye. They're all in `config.camera` for quick tweaking.
+
+## Phase 3 — Movement feel
+
+**Goal:** make walking and riding responsive and grounded; fix floatiness; the
+camera (Phase 2) already follows naturally.
+
+### What changed and why
+
+- **Robot locomotion (`config.player` + `Player.updateRobot`):**
+  - `accel` 46 → 60 and `decel` 34 → 52: quicker to start, much crisper to stop
+    (kills the ice-skating slide, especially out of a sprint).
+  - `turnLerp` 13 → 16: tighter facing snap toward the movement direction.
+  - **Fall gravity multiplier (1.6):** the robot now falls faster than it rises
+    and falls harder when not actively thrusting. This is the single biggest
+    fix for "floaty" — hops and jumps now have weight and land instead of
+    hanging.
+  - **Coyote time (0.12s):** the jetpack launch-hop still fires for a brief
+    moment after walking off a ledge, so edge jumps don't feel dropped. The hop
+    is also guarded to only fire when not already rising.
+  - `stepDown` is now a config value (0.55 → 0.6) instead of a magic constant, so
+    walking down steps/ramps sticks slightly better.
+- **Hovercar riding (`Vehicles.driveHover`):** vertical ground-follow damp 8 → 14
+  so the car stays planted on ramps and (Phase-5) loops instead of floating up
+  behind the surface; `accel` 34 → 42 for snappier throttle response.
+
+### Design decisions made on your behalf
+
+- I treated "floaty" primarily as **hang-time + slow stops**, and fixed both with
+  asymmetric gravity and higher decel rather than changing jump height or speeds,
+  so the game's balance/reach is preserved. All values are in `config` for easy
+  re-tuning.
+
+### Build & test results
+
+- `npm run typecheck`: clean. `npm run build`: succeeds.
+
+### Needs real-device / browser testing
+
+- Exact accel/decel/gravity numbers are tuned by feel-reasoning, not playtest.
+  They're conservative and all live in `config.player` / `config.vehicle`.

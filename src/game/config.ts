@@ -48,11 +48,17 @@ export const config = {
     eyeHeight: 1.6,
     walkSpeed: 6.5,
     runSpeed: 12,
-    accel: 46,
-    decel: 34,
-    airControl: 0.35,
+    accel: 60, // snappier off-the-line response (was 46)
+    decel: 52, // crisper stop, less ice-skating (was 34)
+    airControl: 0.4,
     jumpSpeed: 9.5,
-    turnLerp: 13,
+    // Fall faster than you rise so jumps/hops feel grounded, not floaty.
+    fallGravityMult: 1.6,
+    // Forgiveness window: can still hop just after leaving the ground.
+    coyoteTime: 0.12,
+    // Snap onto ground when within this distance below the feet (steps/ramps).
+    stepDown: 0.6,
+    turnLerp: 16,
     staminaMax: 100,
     staminaDrain: 26, // per second while sprinting
     staminaRegen: 20, // per second while not
@@ -120,7 +126,7 @@ export const config = {
   },
 
   vehicle: {
-    hovercar: { accel: 34, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
+    hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
     spaceship: { accel: 30, maxSpeed: 50, turn: 1.5, hoverHeight: 2.2 },
     enterRange: 6,
   },

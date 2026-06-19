@@ -172,7 +172,9 @@ export class Vehicles {
     const gy = g ? g.y : 0
     v.bob += dt
     const targetY = gy + v.hoverHeight + Math.sin(v.bob * 2) * 0.06
-    v.position.y = damp(v.position.y, targetY, 8, dt)
+    // Crisper vertical tracking so the car stays planted on ramps/loops instead
+    // of floating up behind the terrain.
+    v.position.y = damp(v.position.y, targetY, 14, dt)
 
     this.orient(v, g ? g.normal : UP, -input.moveX * 0.25 * Math.min(1, Math.abs(fs) / 12), dt, 12)
     this.speed01 = Math.min(1, Math.abs(fs) / maxSpeed)
