@@ -106,14 +106,16 @@ export const config = {
 
   camera: {
     fov: 62,
-    distance: 8,
+    distance: 9.5, // pulled back a touch for a more establishing view
     minDistance: 2.2,
     height: 2.6,
     targetHeight: 1.5,
+    // Higher, looking-down-over-the-shoulder default so the city reads as you spawn.
+    startPitch: 0.32,
     followLambda: 9,
     rotateLambda: 16,
     pitchMin: -0.85,
-    pitchMax: 0.62,
+    pitchMax: 0.7,
     mouseSensitivity: 0.0022,
     touchSensitivity: 0.006,
     collisionPadding: 0.4,

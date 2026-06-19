@@ -52,7 +52,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       <style>{KEYFRAMES}</style>
       {hud && !hud.intro && !hud.minigame && <HUD hud={hud} touch={touch} />}
       {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
-        <MobileControls controls={controlsRef.current} />
+        <MobileControls controls={controlsRef.current} hud={hud} />
       )}
       {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} />}

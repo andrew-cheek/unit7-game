@@ -75,8 +75,9 @@ export class Game {
 
   // Beam Wars portal (a doorway near the spawn car into the minigame).
   private beamPortal!: THREE.Group
-  private beamPortalPos = new THREE.Vector3(13, 0, 8)
+  private beamPortalPos = new THREE.Vector3(10, 0, 14)
   private beamPortalDisc!: THREE.Mesh
+  private beamPortalBeam!: THREE.Mesh
   private beamPortalMats: THREE.Material[] = []
   private beamPortalGeos: THREE.BufferGeometry[] = []
   private beamPortalTex: THREE.CanvasTexture | null = null
@@ -203,27 +204,41 @@ export class Game {
     const own = <T extends THREE.Material>(m: T) => { this.beamPortalMats.push(m); return m }
     const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.beamPortalGeos.push(geo); return geo }
 
+    // Glow pad on the ground so it reads even from a distance.
+    const padGeo = ownG(new THREE.CylinderGeometry(2.8, 3.1, 0.18, 28))
+    const pad = new THREE.Mesh(padGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 2.4, roughness: 0.4 })))
+    pad.position.y = 0.09
+    g.add(pad)
+
     // Glowing ring standing on the ground (a doorway you walk into).
-    const ringGeo = ownG(new THREE.TorusGeometry(2.0, 0.16, 14, 40))
-    const ring = new THREE.Mesh(ringGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 3.0, roughness: 0.4 })))
-    ring.position.y = 2.1
+    const ringGeo = ownG(new THREE.TorusGeometry(2.4, 0.22, 16, 44))
+    const ring = new THREE.Mesh(ringGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 3.2, roughness: 0.4 })))
+    ring.position.y = 2.6
     g.add(ring)
 
     // Swirling translucent disc inside the ring.
-    const discGeo = ownG(new THREE.CircleGeometry(1.9, 40))
+    const discGeo = ownG(new THREE.CircleGeometry(2.3, 44))
     const discMat = own(new THREE.MeshBasicMaterial({ color: 0x8a5cff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }))
     const disc = new THREE.Mesh(discGeo, discMat)
-    disc.position.y = 2.1
+    disc.position.y = 2.6
     g.add(disc)
     this.beamPortalDisc = disc
+
+    // Tall light beam rising from the portal - visible from across the city.
+    const beamGeo = ownG(new THREE.CylinderGeometry(0.6, 1.1, 60, 16, 1, true))
+    const beamMat = own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const beam = new THREE.Mesh(beamGeo, beamMat)
+    beam.position.y = 30
+    g.add(beam)
+    this.beamPortalBeam = beam
 
     // Floating "BEAM WARS" label that always faces the camera.
     const tex = this.makeLabelTexture('BEAM WARS')
     this.beamPortalTex = tex
     const spriteMat = own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
     const sprite = new THREE.Sprite(spriteMat)
-    sprite.position.set(0, 4.7, 0)
-    sprite.scale.set(4.2, 1.05, 1)
+    sprite.position.set(0, 5.6, 0)
+    sprite.scale.set(5.0, 1.25, 1)
     g.add(sprite)
 
     this.engine.scene.add(g)
@@ -253,7 +268,7 @@ export class Game {
     if (this.inMinigame || this.beamCooldown > 0 || this.player.mode !== 'robot') return
     const dx = this.player.position.x - this.beamPortalPos.x
     const dz = this.player.position.z - this.beamPortalPos.z
-    if (dx * dx + dz * dz < 2.4 * 2.4) this.enterBeamWars()
+    if (dx * dx + dz * dz < 2.8 * 2.8) this.enterBeamWars()
   }
 
   private enterBeamWars() {
@@ -577,6 +592,8 @@ export class Game {
       this.beamPortalDisc.rotation.z += dt * 1.6
       const m = this.beamPortalDisc.material as THREE.MeshBasicMaterial
       m.opacity = 0.4 + Math.sin(_elapsed * 3) * 0.15
+      const bm = this.beamPortalBeam.material as THREE.MeshBasicMaterial
+      bm.opacity = 0.18 + Math.sin(_elapsed * 2) * 0.08
     }
 
     if (this.netTimer > 0) {
@@ -648,6 +665,7 @@ export class Game {
       this.events.forEachAlien((x, z) => add(x, z, 'alien'))
     }
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
+    if (this.zone === 'earth') add(this.beamPortalPos.x, this.beamPortalPos.z, 'portal')
     return blips
   }
 

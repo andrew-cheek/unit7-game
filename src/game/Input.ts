@@ -27,7 +27,7 @@ export class Input {
   moveY = 0 // forward (+forward)
   // Absolute orbit angles - the single source of truth for look direction.
   yaw = 0
-  pitch = -0.18
+  pitch = config.camera.startPitch
 
   held: Record<GameAction, boolean> = {
     sprint: false, jet: false, net: false, enter: false, boost: false, morph: false, chute: false,

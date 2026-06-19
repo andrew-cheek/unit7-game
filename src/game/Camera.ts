@@ -62,7 +62,7 @@ export class CameraController {
   snap(focus: THREE.Vector3) {
     this.initialized = false
     this.lookAhead.set(0, 0, 0)
-    this.update(0, { yaw: 0, pitch: -0.18 } as Input, focus)
+    this.update(0, { yaw: 0, pitch: config.camera.startPitch } as Input, focus)
   }
 
   update(dt: number, input: Pick<Input, 'yaw' | 'pitch'>, focus: THREE.Vector3, follow: FollowState | number = {}) {
