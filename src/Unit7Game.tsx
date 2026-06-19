@@ -5,6 +5,7 @@ import type { GameControls, HudState, Unit7Config } from './game/types'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
+import { BeamWars } from './ui/BeamWars'
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -49,12 +50,15 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
-      {hud && !hud.intro && <HUD hud={hud} touch={touch} />}
-      {touch && hud && !hud.intro && !hud.paused && controlsRef.current && (
+      {hud && !hud.intro && !hud.minigame && <HUD hud={hud} touch={touch} />}
+      {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} />
       )}
       {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
-      {hud?.paused && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} />}
+      {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} />}
+      {hud?.minigame === 'beamwars' && controlsRef.current && (
+        <BeamWars touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+      )}
     </div>
   )
 }

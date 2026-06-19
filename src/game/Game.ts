@@ -73,6 +73,16 @@ export class Game {
   private netTimer = 0
   private scratchFwd = new THREE.Vector3()
 
+  // Beam Wars portal (a doorway near the spawn car into the minigame).
+  private beamPortal!: THREE.Group
+  private beamPortalPos = new THREE.Vector3(13, 0, 8)
+  private beamPortalDisc!: THREE.Mesh
+  private beamPortalMats: THREE.Material[] = []
+  private beamPortalGeos: THREE.BufferGeometry[] = []
+  private beamPortalTex: THREE.CanvasTexture | null = null
+  private inMinigame = false
+  private beamCooldown = 0
+
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
     // then make it the single object every system reads from.
@@ -104,6 +114,8 @@ export class Game {
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
     this.camera.snap(this.player.position)
 
+    this.buildBeamPortal()
+
     this.vehicles.onEnterRocket = () => this.startRocketLaunch()
 
     // Load real CC0 assets if present; otherwise the procedural world stays.
@@ -134,6 +146,7 @@ export class Game {
       pause: () => this.setPaused(true),
       skipIntro: () => this.intro?.skip(),
       requestPointerLock: () => this.input.requestLock(),
+      exitMinigame: () => this.exitBeamWars(),
     }
 
     this.hud = {
@@ -141,6 +154,7 @@ export class Game {
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
+      minigame: null,
     }
 
     this.engine.onUpdate = this.update
@@ -176,6 +190,98 @@ export class Game {
     this.trans = { phase: 'in', t: 0, target: this.zone }
     this.hud.banner = 'WELCOME TO UNIT 7'
     this.bannerTimer = 2.4
+  }
+
+  // --- Beam Wars portal ----------------------------------------------------
+
+  private buildBeamPortal() {
+    const g = new THREE.Group()
+    const gy = this.physics.sampleGround(this.beamPortalPos.x, this.beamPortalPos.z, 40)?.y ?? 0
+    this.beamPortalPos.y = gy
+    g.position.set(this.beamPortalPos.x, gy, this.beamPortalPos.z)
+
+    const own = <T extends THREE.Material>(m: T) => { this.beamPortalMats.push(m); return m }
+    const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.beamPortalGeos.push(geo); return geo }
+
+    // Glowing ring standing on the ground (a doorway you walk into).
+    const ringGeo = ownG(new THREE.TorusGeometry(2.0, 0.16, 14, 40))
+    const ring = new THREE.Mesh(ringGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 3.0, roughness: 0.4 })))
+    ring.position.y = 2.1
+    g.add(ring)
+
+    // Swirling translucent disc inside the ring.
+    const discGeo = ownG(new THREE.CircleGeometry(1.9, 40))
+    const discMat = own(new THREE.MeshBasicMaterial({ color: 0x8a5cff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }))
+    const disc = new THREE.Mesh(discGeo, discMat)
+    disc.position.y = 2.1
+    g.add(disc)
+    this.beamPortalDisc = disc
+
+    // Floating "BEAM WARS" label that always faces the camera.
+    const tex = this.makeLabelTexture('BEAM WARS')
+    this.beamPortalTex = tex
+    const spriteMat = own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
+    const sprite = new THREE.Sprite(spriteMat)
+    sprite.position.set(0, 4.7, 0)
+    sprite.scale.set(4.2, 1.05, 1)
+    g.add(sprite)
+
+    this.engine.scene.add(g)
+    this.beamPortal = g
+  }
+
+  /** A neon text label baked to a canvas texture for a billboard sprite. */
+  private makeLabelTexture(text: string): THREE.CanvasTexture {
+    const cv = document.createElement('canvas')
+    cv.width = 512
+    cv.height = 128
+    const ctx = cv.getContext('2d')!
+    ctx.clearRect(0, 0, cv.width, cv.height)
+    ctx.font = '800 76px ui-monospace, Menlo, monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.shadowColor = '#27e7ff'
+    ctx.shadowBlur = 22
+    ctx.fillStyle = '#bfefff'
+    ctx.fillText(text, cv.width / 2, cv.height / 2)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }
+
+  private checkBeamPortal() {
+    if (this.inMinigame || this.beamCooldown > 0 || this.player.mode !== 'robot') return
+    const dx = this.player.position.x - this.beamPortalPos.x
+    const dz = this.player.position.z - this.beamPortalPos.z
+    if (dx * dx + dz * dz < 2.4 * 2.4) this.enterBeamWars()
+  }
+
+  private enterBeamWars() {
+    this.inMinigame = true
+    this.hud.minigame = 'beamwars'
+    this.input.setLockEnabled(false)
+    this.input.exitLock()
+    this.hudListener({ ...this.hud, radar: this.radar })
+    this.engine.stop() // freeze + stop rendering the city behind the overlay
+  }
+
+  private exitBeamWars() {
+    if (!this.inMinigame) return
+    this.inMinigame = false
+    this.hud.minigame = null
+    // Step the robot out of the doorway (toward spawn) so it doesn't re-trigger.
+    const out = this.scratchFwd.subVectors(this.world.spawn, this.beamPortalPos)
+    out.y = 0
+    if (out.lengthSq() < 1e-4) out.set(0, 0, 1)
+    out.normalize()
+    this.player.position.set(this.beamPortalPos.x, this.beamPortalPos.y, this.beamPortalPos.z).addScaledVector(out, 4)
+    this.player.position.y = this.physics.sampleGround(this.player.position.x, this.player.position.z, this.player.position.y + 4)?.y ?? this.beamPortalPos.y
+    this.beamCooldown = 1.5
+    this.input.consumePause() // drop any Escape pressed inside the minigame
+    this.input.setLockEnabled(true)
+    this.camera.snap(this.player.position)
+    this.engine.start()
+    this.hudListener({ ...this.hud, radar: this.radar })
   }
 
   // --- zone travel ---------------------------------------------------------
@@ -416,6 +522,7 @@ export class Game {
     }
 
     this.travelCooldown = Math.max(0, this.travelCooldown - dt)
+    this.beamCooldown = Math.max(0, this.beamCooldown - dt)
 
     if (this.launch.active) {
       this.updateLaunch(dt)
@@ -452,6 +559,7 @@ export class Game {
       this.player.position.z = clamp(this.player.position.z, -lim, lim)
       this.focus.copy(this.player.position)
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
+      if (onEarth && this.trans.phase === 'none') this.checkBeamPortal()
     }
 
     if (onEarth) this.npcs.update(dt)
@@ -462,6 +570,14 @@ export class Game {
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
     this.world.update(dt, this.focus)
+
+    // Animate the Beam Wars portal (Earth only).
+    this.beamPortal.visible = onEarth
+    if (onEarth) {
+      this.beamPortalDisc.rotation.z += dt * 1.6
+      const m = this.beamPortalDisc.material as THREE.MeshBasicMaterial
+      m.opacity = 0.4 + Math.sin(_elapsed * 3) * 0.15
+    }
 
     if (this.netTimer > 0) {
       this.netTimer -= dt
@@ -583,6 +699,9 @@ export class Game {
     const m = this.netLine.material as THREE.Material
     this.netLine.geometry.dispose()
     m.dispose()
+    this.beamPortalGeos.forEach((g) => g.dispose())
+    this.beamPortalMats.forEach((mm) => mm.dispose())
+    this.beamPortalTex?.dispose()
     this.engine.dispose()
     this.world.dispose()
   }

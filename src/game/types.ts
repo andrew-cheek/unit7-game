@@ -51,7 +51,10 @@ export interface HudState {
   radar: RadarBlip[]
   fade: number // 0..1 black overlay for zone transitions / launch
   banner: string | null // transient center banner (e.g. "ENTERING MARS")
+  minigame: MinigameKind | null // non-null while a full-screen minigame is active
 }
+
+export type MinigameKind = 'beamwars'
 
 /** Minimal command surface the HUD / mobile controls use to talk back to the engine. */
 export interface GameControls {
@@ -62,6 +65,7 @@ export interface GameControls {
   pause(): void
   skipIntro(): void
   requestPointerLock(): void
+  exitMinigame(): void // leave a minigame and return to the city
 }
 
 export type GameAction =
