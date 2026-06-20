@@ -10,11 +10,12 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
  * runs; onExit returns to Humanoid City.
  */
 
-const COLS = 88 // a large underground world; the camera shows only a small window
-const ROWS = 60
-const VIEW = 14 // how many cells span the short screen edge (smaller = closer)
-const TUNNELS = 9 // branch tunnels carved at start (lower = more solid dirt)
-const TUNNEL_LEN = 95
+const COLS = 100 // a large underground world; the camera shows only a window
+const ROWS = 68
+const VIEW_COLS = 30 // tiles shown across each panel (higher = more zoomed out)
+const VIEW_ROWS = 42 // tiles shown down each panel
+const TUNNELS = 13 // branch tunnels carved at start (lower = more solid dirt)
+const TUNNEL_LEN = 110
 const DIG_BRUSH = 0.9
 const MOVE_OPEN = 11
 const MOVE_DIG = 4.5
@@ -251,8 +252,8 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
       ctx.rect(rx, ry, pw, ph)
       ctx.clip()
 
-      // More, smaller tiles -> finer dirt grain and a more vast-feeling world.
-      const cell = Math.max(pw / 22, ph / 34)
+      // Zoomed-out window: show many tiles per panel so the world feels vast.
+      const cell = Math.max(pw / VIEW_COLS, ph / VIEW_ROWS)
       const halfW = pw / (2 * cell)
       const halfH = ph / (2 * cell)
       const camX = halfW * 2 >= COLS ? COLS / 2 : Math.max(halfW, Math.min(COLS - halfW, pan.cam.x))
@@ -283,12 +284,15 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
           // looks uniform-but-textured rather than a high-contrast checkerboard.
           ctx.fillStyle = ROCK.base
           ctx.fillRect(px, py, cs, cs)
-          for (let qi = 0; qi < 4; qi++) {
-            const m = hash2D(x * 2 + (qi & 1), y * 2 + (qi >> 1)) % 5
-            if (m === 3) ctx.fillStyle = ROCK.mid
-            else if (m === 4) ctx.fillStyle = ROCK.light
-            else continue
-            ctx.fillRect(px + (qi & 1) * half, py + (qi >> 1) * half, half, half)
+          // Fine grain only when tiles are big enough to show it (perf when zoomed).
+          if (cell >= 9) {
+            for (let qi = 0; qi < 4; qi++) {
+              const m = hash2D(x * 2 + (qi & 1), y * 2 + (qi >> 1)) % 5
+              if (m === 3) ctx.fillStyle = ROCK.mid
+              else if (m === 4) ctx.fillStyle = ROCK.light
+              else continue
+              ctx.fillRect(px + (qi & 1) * half, py + (qi >> 1) * half, half, half)
+            }
           }
           const h = hash2D(x, y)
           if (h % 11 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + (h % 2 ? half : 0), py + (h % 3 ? half : 0), hq, hq) } // dark grain
