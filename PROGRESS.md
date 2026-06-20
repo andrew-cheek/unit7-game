@@ -422,3 +422,23 @@ Five gameplay/atmosphere additions on top of the environment pass.
 Mobile-vs-desktop: bus count (2 high / 1 low) and highway car count scale with
 `tier.densityScale`; offices and the Titan are static/cheap. Sunrise is a few
 per-frame color lerps, negligible cost.
+
+## Three pilotable battle-mechs with missiles
+
+Replaced the single Titan with three sized, flyable mechs and a missile system.
+
+- **createMechSuit(opts)** (procedural.ts): one parametrized humanoid mech rig
+  (armor/trim/core colors + `scale`) with shoulder missile tubes, a cockpit, and
+  additive back/foot thrusters that flare with speed (flight pose tucks the legs).
+- **Three vehicles** (Vehicles.ts + config.vehicle.mechM/L/XL): MECH-M (blue,
+  size 1.4), MECH-L (crimson, size 2.6) and MECH-XL (green, building-sized,
+  size 6). They park standing on the ground in a row by the arcade portals so
+  you see them at spawn, and lift off (drive: 'fly') when piloted. Bigger =
+  taller, slower turn, higher top speed.
+- **Missiles** (Missiles.ts): CAPTURE/FIRE (H key, or FIRE button on mobile)
+  launches a pair of missiles from the shoulder pods that arc out, glow, and
+  detonate into a shockwave; `Game.detonate` captures every target in the blast
+  radius for score. 0.45s cooldown.
+- Camera pulls back proportionally to mech size and frames the torso; HUD/mobile
+  hints updated (Space/J fly, H fire, G exit). Missiles hidden off-Earth and
+  disposed with the game.

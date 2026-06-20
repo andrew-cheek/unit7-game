@@ -1,11 +1,11 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createHovercar, createSpaceship, createRocket, createSpeederBike, createTitan, type VehicleModel } from './procedural'
+import { createHovercar, createSpaceship, createRocket, createSpeederBike, createMechSuit, type VehicleModel } from './procedural'
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
 
-export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'titan'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL'
 type DriveMode = 'hover' | 'fly' | 'rocket'
 
 interface Vehicle {
@@ -19,7 +19,10 @@ interface Vehicle {
   hoverHeight: number
   drive: DriveMode
   bob: number
+  size: number // model scale (1 for non-mechs); used for camera + muzzle height
 }
+
+export const isMech = (k: VehicleKind) => k === 'mechM' || k === 'mechL' || k === 'mechXL'
 
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
 const UP = new THREE.Vector3(0, 1, 0)
@@ -56,18 +59,33 @@ export class Vehicles {
     this.spawn('speeder', createSpeederBike(), new THREE.Vector3(-6, 0, 8), config.vehicle.speeder.hoverHeight, 1.1, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
     this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -30), 0, 1.4, 'rocket')
-    // The Blue Titan, parked by the arcade portals (beamwars -6,12 / digduel 10,12).
-    this.spawn('titan', createTitan(), new THREE.Vector3(2, 0, 16), config.vehicle.titan.hoverHeight, 2.5, 'hover')
+    // Three battle-mechs lined up by the arcade portals so they're obvious at
+    // spawn: medium (blue), large (crimson), extra-large building-sized (green).
+    const mm = config.vehicle.mechM
+    const ml = config.vehicle.mechL
+    const mx = config.vehicle.mechXL
+    this.spawn('mechM', createMechSuit({ scale: mm.size, armor: 0x2348c8, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(-16, 0, 18), mm.hoverHeight, 2.0 * mm.size, 'fly', mm.size)
+    this.spawn('mechL', createMechSuit({ scale: ml.size, armor: 0xb01f3a, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(2, 0, 22), ml.hoverHeight, 2.0 * ml.size, 'fly', ml.size)
+    this.spawn('mechXL', createMechSuit({ scale: mx.size, armor: 0x1f6e3a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(26, 0, 30), mx.hoverHeight, 2.0 * mx.size, 'fly', mx.size)
   }
 
-  private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode) {
+  private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode, size = 1) {
     const gy = this.physics.sampleGround(at.x, at.z, 40)?.y ?? 0
-    const position = new THREE.Vector3(at.x, gy + hoverHeight, at.z)
+    // Mechs stand parked on the ground; everything else rests at its hover height.
+    const position = new THREE.Vector3(at.x, gy + (isMech(kind) ? 0 : hoverHeight), at.z)
     model.group.position.copy(position)
     this.scene.add(model.group)
+    const name =
+      kind === 'hovercar' ? 'HOVERCAR'
+      : kind === 'speeder' ? 'SPEEDER'
+      : kind === 'spaceship' ? 'SHUTTLE'
+      : kind === 'mechM' ? 'MECH-M'
+      : kind === 'mechL' ? 'MECH-L'
+      : kind === 'mechXL' ? 'MECH-XL'
+      : 'ROCKET'
     this.list.push({
       kind,
-      name: kind === 'hovercar' ? 'HOVERCAR' : kind === 'speeder' ? 'SPEEDER' : kind === 'spaceship' ? 'SHUTTLE' : kind === 'titan' ? 'TITAN' : 'ROCKET',
+      name,
       model,
       position,
       velocity: new THREE.Vector3(),
@@ -76,6 +94,7 @@ export class Vehicles {
       hoverHeight,
       drive,
       bob: kind === 'spaceship' ? 1.7 : 0,
+      size,
     })
   }
 
@@ -148,12 +167,14 @@ export class Vehicles {
     if (v.drive === 'rocket') return
     const gy = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 6)?.y ?? 0
     v.bob += dt
-    v.position.y = gy + v.hoverHeight + Math.sin(v.bob * 1.4) * 0.12
+    // Mechs park standing on the ground (feet at gy); others hover.
+    const rest = isMech(v.kind) ? 0 : v.hoverHeight
+    v.position.y = gy + rest + Math.sin(v.bob * 1.4) * 0.12
     v.model.group.rotation.set(0, v.yaw, 0)
   }
 
   private driveHover(v: Vehicle, dt: number, input: Input) {
-    const cfg = v.kind === 'speeder' ? config.vehicle.speeder : v.kind === 'titan' ? config.vehicle.titan : config.vehicle.hovercar
+    const cfg = v.kind === 'speeder' ? config.vehicle.speeder : config.vehicle.hovercar
     const boost = input.held.boost ? 1.4 : 1
     const maxSpeed = cfg.maxSpeed * boost
 
@@ -187,7 +208,11 @@ export class Vehicles {
   }
 
   private driveFly(v: Vehicle, dt: number, input: Input) {
-    const cfg = config.vehicle.spaceship
+    const cfg =
+      v.kind === 'mechM' ? config.vehicle.mechM
+      : v.kind === 'mechL' ? config.vehicle.mechL
+      : v.kind === 'mechXL' ? config.vehicle.mechXL
+      : config.vehicle.spaceship
     const boost = input.held.boost ? 1.4 : 1
     const maxSpeed = cfg.maxSpeed * boost
 

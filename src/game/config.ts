@@ -139,9 +139,14 @@ export const config = {
     hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
     speeder: { accel: 56, maxSpeed: 58, reverse: 12, turn: 2.4, hoverHeight: 0.9, bob: 0.1 },
     spaceship: { accel: 30, maxSpeed: 50, turn: 1.5, hoverHeight: 2.2 },
-    // The Blue Titan walker: heavy and powerful. Walks the ground (hoverHeight 0),
-    // higher top speed than on foot, ground-shaking stomp on boost.
-    titan: { accel: 34, maxSpeed: 28, reverse: 12, turn: 1.6, hoverHeight: 0, bob: 0 },
+    // Three pilotable battle-mechs of growing size. They fly (drive: 'fly') and
+    // fire missiles. Bigger = stands taller, turns slower, hits a higher top
+    // speed. They park standing on the ground and lift off when piloted, so
+    // `hoverHeight` here is just the minimum flight clearance (feet above
+    // ground). `size` scales the model + camera framing + missile muzzle.
+    mechM: { accel: 34, maxSpeed: 44, turn: 1.7, hoverHeight: 1, size: 1.4 },
+    mechL: { accel: 30, maxSpeed: 52, turn: 1.25, hoverHeight: 1.5, size: 2.6 },
+    mechXL: { accel: 26, maxSpeed: 60, turn: 0.9, hoverHeight: 3, size: 6 },
     enterRange: 6,
   },
 

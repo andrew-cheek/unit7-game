@@ -4,7 +4,8 @@ import { World } from './World'
 import { Input } from './Input'
 import { Player } from './Player'
 import { Physics } from './Physics'
-import { Vehicles } from './Vehicles'
+import { Vehicles, isMech } from './Vehicles'
+import { Missiles } from './Missiles'
 import { NPCManager } from './NPC'
 import { Patrols } from './Patrols'
 import { Sky } from './Sky'
@@ -38,6 +39,7 @@ export class Game {
   readonly physics: Physics
   readonly player: Player
   readonly vehicles: Vehicles
+  readonly missiles: Missiles
   readonly npcs: NPCManager
   readonly patrols: Patrols
   readonly sky: Sky
@@ -75,6 +77,7 @@ export class Game {
 
   private netLine: THREE.Line
   private netTimer = 0
+  private missileCooldown = 0
   private scratchFwd = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
@@ -109,6 +112,7 @@ export class Game {
     this.player = new Player(this.engine.scene)
     this.player.object.position.copy(this.world.spawn)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
+    this.missiles = new Missiles(this.engine.scene)
     const npcCount = Math.round(config.npc.count * tier.densityScale)
     this.npcs = new NPCManager(this.engine.scene, this.physics, this.capturables, npcCount)
     this.zones = new Zones(this.engine.scene)
@@ -352,6 +356,7 @@ export class Game {
     this.physics.setSurfaces(ground, colliders)
     this.camera.setSolids(solids)
     this.vehicles.setVisible(zone === 'earth')
+    this.missiles.setVisible(zone === 'earth')
     this.npcs.setVisible(zone === 'earth')
     this.events.setVisible(zone === 'earth')
     this.patrols.setVisible(zone === 'earth')
@@ -470,27 +475,45 @@ export class Game {
   }
 
   /**
-   * Titan ground-pound: a heavy AoE stomp that captures every live target in a
-   * radius around the mech. The Titan's signature power - no aiming, just smash.
+   * Mech weapon: fire a pair of missiles forward from the shoulder pods. Muzzle
+   * height + spread scale with the mech's size. Detonation damage is applied in
+   * `detonate` when each missile lands.
    */
-  private titanStomp() {
+  private fireMissiles() {
     const v = this.vehicles.current
-    if (!v) return
-    const radius = 10
-    let hits = 0
+    if (!v || !isMech(v.kind)) return
+    if (this.missileCooldown > 0) return
+    this.missileCooldown = 0.45
+    const size = v.size
+    this.scratchFwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
+    const right = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw))
+    const muzzleY = v.position.y + 4.0 * size
+    for (const sx of [-1.3, 1.3]) {
+      const origin = new THREE.Vector3(
+        v.position.x + right.x * sx * size + this.scratchFwd.x * 1.2 * size,
+        muzzleY,
+        v.position.z + right.z * sx * size + this.scratchFwd.z * 1.2 * size,
+      )
+      // Slight upward lob so they arc out and come down on targets.
+      const dir = new THREE.Vector3(this.scratchFwd.x, 0.12, this.scratchFwd.z)
+      this.missiles.fire(origin, dir, 80, 2.8)
+    }
+    this.hud.banner = 'MISSILES AWAY'
+    this.bannerTimer = 0.8
+  }
+
+  /** Apply a missile blast: capture every live target inside the radius. */
+  private detonate(pos: THREE.Vector3, radius: number) {
+    const r2 = radius * radius
     for (const c of this.capturables) {
       if (!c.alive) continue
-      const dx = c.position.x - v.position.x
-      const dz = c.position.z - v.position.z
-      if (dx * dx + dz * dz > radius * radius) continue
+      const dx = c.position.x - pos.x
+      const dz = c.position.z - pos.z
+      if (dx * dx + dz * dz > r2) continue
       const award = c.capture()
       this.hud.score += Math.round(award * this.scoreMul)
       this.hud.captured += 1
-      hits++
     }
-    // A banner sells the impact.
-    this.hud.banner = hits > 0 ? `STOMP x${hits}` : 'STOMP'
-    this.bannerTimer = 1.2
   }
 
   private updateTransition(dt: number) {
@@ -611,18 +634,21 @@ export class Game {
       // drop unused edges so they don't fire on exit
       this.input.consumeEdge('morph')
       this.input.consumeEdge('chute')
-      // In the Titan, CAPTURE becomes a ground-pound stomp shockwave.
+      // In a mech, CAPTURE / FIRE launches missiles.
       if (this.input.consumeEdge('net')) {
-        if (this.vehicles.current?.kind === 'titan') this.titanStomp()
+        if (this.vehicles.current && isMech(this.vehicles.current.kind)) this.fireMissiles()
       }
     }
 
+    this.missileCooldown = Math.max(0, this.missileCooldown - dt)
     const gravity = config.zones[this.zone].gravity
     if (onEarth) this.vehicles.update(dt, this.input)
 
     if (this.vehicles.current) {
       this.player.object.position.copy(this.vehicles.current.position)
       this.focus.copy(this.vehicles.current.position)
+      // Frame the mech around its torso rather than its feet.
+      if (isMech(this.vehicles.current.kind)) this.focus.y += this.vehicles.current.size * 3.2
     } else {
       this.player.update(dt, this.input, this.physics, gravity)
       const lim = config.world.half - 1
@@ -636,6 +662,7 @@ export class Game {
     if (onEarth) this.npcs.update(dt, this.player.position)
     if (onEarth) this.events.update(dt, this.player.position)
     if (onEarth) this.patrols.update(dt)
+    this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
     this.zones.update(dt, this.zone)
@@ -671,8 +698,8 @@ export class Game {
       const sp = Math.hypot(v.velocity.x, v.velocity.z)
       const inv = sp > 0.1 ? 1 / sp : 0
       return {
-        // The Titan is tall, so pull the camera back further to frame it.
-        distanceScale: v.kind === 'titan' ? 2.8 : 1.8,
+        // Mechs are tall; pull the camera back proportionally to frame them.
+        distanceScale: isMech(v.kind) ? Math.min(5, 1.8 + v.size * 0.5) : 1.8,
         followYaw: v.yaw,
         moveX: v.velocity.x * inv,
         moveZ: v.velocity.z * inv,
@@ -741,8 +768,12 @@ export class Game {
 
     const piloting = !!this.vehicles.current
     let prompt: string | null = null
-    if (piloting) prompt = `Press G - Exit ${this.vehicles.currentName}`
-    else if (this.player.mode === 'robot') {
+    if (piloting) {
+      const cur = this.vehicles.current!
+      prompt = isMech(cur.kind)
+        ? `${cur.name} - Space/J fly, H fire, G exit`
+        : `Press G - Exit ${this.vehicles.currentName}`
+    } else if (this.player.mode === 'robot') {
       const near = this.vehicles.nearest(this.player.position)
       if (near) prompt = `Press G - ${near.name}`
     }
@@ -769,6 +800,7 @@ export class Game {
     this.input.dispose()
     this.player.dispose()
     this.vehicles.dispose()
+    this.missiles.dispose()
     this.npcs.dispose()
     this.patrols.dispose()
     this.sky.dispose()

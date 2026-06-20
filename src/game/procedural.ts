@@ -1253,21 +1253,25 @@ export function createSpeederBike(): VehicleModel {
 }
 
 /**
- * The Blue Titan: a large pilotable mech the player climbs into near the
- * portals. Roughly 4.5m tall, heavy blue armor with cyan trim, an open cockpit
- * the robot drops into, twin shoulder pods and a glowing core. Built as a
- * VehicleModel so it plugs straight into the vehicle system; the walk cycle is
- * driven by speed01 like the other walkers.
+ * A pilotable humanoid battle-mech, built at a base ~5m scale and then scaled by
+ * `opts.scale` so the same rig serves the medium / large / extra-large suits.
+ * Heavy armor with neon trim, an open cockpit, shoulder missile pods (with
+ * visible tubes), back + foot thrusters that glow for flight, and a pulsing
+ * reactor core. Returned as a VehicleModel; the legs tuck into a flight pose as
+ * speed rises.
  */
-export function createTitan(): VehicleModel {
+export interface MechOpts { scale?: number; armor?: number; trim?: number; core?: number }
+export function createMechSuit(opts: MechOpts = {}): VehicleModel {
+  const scale = opts.scale ?? 1
   const group = new THREE.Group()
   const mats: THREE.Material[] = []
-  const armor = new THREE.MeshStandardMaterial({ color: 0x2348c8, metalness: 0.85, roughness: 0.3 })
+  const armor = new THREE.MeshStandardMaterial({ color: opts.armor ?? 0x2348c8, metalness: 0.85, roughness: 0.3 })
   const dark = new THREE.MeshStandardMaterial({ color: 0x141a2c, metalness: 0.7, roughness: 0.45 })
   const steel = new THREE.MeshStandardMaterial({ color: 0x9fb4d8, metalness: 0.9, roughness: 0.28 })
   mats.push(armor, dark, steel)
-  const trim = glowMat(mats, config.palette.cyan, 3.2)
-  const coreGlow = glowMat(mats, 0x6fd8ff, 4)
+  const trim = glowMat(mats, opts.trim ?? config.palette.cyan, 3.2)
+  const coreGlow = glowMat(mats, opts.core ?? 0x6fd8ff, 4)
+  const missileMat = glowMat(mats, opts.trim ?? config.palette.orange, 2.6)
 
   const core = new THREE.Group()
   group.add(core)
@@ -1302,13 +1306,20 @@ export function createTitan(): VehicleModel {
   eye.position.set(0, 4.52, 0.35)
   core.add(eye)
 
-  // Shoulder pods.
+  // Shoulder pods with visible missile tubes pointing forward (+Z).
   const arms: THREE.Group[] = []
   const mkArm = (sx: number) => {
     const sh = new THREE.Group()
     sh.position.set(sx, 4.0, 0)
-    const pod = box(0.7, 0.8, 0.9, armor)
+    const pod = box(0.8, 0.85, 0.95, armor)
     sh.add(pod)
+    // Missile tube cluster on top of the shoulder pod.
+    for (const tx of [-0.22, 0.22]) {
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 10), missileMat)
+      tube.rotation.x = Math.PI / 2
+      tube.position.set(tx, 0.55, 0.4)
+      sh.add(tube)
+    }
     const upper = box(0.45, 1.0, 0.5, steel)
     upper.position.set(sx * 0.1, -0.8, 0)
     const fore = box(0.5, 0.9, 0.55, dark)
@@ -1339,6 +1350,24 @@ export function createTitan(): VehicleModel {
   }
   mkLeg(-0.6); mkLeg(0.6)
 
+  // Flight thrusters: additive cones on the back + under the feet. They flare
+  // with thrust (driven by speed01) so the mech reads as jet-powered.
+  const flameMat = new THREE.MeshBasicMaterial({ color: opts.core ?? 0x6fd8ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+  mats.push(flameMat)
+  const flames: THREE.Mesh[] = []
+  const addFlame = (x: number, y: number, z: number, len: number) => {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.3, len, 12), flameMat)
+    f.rotation.x = Math.PI // point down
+    f.position.set(x, y, z)
+    core.add(f)
+    flames.push(f)
+  }
+  addFlame(-0.6, 0.0, 0.0, 1.4) // under-foot
+  addFlame(0.6, 0.0, 0.0, 1.4)
+  addFlame(-0.5, 3.4, -0.8, 1.8) // back pack
+  addFlame(0.5, 3.4, -0.8, 1.8)
+
+  group.scale.setScalar(scale)
   shadowAll(group)
   const reactorMat = reactor.material as THREE.MeshStandardMaterial
   let phase = 0
@@ -1349,11 +1378,15 @@ export function createTitan(): VehicleModel {
       t += dt
       const s = clamp01(s01)
       phase += dt * (1.6 + s * 3.0)
-      legs.forEach((l, i) => { l.rotation.x = Math.sin(phase + (i ? Math.PI : 0)) * (0.08 + s * 0.45) })
-      arms.forEach((a, i) => { a.rotation.x = Math.sin(phase + (i ? 0 : Math.PI)) * (0.06 + s * 0.3) })
-      core.position.y = Math.abs(Math.sin(phase)) * 0.1 * s
-      core.rotation.z = Math.sin(phase) * 0.02 * s
+      // Tuck the legs back as it speeds up (flight pose); idle sway otherwise.
+      const tuck = s * 0.5
+      legs.forEach((l, i) => { l.rotation.x = -tuck + Math.sin(phase + (i ? Math.PI : 0)) * (0.06) * (1 - s) })
+      arms.forEach((a, i) => { a.rotation.x = Math.sin(phase + (i ? 0 : Math.PI)) * 0.05 })
+      core.rotation.x = -s * 0.18 // lean into the dive
       reactorMat.emissiveIntensity = 3.6 + Math.sin(t * 4) * 0.8
+      const flicker = 0.7 + Math.sin(t * 38) * 0.2
+      const fs = (0.35 + s * 0.65) * flicker
+      for (const f of flames) f.scale.set(0.6 + s * 0.4, fs, 0.6 + s * 0.4)
     },
     dispose: () => disposeGroup(group, mats),
   }
