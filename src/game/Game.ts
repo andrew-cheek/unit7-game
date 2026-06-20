@@ -78,6 +78,7 @@ export class Game {
   private netLine: THREE.Line
   private netTimer = 0
   private missileCooldown = 0
+  private invasionTriggered = false
   private scratchFwd = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
@@ -118,6 +119,10 @@ export class Game {
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
+    this.events.onSoak = () => {
+      this.hud.banner = 'SPLASH! SOAKED'
+      this.bannerTimer = 0.9
+    }
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
@@ -657,6 +662,14 @@ export class Game {
       this.focus.copy(this.player.position)
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
       if (onEarth && this.trans.phase === 'none') this.checkArcadePortals()
+    }
+
+    // When the sun finishes rising, the aliens invade (once).
+    if (onEarth && !this.invasionTriggered && this.world.dayFactor >= 0.96) {
+      this.invasionTriggered = true
+      this.events.startInvasion(this.player.position)
+      this.hud.banner = 'ALIEN INVASION'
+      this.bannerTimer = 2.4
     }
 
     if (onEarth) this.npcs.update(dt, this.player.position)

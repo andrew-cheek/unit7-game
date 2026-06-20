@@ -58,7 +58,11 @@ export class Vehicles {
     // A speeder bike parked just the other side of the spawn for fast travel.
     this.spawn('speeder', createSpeederBike(), new THREE.Vector3(-6, 0, 8), config.vehicle.speeder.hoverHeight, 1.1, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
-    this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -30), 0, 1.4, 'rocket')
+    this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -20), 0, 1.4, 'rocket')
+    // Drivable cars sitting up on the elevated highway (deck at z=-36, y~9).
+    // sampleGround in spawn() lands them on the deck surface.
+    this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    this.spawn('hovercar', createHovercar(), new THREE.Vector3(20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
     // Three battle-mechs lined up by the arcade portals so they're obvious at
     // spawn: medium (blue), large (crimson), extra-large building-sized (green).
     const mm = config.vehicle.mechM

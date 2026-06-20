@@ -34,11 +34,12 @@ const smooth01 = (x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// Earth dawn cycle: night -> warm sunrise. The sun starts low on the horizon
-// and climbs while the sky, fog and fills warm up. Begins after the first
-// `SUNRISE_DELAY` seconds and eases in over `SUNRISE_DUR`.
-const SUNRISE_DELAY = 8
-const SUNRISE_DUR = 16
+// Earth day cycle: a slow sunrise then sunset. The sun rises starting at
+// SUN_RISE_AT (climbing to full day at SUN_PEAK_AT), then sets from SUN_PEAK_AT
+// fading back to night over SUN_SET_DUR. Day factor 0 = night, 1 = full day.
+const SUN_RISE_AT = 5
+const SUN_PEAK_AT = 10
+const SUN_SET_DUR = 12
 const NIGHT = {
   skyTop: new THREE.Color(0x05070f),
   skyBot: new THREE.Color(0x180a2c),
@@ -87,6 +88,9 @@ export class World {
   // Shared unit roof caps (scaled per tower) for building-silhouette variety.
   private domeGeo = new THREE.SphereGeometry(0.5, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2)
   private spireGeo = new THREE.ConeGeometry(0.5, 1, 10)
+  private pyramidGeo = new THREE.ConeGeometry(0.5, 1, 4) // 4-sided crystal/pyramid cap
+  private crownGeo = new THREE.TorusGeometry(0.5, 0.12, 6, 16) // glowing roof ring
+  private tankGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12) // rooftop water tank
   private groundMat!: THREE.MeshStandardMaterial
   private windowTex: THREE.CanvasTexture[] = []
   private ownedMats: THREE.Material[] = []
@@ -97,6 +101,12 @@ export class World {
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
   private time = 0
+  private dawn = 0 // current day factor (0 night .. 1 full day)
+
+  /** Day-cycle factor, 0 = night, 1 = full day. Used to time the invasion. */
+  get dayFactor() {
+    return this.dawn
+  }
   // Atmosphere + set dressing.
   private rain?: THREE.Points
   private rainGeo?: THREE.BufferGeometry
@@ -125,6 +135,7 @@ export class World {
     this.buildCity()
     this.buildNearbyBuildings()
     this.buildElevatedPlatform()
+    this.buildDriveHighway()
     this.buildExtras()
     this.buildSkyline()
     this.buildLandmark()
@@ -160,7 +171,7 @@ export class World {
       t.anisotropy = config.tier.anisotropy
       this.ownedTex.push(t)
     })
-    this.ownedGeos.push(this.domeGeo, this.spireGeo)
+    this.ownedGeos.push(this.domeGeo, this.spireGeo, this.pyramidGeo, this.crownGeo, this.tankGeo)
   }
 
   private buildGround() {
@@ -197,7 +208,7 @@ export class World {
   }
 
   private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number) {
-    const facade = [0x12151f, 0x171b27, 0x1d2230, 0x10131c][Math.floor(hash01(seed * 1.7) * 4)]
+    const facade = [0x12151f, 0x171b27, 0x1d2230, 0x10131c, 0x222a38, 0x0d1a22, 0x241a2e][Math.floor(hash01(seed * 1.7) * 7)]
     const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
     tex.needsUpdate = true
     tex.anisotropy = config.tier.anisotropy
@@ -233,27 +244,57 @@ export class World {
     }
     // Roof-shape variety so the skyline isn't all flat boxes.
     const roof = hash01(seed * 4.4)
-    if (roof < 0.18) {
+    const neonPick = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime][Math.floor(hash01(seed * 6.1) * 5)]
+    if (roof < 0.14) {
       // Domed cap.
       const dome = new THREE.Mesh(this.domeGeo, mat)
       dome.scale.set(fx, Math.min(fx, fz) * 0.6, fz)
       dome.position.set(cx, h, cz)
       this.group.add(dome)
-    } else if (roof < 0.34) {
+    } else if (roof < 0.28) {
       // Spire cap (glowing).
       const spire = new THREE.Mesh(this.spireGeo, this.glow(config.palette.cyan, 2.4))
       const sh = 6 + hash01(seed * 4.9) * 10
       spire.scale.set(fx * 0.5, sh, fz * 0.5)
       spire.position.set(cx, h + sh / 2, cz)
       this.group.add(spire)
-    } else if (roof < 0.5) {
-      // Stepped setback (a smaller box stacked on top).
-      const step = new THREE.Mesh(this.boxGeo, mat)
-      const sh = 6 + hash01(seed * 4.1) * 12
-      step.scale.set(fx * 0.62, sh, fz * 0.62)
-      step.position.set(cx, h + sh / 2, cz)
-      step.castShadow = true
-      this.group.add(step)
+    } else if (roof < 0.42) {
+      // Ziggurat: two shrinking setbacks stacked into a stepped pyramid.
+      let sw = fx, sd = fz, sy = h
+      for (let k = 0; k < 2; k++) {
+        const sh = 4 + hash01(seed * (4.1 + k)) * 8
+        sw *= 0.64; sd *= 0.64
+        const step = new THREE.Mesh(this.boxGeo, mat)
+        step.scale.set(sw, sh, sd)
+        step.position.set(cx, sy + sh / 2, cz)
+        step.castShadow = config.tier.buildingShadows
+        this.group.add(step)
+        sy += sh
+      }
+    } else if (roof < 0.54) {
+      // Pyramid / tapered crystal cap (4-sided cone).
+      const pyr = new THREE.Mesh(this.pyramidGeo, hash01(seed * 7.3) > 0.5 ? this.glow(neonPick, 2.0) : mat)
+      const ph = Math.min(fx, fz) * (0.7 + hash01(seed * 5.5) * 0.8)
+      pyr.rotation.y = Math.PI / 4
+      pyr.scale.set(fx * 0.72, ph, fz * 0.72)
+      pyr.position.set(cx, h + ph / 2, cz)
+      this.group.add(pyr)
+    } else if (roof < 0.64) {
+      // Glowing crown ring around the roofline.
+      const crown = new THREE.Mesh(this.crownGeo, this.glow(neonPick, 2.8))
+      crown.rotation.x = Math.PI / 2
+      crown.scale.set(fx * 0.6, fz * 0.6, Math.max(fx, fz) * 0.18)
+      crown.position.set(cx, h + 0.6, cz)
+      this.group.add(crown)
+    } else if (roof < 0.74) {
+      // Rooftop water-tank / utility cluster on stilts.
+      for (let k = 0; k < 2; k++) {
+        const tank = new THREE.Mesh(this.tankGeo, k === 0 ? mat : this.glow(neonPick, 1.6))
+        const r = Math.min(fx, fz) * 0.18
+        tank.scale.set(r, 2 + hash01(seed * (3.3 + k)) * 2, r)
+        tank.position.set(cx + (k ? 1 : -1) * fx * 0.22, h + 1.4, cz + (hash01(seed * (2.2 + k)) - 0.5) * fz * 0.3)
+        this.group.add(tank)
+      }
     }
 
     // Rooftop antenna mast with a glowing tip on some towers (adds verticality).
@@ -374,6 +415,71 @@ export class World {
     arch.scale.set(width + 2, 0.6, 0.6)
     arch.position.set(px, 0.3, z0 - run - 1)
     this.group.add(arch)
+  }
+
+  /**
+   * A low elevated highway you can actually drive on: a long straight deck at a
+   * modest height with a down-ramp at each end, glowing edge rails and support
+   * pillars. The deck + ramps go into the ground/solid meshes so the hover
+   * vehicles raycast onto them and drive up and along it. Runs along X just
+   * south of the plaza so it's visible and reachable from spawn.
+   */
+  private buildDriveHighway() {
+    const z = -36 // over the south avenue (clear road gap between building rows)
+    const top = 9 // deck height (closer to the ground than the sky highway)
+    const half = 140 // deck spans x -half..half
+    const w = 14 // road width
+    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x161a24, metalness: 0.5, roughness: 0.5 }))
+    const deckMat2 = this.own(new THREE.MeshStandardMaterial({ color: 0x10131c, metalness: 0.5, roughness: 0.5 }))
+
+    const deck = new THREE.Mesh(this.boxGeo, deckMat)
+    deck.scale.set(half * 2, 1.0, w)
+    deck.position.set(0, top, z)
+    deck.castShadow = config.tier.buildingShadows
+    deck.receiveShadow = true
+    this.group.add(deck)
+    this.groundMeshes.push(deck)
+    this.solidMeshes.push(deck)
+    // (No full-length collider - you can walk/drive under the deck; only the
+    //  pillars below are solid, added with the pillars further down.)
+
+    // Centre lane line (glowing) + edge rails.
+    const lane = new THREE.Mesh(this.boxGeo, this.glow(config.palette.orange, 2.0))
+    lane.scale.set(half * 2, 0.06, 0.5)
+    lane.position.set(0, top + 0.56, z)
+    this.group.add(lane)
+    for (const off of [-w / 2 + 0.4, w / 2 - 0.4]) {
+      const rail = new THREE.Mesh(this.boxGeo, this.glow(off < 0 ? config.palette.cyan : config.palette.magenta, 2.6))
+      rail.scale.set(half * 2, 0.7, 0.4)
+      rail.position.set(0, top + 0.7, z + off)
+      this.group.add(rail)
+    }
+
+    // A down-ramp at each end so vehicles can climb up from the street.
+    const run = 30
+    const slope = Math.hypot(run, top)
+    const angle = Math.atan2(top, run)
+    for (const dir of [-1, 1]) {
+      const ramp = new THREE.Mesh(new THREE.BoxGeometry(slope, 0.8, w), deckMat2)
+      ramp.rotation.z = dir * angle
+      ramp.position.set(dir * (half + run / 2), top / 2, z)
+      ramp.castShadow = config.tier.buildingShadows
+      ramp.receiveShadow = true
+      this.group.add(ramp)
+      this.groundMeshes.push(ramp)
+      this.solidMeshes.push(ramp)
+    }
+
+    // Support pillars down to the street.
+    const pillarMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a1f2c, metalness: 0.6, roughness: 0.5 }))
+    for (let x = -half + 20; x <= half - 20; x += 40) {
+      const pillar = new THREE.Mesh(this.boxGeo, pillarMat)
+      pillar.scale.set(2.2, top, 2.2)
+      pillar.position.set(x, top / 2, z)
+      pillar.castShadow = config.tier.buildingShadows
+      this.group.add(pillar)
+      this.colliders.push(new THREE.Box3(new THREE.Vector3(x - 1.1, 0, z - 1.1), new THREE.Vector3(x + 1.1, top, z + 1.1)))
+    }
   }
 
   private buildPlazaNeon() {
@@ -776,10 +882,17 @@ export class World {
     this.sky.update(dt)
     this.sky.group.position.set(focus.x, 0, focus.z)
 
-    // Gradual sunrise on Earth: sun climbs from the horizon as the world warms.
-    const dawn = this.zone === 'earth' ? smooth01((this.time - SUNRISE_DELAY) / SUNRISE_DUR) : 0
+    // Day cycle on Earth: slow rise (5s -> 10s) then a slow set back to night.
+    let dawn = 0
+    if (this.zone === 'earth') {
+      if (this.time < SUN_RISE_AT) dawn = 0
+      else if (this.time < SUN_PEAK_AT) dawn = smooth01((this.time - SUN_RISE_AT) / (SUN_PEAK_AT - SUN_RISE_AT))
+      else dawn = 1 - smooth01((this.time - SUN_PEAK_AT) / SUN_SET_DUR)
+    }
+    this.dawn = dawn
+    // Sun climbs from the horizon at dawn and sinks again at dusk.
     const sunOffX = lerp(120, 60, dawn)
-    const sunOffY = lerp(24, 90, dawn)
+    const sunOffY = lerp(18, 92, dawn)
     this.sun.position.set(focus.x + sunOffX, focus.y + sunOffY, focus.z + 40)
     if (this.zone === 'earth') this.applyDawn(dawn)
     this.sunTarget.position.copy(focus)

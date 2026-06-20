@@ -3,6 +3,7 @@ import { config } from './config'
 import { createAlien, createBus, createCitizen, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { dampAngle, randRange } from './utils'
 import { OFFICE_ANCHORS } from './World'
+import { WaterBalloons } from './WaterBalloons'
 import type { Physics } from './Physics'
 import type { Capturable } from './Game'
 import type { PowerupKind } from './types'
@@ -24,6 +25,16 @@ interface Alien {
   alive: boolean
   cap: Capturable
   boarding: boolean // walking back to a departing ship to "board" and vanish
+  invader: boolean // part of the sunrise invasion: chases + lobs water balloons
+  throwTimer: number
+}
+interface Dropship {
+  model: VehicleModel
+  pos: THREE.Vector3
+  groundY: number
+  state: 'descend' | 'hover' | 'leave'
+  timer: number
+  dropped: boolean
 }
 interface Drone {
   model: VehicleModel
@@ -97,6 +108,14 @@ export class Events {
   private busRoute: BusWaypoint[] = []
   private ownedMats: THREE.Material[] = []
 
+  // Sunrise alien invasion.
+  private balloons: WaterBalloons
+  private invasionActive = false
+  private dropships: Dropship[] = []
+  private playerPos = new THREE.Vector3()
+  /** Fired when a water balloon bursts on the player. Game shows a banner. */
+  onSoak: (() => void) | null = null
+
   private shipModel: VehicleModel
   private ship = {
     phase: 'idle' as 'idle' | 'incoming' | 'landed' | 'leaving',
@@ -112,6 +131,7 @@ export class Events {
     this.capturables = capturables
     this.onPowerup = onPowerup
     scene.add(this.root)
+    this.balloons = new WaterBalloons(scene)
 
     const q = config.tier.densityScale
     for (let i = 0; i < config.events.powerupCount; i++) this.spawnPowerup(POWERUP_KINDS[i % 4])
@@ -128,6 +148,7 @@ export class Events {
 
   setVisible(v: boolean) {
     this.root.visible = v
+    this.balloons.setVisible(v)
   }
 
   // --- spawn helpers -------------------------------------------------------
@@ -270,6 +291,7 @@ export class Events {
 
   update(dt: number, playerPos: THREE.Vector3) {
     this.t += dt
+    this.playerPos.copy(playerPos)
     this.updatePowerups(dt, playerPos)
     this.updateDrones(dt)
     this.updateTraffic(dt)
@@ -277,7 +299,70 @@ export class Events {
     this.updateBuses(dt)
     this.updateCommuters(dt)
     this.updateShip(dt)
+    this.updateInvasion(dt)
     this.updateAliens(dt)
+    // Step + resolve water balloons; soak the player on a near hit.
+    this.balloons.update(
+      dt,
+      (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0,
+      (pos) => { if (Math.hypot(pos.x - this.playerPos.x, pos.z - this.playerPos.z) < 3.5) this.onSoak?.() },
+    )
+  }
+
+  /**
+   * Kick off the sunrise invasion: a wave of dropships descends around the
+   * player, each disgorging "invader" aliens that chase you and lob water
+   * balloons. Safe to call repeatedly - it only triggers once.
+   */
+  startInvasion(playerPos: THREE.Vector3) {
+    if (this.invasionActive) return
+    this.invasionActive = true
+    const n = config.tier.name === 'high' ? 4 : 2
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + 0.4
+      const r = 26 + Math.random() * 18
+      const x = playerPos.x + Math.cos(a) * r
+      const z = playerPos.z + Math.sin(a) * r
+      const model = createSpaceship()
+      model.group.scale.setScalar(1.5)
+      const groundY = this.physics.sampleGround(x, z, 80)?.y ?? 0
+      const pos = new THREE.Vector3(x, groundY + 110, z)
+      model.group.position.copy(pos)
+      this.root.add(model.group)
+      this.dropships.push({ model, pos, groundY, state: 'descend', timer: 0, dropped: false })
+    }
+  }
+
+  private updateInvasion(dt: number) {
+    for (let i = this.dropships.length - 1; i >= 0; i--) {
+      const s = this.dropships[i]
+      s.model.update(dt, 0)
+      s.model.group.rotation.y += dt * 0.5
+      if (s.state === 'descend') {
+        s.pos.y = approach(s.pos.y, s.groundY + 6, 40 * dt)
+        if (s.pos.y <= s.groundY + 6.5 && !s.dropped) {
+          s.dropped = true
+          s.state = 'hover'
+          s.timer = 6
+          const k = config.tier.name === 'high' ? 4 : 2
+          for (let j = 0; j < k; j++) {
+            const a = (j / k) * Math.PI * 2
+            this.spawnAlien(s.pos.x + Math.cos(a) * 4, s.pos.z + Math.sin(a) * 4, true)
+          }
+        }
+      } else if (s.state === 'hover') {
+        s.timer -= dt
+        if (s.timer <= 0) s.state = 'leave'
+      } else {
+        s.pos.y += (12 + (s.pos.y - s.groundY)) * dt
+        if (s.pos.y > s.groundY + 120) {
+          this.root.remove(s.model.group)
+          s.model.dispose()
+          this.dropships.splice(i, 1)
+        }
+      }
+      s.model.group.position.copy(s.pos)
+    }
   }
 
   private updateBuses(dt: number) {
@@ -493,8 +578,8 @@ export class Events {
     return n
   }
 
-  private spawnAlien(x: number, z: number) {
-    const model = createAlien()
+  private spawnAlien(x: number, z: number, invader = false) {
+    const model = invader ? createAlien({ color: 0x6a3bd0, eye: 0xff4d4d }) : createAlien()
     const pos = new THREE.Vector3(x, this.physics.sampleGround(x, z, 40)?.y ?? 0, z)
     model.group.position.copy(pos)
     this.root.add(model.group)
@@ -502,17 +587,19 @@ export class Events {
       pos,
       vel: new THREE.Vector3(),
       yaw: 0,
-      target: this.clearPoint(70),
+      target: invader ? this.playerPos.clone() : this.clearPoint(70),
       model,
       alive: true,
       boarding: false,
+      invader,
+      throwTimer: randRange(0.8, 2.2),
       cap: {
         position: pos,
         alive: true,
         capture: () => {
           alien.alive = false
           alien.cap.alive = false
-          return 120
+          return invader ? 200 : 120
         },
       },
     }
@@ -533,6 +620,25 @@ export class Events {
         this.aliens.splice(i, 1)
         continue
       }
+      // Invaders chase the player and lob water balloons; keep a stand-off gap.
+      if (a.invader && !a.boarding) {
+        const pdx = this.playerPos.x - a.pos.x
+        const pdz = this.playerPos.z - a.pos.z
+        const pd = Math.hypot(pdx, pdz)
+        const standoff = 11
+        a.target.set(
+          this.playerPos.x - (pd > 0.01 ? pdx / pd : 0) * standoff,
+          0,
+          this.playerPos.z - (pd > 0.01 ? pdz / pd : 0) * standoff,
+        )
+        a.throwTimer -= dt
+        if (a.throwTimer <= 0 && pd < 55) {
+          a.throwTimer = randRange(1.6, 3.0)
+          const origin = new THREE.Vector3(a.pos.x, a.pos.y + 1.6, a.pos.z)
+          const target = new THREE.Vector3(this.playerPos.x, this.playerPos.y + 0.5, this.playerPos.z)
+          this.balloons.throw(origin, target, 1.4)
+        }
+      }
       const tx = a.target.x - a.pos.x
       const tz = a.target.z - a.pos.z
       const td = Math.hypot(tx, tz)
@@ -544,12 +650,12 @@ export class Events {
           a.cap.alive = false
           continue
         }
-      } else if (td < 3) {
+      } else if (td < 3 && !a.invader) {
         a.target = this.clearPoint(70)
       }
-      const mv = a.boarding ? speed * 1.6 : speed // hustle to board
-      a.vel.x = approach(a.vel.x, td > 0.01 ? (tx / td) * mv : 0, 8 * dt)
-      a.vel.z = approach(a.vel.z, td > 0.01 ? (tz / td) * mv : 0, 8 * dt)
+      const mv = a.boarding ? speed * 1.6 : a.invader ? speed * 1.5 : speed // invaders hustle
+      a.vel.x = approach(a.vel.x, td > 0.5 ? (tx / td) * mv : 0, 8 * dt)
+      a.vel.z = approach(a.vel.z, td > 0.5 ? (tz / td) * mv : 0, 8 * dt)
       a.pos.x += a.vel.x * dt
       a.pos.z += a.vel.z * dt
       this.physics.resolveHorizontal(a.pos, a.vel, 0.4, 1.6)
@@ -584,6 +690,8 @@ export class Events {
     for (const b of this.buses) b.model.dispose()
     for (const c of this.commuters) c.model.dispose()
     for (const a of this.aliens) a.model.dispose()
+    for (const s of this.dropships) s.model.dispose()
+    this.balloons.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }
 }

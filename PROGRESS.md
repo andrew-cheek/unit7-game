@@ -442,3 +442,22 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - Camera pulls back proportionally to mech size and frames the torso; HUD/mobile
   hints updated (Space/J fly, H fire, G exit). Missiles hidden off-Earth and
   disposed with the game.
+
+## City variety, drivable low highway, day cycle + sunrise alien invasion
+
+- **More building types** (World.addBuilding): expanded facade palette and added
+  roof variety - ziggurat setbacks, 4-sided pyramid/crystal caps, glowing crown
+  rings, and rooftop water-tank/utility clusters (new shared geos).
+- **Drivable elevated highway** (World.buildDriveHighway): a low (~9m) straight
+  deck over the south avenue with down-ramps at both ends, glowing rails, a
+  centre line and support pillars. The deck + ramps are in the physics ground
+  meshes, so the hover-cars drive up the ramp and along it. Two drivable cars
+  park up on it; the rocket pad moved clear of the deck. Decorative sky highway
+  lowered to ~24m so it reads near the rooftops.
+- **Day cycle** (World): sun now rises starting at 5s (full day ~10s) then sets
+  over ~12s back to night, a slow fade. Exposed `dayFactor`.
+- **Sunrise alien invasion** (Events + WaterBalloons): when the sun finishes
+  rising, dropships descend around the player and release "invader" aliens that
+  chase you and lob arcing water balloons; a hit bursts into a splash and flashes
+  SOAKED. Invaders are worth more on capture. New WaterBalloons projectile system
+  (ballistic arc + splash). Triggers once, Earth only.

@@ -94,7 +94,7 @@ export class Sky {
     for (let i = 0; i < N; i++) {
       const a = (i / N) * Math.PI * 2
       const r = 140 + Math.sin(a * 3) * 50 // weaves in and out
-      const y = 40 + Math.sin(a * 2) * 12 // lower + flatter so it reads clearly
+      const y = 24 + Math.sin(a * 2) * 8 // lower, near the rooftops so it reads clearly
       ctrl.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r))
     }
     const curve = new THREE.CatmullRomCurve3(ctrl, true, 'catmullrom', 0.5)
