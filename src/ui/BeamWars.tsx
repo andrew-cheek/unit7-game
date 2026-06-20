@@ -12,8 +12,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 const COLS = 64
 const ROWS = 40
 const TICK_MS = 78 // beam step interval
-const BOT_RANDOM = 0.06 // chance the bot makes a non-optimal (but safe) move
-const FLOOD_CAP = 80 // max cells the bot's space-check explores (keeps it cheap)
+const BOT_RANDOM = 0.02 // small chance of a non-optimal (but safe) move so it stays beatable
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
 interface Vec { x: number; y: number }
@@ -39,6 +38,10 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
   const bot = useRef<Beam>(newBeam())
   const phaseRef = useRef<Phase>('ready')
   const timer = useRef<number | null>(null)
+  // Reusable scratch buffers for the bot's Voronoi search (no per-tick allocs).
+  const botDist = useRef<Int16Array>(new Int16Array(COLS * ROWS))
+  const playerDist = useRef<Int16Array>(new Int16Array(COLS * ROWS))
+  const bfsQueue = useRef<Int32Array>(new Int32Array(COLS * ROWS))
 
   const idx = (x: number, y: number) => y * COLS + x
   const free = (x: number, y: number) => x >= 0 && x < COLS && y >= 0 && y < ROWS && grid.current[idx(x, y)] === 0
@@ -61,39 +64,62 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     beam.next = d
   }, [])
 
-  // Flood-fill the open space reachable from (sx,sy), capped at FLOOD_CAP cells.
-  // This is what stops the bot driving itself into a pocket it can't escape -
-  // the main thing that made the old one-cell-lookahead bot feel braindead.
-  const floodCount = useCallback((sx: number, sy: number) => {
-    if (!free(sx, sy)) return 0
-    const seen = new Uint8Array(COLS * ROWS)
-    const stack = [sx, sy]
-    seen[idx(sx, sy)] = 1
-    let count = 0
-    while (stack.length && count < FLOOD_CAP) {
-      const y = stack.pop() as number
-      const x = stack.pop() as number
-      count++
-      const nbrs = [x + 1, y, x - 1, y, x, y + 1, x, y - 1]
-      for (let i = 0; i < nbrs.length; i += 2) {
-        const nx = nbrs[i]
-        const ny = nbrs[i + 1]
-        if (free(nx, ny) && !seen[idx(nx, ny)]) {
-          seen[idx(nx, ny)] = 1
-          stack.push(nx, ny)
-        }
-      }
+  // Breadth-first distance fill from (sx,sy) over free cells into `dist`
+  // (-1 = unreached). The source cell itself is the head: it's occupied, but we
+  // still expand from it. Uses the shared queue buffer - no allocation.
+  const bfsFill = useCallback((sx: number, sy: number, dist: Int16Array) => {
+    dist.fill(-1)
+    const q = bfsQueue.current
+    const g = grid.current
+    let head = 0
+    let tail = 0
+    const s = idx(sx, sy)
+    dist[s] = 0
+    q[tail++] = s
+    while (head < tail) {
+      const cur = q[head++]
+      const cx = cur % COLS
+      const cy = (cur - cx) / COLS
+      const d = dist[cur] + 1
+      // 4-neighbourhood
+      if (cx + 1 < COLS) { const n = cur + 1; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
+      if (cx - 1 >= 0) { const n = cur - 1; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
+      if (cy + 1 < ROWS) { const n = cur + COLS; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
+      if (cy - 1 >= 0) { const n = cur - COLS; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
     }
-    return count
   }, [])
 
-  // Bot picks among straight / left / right: avoids instant death, prefers the
-  // option with the most reachable open space, and leans toward the player when
-  // it's close (a light cut-off instinct). Still turns "dumb" a small fraction
-  // of the time so it stays beatable.
+  // Voronoi heuristic (the classic strong lightcycle eval): flood from both
+  // heads, count the cells each reaches first, and score the board by the
+  // bot's territory minus the player's. Maximizing this both denies the player
+  // space and keeps the bot out of dead ends - expert-ish play.
+  const evaluateBoard = useCallback((bx: number, by: number, px: number, py: number) => {
+    const bd = botDist.current
+    const pd = playerDist.current
+    bfsFill(bx, by, bd)
+    bfsFill(px, py, pd)
+    let botCells = 0
+    let playerCells = 0
+    let botReach = 0
+    const total = COLS * ROWS
+    for (let i = 0; i < total; i++) {
+      const a = bd[i]
+      const c = pd[i]
+      if (a >= 0) botReach++
+      if (a >= 0 && (c < 0 || a < c)) botCells++
+      else if (c >= 0 && (a < 0 || c < a)) playerCells++
+    }
+    // Almost no room left = effectively dead; bail out of that line.
+    if (botReach < 3) return -10000 + botReach
+    return botCells - playerCells
+  }, [bfsFill])
+
+  // Bot picks among straight / left / right by evaluating the board after each
+  // move, with a small chance of a random (still safe) move so it's beatable.
   const botThink = useCallback(() => {
     const b = bot.current
     if (!b.alive) return
+    const p = player.current
     const straight = b.dir
     const left = { x: b.dir.y, y: -b.dir.x }
     const right = { x: -b.dir.y, y: b.dir.x }
@@ -104,27 +130,24 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
       b.next = safe[Math.floor(Math.random() * safe.length)]
       return
     }
-    const p = player.current
+    const g = grid.current
     let best = safe[0]
     let bestScore = -Infinity
     for (const o of safe) {
       const nx = b.head.x + o.x
       const ny = b.head.y + o.y
-      // Reachable open space is the dominant term: don't trap yourself.
-      let s = floodCount(nx, ny)
-      // Slight bias to keep going straight so it reads as purposeful.
-      if (o === straight) s += 2
-      // Mild aggression: nudge toward the player's head when reasonably near,
-      // so it sometimes cuts you off. Weak enough that space always wins.
-      const dist = Math.abs(nx - p.head.x) + Math.abs(ny - p.head.y)
-      if (dist < 14) s += (14 - dist) * 0.25
-      if (s > bestScore) {
-        bestScore = s
+      const id = idx(nx, ny)
+      g[id] = BOT // tentatively lay the trail, evaluate, then undo
+      let score = evaluateBoard(nx, ny, p.head.x, p.head.y)
+      g[id] = 0
+      if (o === straight) score += 0.1 // tie-break: prefer not turning
+      if (score > bestScore) {
+        bestScore = score
         best = o
       }
     }
     b.next = best
-  }, [floodCount])
+  }, [evaluateBoard])
 
   const step = useCallback(() => {
     if (phaseRef.current !== 'playing') return
