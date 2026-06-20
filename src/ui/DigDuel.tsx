@@ -12,12 +12,12 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 
 const COLS = 140 // a large underground world; the camera shows only a window
 const ROWS = 100
-const VIEW = 56 // tiles across the short side of each panel (higher = zoomed out)
-const TUNNELS = 18 // branch tunnels carved at start (lower = more solid dirt)
-const TUNNEL_LEN = 150
+const VIEW = 66 // tiles across the short side of each panel (higher = zoomed out)
+const TUNNELS = 22 // branch tunnels carved at start (lower = more solid dirt)
+const TUNNEL_LEN = 170
 const DIG_BRUSH = 0.9
-const MOVE_OPEN = 6.5 // slower, more deliberate
-const MOVE_DIG = 3
+const MOVE_OPEN = 4.6 // slow, deliberate
+const MOVE_DIG = 2.2
 
 // Retro cave palette (per the agreed rendering spec).
 // Dense fine-grain browns tuned to the reference dirt.
@@ -29,7 +29,7 @@ const hash2D = (x: number, y: number) => {
   h = (h ^ (h >> 13)) * 1274126177
   return Math.abs(h ^ (h >> 16))
 }
-const BULLET_SPEED = 20
+const BULLET_SPEED = 15
 const MAX_HP = 6
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
@@ -147,6 +147,23 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     raf = requestAnimationFrame(frame)
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Size the canvas backing store to the real device resolution. Without this
+  // the canvas stays the default 300x150 and gets stretched to fill the screen,
+  // which is what made everything blurry and look zoomed in.
+  useEffect(() => {
+    const cv = canvasRef.current
+    if (!cv) return
+    const fit = () => {
+      const r = cv.getBoundingClientRect()
+      const dpr = Math.min(window.devicePixelRatio || 1, 3)
+      cv.width = Math.max(2, Math.round(r.width * dpr))
+      cv.height = Math.max(2, Math.round(r.height * dpr))
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
   }, [])
 
   const driveTank = (t: Tank, dir: Vec | null, dt: number) => {
