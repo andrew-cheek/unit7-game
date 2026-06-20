@@ -12,7 +12,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 const COLS = 64
 const ROWS = 40
 const TICK_MS = 78 // beam step interval
-const BOT_RANDOM = 0.16 // chance the bot makes a non-optimal (but safe) move
+const BOT_RANDOM = 0.06 // chance the bot makes a non-optimal (but safe) move
+const FLOOD_CAP = 80 // max cells the bot's space-check explores (keeps it cheap)
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
 interface Vec { x: number; y: number }
@@ -60,8 +61,36 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     beam.next = d
   }, [])
 
+  // Flood-fill the open space reachable from (sx,sy), capped at FLOOD_CAP cells.
+  // This is what stops the bot driving itself into a pocket it can't escape -
+  // the main thing that made the old one-cell-lookahead bot feel braindead.
+  const floodCount = useCallback((sx: number, sy: number) => {
+    if (!free(sx, sy)) return 0
+    const seen = new Uint8Array(COLS * ROWS)
+    const stack = [sx, sy]
+    seen[idx(sx, sy)] = 1
+    let count = 0
+    while (stack.length && count < FLOOD_CAP) {
+      const y = stack.pop() as number
+      const x = stack.pop() as number
+      count++
+      const nbrs = [x + 1, y, x - 1, y, x, y + 1, x, y - 1]
+      for (let i = 0; i < nbrs.length; i += 2) {
+        const nx = nbrs[i]
+        const ny = nbrs[i + 1]
+        if (free(nx, ny) && !seen[idx(nx, ny)]) {
+          seen[idx(nx, ny)] = 1
+          stack.push(nx, ny)
+        }
+      }
+    }
+    return count
+  }, [])
+
   // Bot picks among straight / left / right: avoids instant death, prefers the
-  // option with more open space, but turns "dumb" a fraction of the time.
+  // option with the most reachable open space, and leans toward the player when
+  // it's close (a light cut-off instinct). Still turns "dumb" a small fraction
+  // of the time so it stays beatable.
   const botThink = useCallback(() => {
     const b = bot.current
     if (!b.alive) return
@@ -75,26 +104,27 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
       b.next = safe[Math.floor(Math.random() * safe.length)]
       return
     }
-    // Shallow openness score: count free orthogonal neighbours of the next cell.
+    const p = player.current
     let best = safe[0]
-    let bestScore = -1
+    let bestScore = -Infinity
     for (const o of safe) {
       const nx = b.head.x + o.x
       const ny = b.head.y + o.y
-      let s = 0
-      if (free(nx + 1, ny)) s++
-      if (free(nx - 1, ny)) s++
-      if (free(nx, ny + 1)) s++
-      if (free(nx, ny - 1)) s++
+      // Reachable open space is the dominant term: don't trap yourself.
+      let s = floodCount(nx, ny)
       // Slight bias to keep going straight so it reads as purposeful.
-      if (o === straight) s += 0.5
+      if (o === straight) s += 2
+      // Mild aggression: nudge toward the player's head when reasonably near,
+      // so it sometimes cuts you off. Weak enough that space always wins.
+      const dist = Math.abs(nx - p.head.x) + Math.abs(ny - p.head.y)
+      if (dist < 14) s += (14 - dist) * 0.25
       if (s > bestScore) {
         bestScore = s
         best = o
       }
     }
     b.next = best
-  }, [])
+  }, [floodCount])
 
   const step = useCallback(() => {
     if (phaseRef.current !== 'playing') return
