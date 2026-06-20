@@ -83,19 +83,15 @@ export interface RobotColors {
 
 /** Stylized humanoid robot, feet at the group origin (y=0), facing +Z. */
 export function createRobot(colors: RobotColors = {}): RobotModel {
-  const body = colors.body ?? config.palette.robot
-  const trim = colors.trim ?? config.palette.robotTrim
-  const accent = colors.accent ?? config.palette.purple
+  // "Blue Titan" look: navy-blue plating, silver limbs/head, cyan glow.
+  const body = colors.body ?? 0x1c3c82 // navy blue
+  const trim = colors.trim ?? config.palette.cyan
+  const accent = colors.accent ?? 0xb8bec8 // silver
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: body, metalness: 0.85, roughness: 0.32 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.6, roughness: 0.5 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.7, roughness: 0.35 })
-  const trimMat = new THREE.MeshStandardMaterial({
-    color: 0x05060b,
-    emissive: trim,
-    emissiveIntensity: 3.4,
-    roughness: 0.4,
-  })
+  const bodyMat = new THREE.MeshStandardMaterial({ color: body, metalness: 0.6, roughness: 0.42 })
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x14161e, metalness: 0.5, roughness: 0.6 })
+  const accentMat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.72, roughness: 0.4 }) // silver
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: trim, emissiveIntensity: 3.0, roughness: 0.4 })
   const mats: THREE.Material[] = [bodyMat, darkMat, accentMat, trimMat]
 
   const group = new THREE.Group()
@@ -104,87 +100,108 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const core = new THREE.Group()
   group.add(core)
 
-  // Pelvis + torso
-  const pelvis = box(0.44, 0.24, 0.3, darkMat)
+  // Pelvis + bulky torso (blue) with silver shoulder pauldrons.
+  const pelvis = box(0.5, 0.26, 0.34, darkMat)
   pelvis.position.set(0, 1.0, 0)
   core.add(pelvis)
 
-  const torso = box(0.52, 0.62, 0.34, bodyMat)
-  torso.position.set(0, 1.34, 0)
+  const torso = box(0.64, 0.66, 0.42, bodyMat)
+  torso.position.set(0, 1.36, 0)
   core.add(torso)
 
-  const chestPlate = box(0.4, 0.34, 0.06, accentMat)
-  chestPlate.position.set(0, 1.4, 0.17)
-  core.add(chestPlate)
+  for (const sx of [-1, 1]) {
+    const pauldron = box(0.3, 0.28, 0.46, accentMat)
+    pauldron.position.set(sx * 0.46, 1.62, 0)
+    core.add(pauldron)
+  }
 
-  const chestCore = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 16), trimMat)
-  chestCore.rotation.x = Math.PI / 2
-  chestCore.position.set(0, 1.4, 0.21)
-  core.add(chestCore)
+  // Triangular glowing chest vent.
+  const vent = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.36, 3), trimMat)
+  vent.rotation.set(Math.PI, Math.PI, 0)
+  vent.position.set(0, 1.4, 0.22)
+  core.add(vent)
 
-  // Jetpack on the back (visual home for thruster FX later).
-  const pack = box(0.34, 0.4, 0.18, darkMat)
-  pack.position.set(0, 1.34, -0.24)
+  // Backpack/jetpack (dark) + thruster nozzles.
+  const pack = box(0.42, 0.46, 0.2, darkMat)
+  pack.position.set(0, 1.36, -0.27)
   core.add(pack)
-  for (const sx of [-0.09, 0.09]) {
+  for (const sx of [-0.1, 0.1]) {
     const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.12, 12), trimMat)
-    nozzle.position.set(sx, 1.1, -0.26)
+    nozzle.position.set(sx, 1.08, -0.29)
     core.add(nozzle)
   }
 
-  // Neck + head
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.1, 12), darkMat)
-  neck.position.set(0, 1.66, 0)
+  // Neck + silver wedge head with twin fins and a glowing visor.
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.1, 12), darkMat)
+  neck.position.set(0, 1.7, 0)
   core.add(neck)
 
-  const head = box(0.34, 0.32, 0.34, bodyMat)
-  head.position.set(0, 1.82, 0)
+  const head = box(0.4, 0.34, 0.4, accentMat)
+  head.position.set(0, 1.87, 0)
   core.add(head)
 
-  const visor = box(0.3, 0.11, 0.06, trimMat)
-  visor.position.set(0, 1.84, 0.17)
+  const visor = box(0.34, 0.1, 0.06, trimMat)
+  visor.position.set(0, 1.89, 0.2)
   core.add(visor)
 
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 8), darkMat)
-  antenna.position.set(0.1, 2.05, 0)
-  core.add(antenna)
-  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 10), trimMat)
-  antennaTip.position.set(0.1, 2.15, 0)
-  core.add(antennaTip)
+  for (const sx of [-1, 1]) {
+    const fin = box(0.1, 0.5, 0.34, accentMat)
+    fin.position.set(sx * 0.13, 2.2, -0.02)
+    fin.rotation.z = sx * 0.26
+    core.add(fin)
+  }
 
-  // Limb factory: a pivot Group at the joint with geometry hanging downward.
+  // Beefy legs: blue thigh, silver knee band, silver shin + foot.
   const makeLeg = (sx: number) => {
     const hip = new THREE.Group()
-    hip.position.set(sx, 0.96, 0)
-    const thigh = box(0.18, 0.44, 0.2, bodyMat)
-    thigh.position.set(0, -0.22, 0)
-    const shin = box(0.15, 0.44, 0.18, darkMat)
-    shin.position.set(0, -0.64, 0)
-    const foot = box(0.18, 0.12, 0.34, bodyMat)
-    foot.position.set(0, -0.88, 0.06)
-    hip.add(thigh, shin, foot)
+    hip.position.set(sx, 0.98, 0)
+    const thigh = box(0.26, 0.42, 0.3, bodyMat)
+    thigh.position.set(0, -0.2, 0)
+    const knee = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.3, 16), accentMat)
+    knee.rotation.z = Math.PI / 2
+    knee.position.set(0, -0.44, 0)
+    const shin = box(0.28, 0.46, 0.32, accentMat)
+    shin.position.set(0, -0.68, 0)
+    const foot = box(0.32, 0.18, 0.44, accentMat)
+    foot.position.set(0, -0.94, 0.07)
+    hip.add(thigh, knee, shin, foot)
     core.add(hip)
     return hip
   }
-  const makeArm = (sx: number) => {
+  // Arms: left = arm cannon, right = heavy gauntlet. Shoulder pivot swings.
+  const makeArm = (sx: number, cannon: boolean) => {
     const shoulder = new THREE.Group()
-    shoulder.position.set(sx, 1.52, 0)
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), accentMat)
-    const upper = box(0.14, 0.4, 0.16, bodyMat)
-    upper.position.set(0, -0.22, 0)
-    const fore = box(0.12, 0.36, 0.14, darkMat)
-    fore.position.set(0, -0.58, 0)
-    const hand = box(0.13, 0.14, 0.16, accentMat)
-    hand.position.set(0, -0.78, 0)
-    shoulder.add(ball, upper, fore, hand)
+    shoulder.position.set(sx, 1.56, 0)
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), accentMat)
+    const upper = box(0.2, 0.36, 0.22, accentMat)
+    upper.position.set(0, -0.24, 0)
+    shoulder.add(ball, upper)
+    if (cannon) {
+      const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.36, 16), bodyMat)
+      housing.rotation.x = Math.PI / 2
+      housing.position.set(0, -0.52, 0.06)
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.34, 16), accentMat)
+      barrel.rotation.x = Math.PI / 2
+      barrel.position.set(0, -0.52, 0.34)
+      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 12), trimMat)
+      muzzle.rotation.x = Math.PI / 2
+      muzzle.position.set(0, -0.52, 0.52)
+      shoulder.add(housing, barrel, muzzle)
+    } else {
+      const fore = box(0.22, 0.32, 0.24, bodyMat)
+      fore.position.set(0, -0.52, 0)
+      const fist = box(0.28, 0.26, 0.32, accentMat)
+      fist.position.set(0, -0.76, 0)
+      shoulder.add(fore, fist)
+    }
     core.add(shoulder)
     return shoulder
   }
 
-  const legL = makeLeg(-0.15)
-  const legR = makeLeg(0.15)
-  const armL = makeArm(-0.36)
-  const armR = makeArm(0.36)
+  const legL = makeLeg(-0.2)
+  const legR = makeLeg(0.2)
+  const armL = makeArm(-0.46, true)
+  const armR = makeArm(0.46, false)
 
   // Foldable wings for the plane morph: a pivot at the shoulder, geometry hung
   // outward so scaling the pivot extends the wing from the body.
