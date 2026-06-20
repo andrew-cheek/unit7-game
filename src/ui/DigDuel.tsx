@@ -20,7 +20,8 @@ const MOVE_OPEN = 11
 const MOVE_DIG = 4.5
 
 // Retro cave palette (per the agreed rendering spec).
-const ROCK = { void: '#050505', border: '#0500a8', base: '#9a642f', mid: '#7a502b', dark: '#4d351f', light: '#c18443', hi: '#d69a57', edge: '#2a1c13' }
+// Lower-contrast browns so the dirt reads as fine grain, not a checkerboard.
+const ROCK = { void: '#050505', border: '#0500a8', base: '#9a642f', mid: '#875729', dark: '#5a3c20', light: '#b07a40', hi: '#c98c4f', edge: '#241710' }
 
 // Deterministic integer hash for stable, non-flickering per-tile pixel texture.
 const hash2D = (x: number, y: number) => {
@@ -250,8 +251,8 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
       ctx.rect(rx, ry, pw, ph)
       ctx.clip()
 
-      // Cell size keeps a small window in BOTH dimensions (vast map feel).
-      const cell = Math.max(pw / 15, ph / 24)
+      // More, smaller tiles -> finer dirt grain and a more vast-feeling world.
+      const cell = Math.max(pw / 22, ph / 34)
       const halfW = pw / (2 * cell)
       const halfH = ph / (2 * cell)
       const camX = halfW * 2 >= COLS ? COLS / 2 : Math.max(halfW, Math.min(COLS - halfW, pan.cam.x))
@@ -277,14 +278,21 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
           if (dirt.current[di(x, y)] === 0) continue // tunnel: leave it black
           const px = sx(x)
           const py = sy(y)
-          // Base rock + deterministic quadrant pixel texture (clean, non-random).
+          // Base rock, then fine low-contrast grain. Each quadrant is usually
+          // base, occasionally a slightly darker/lighter brown - so the dirt
+          // looks uniform-but-textured rather than a high-contrast checkerboard.
           ctx.fillStyle = ROCK.base
           ctx.fillRect(px, py, cs, cs)
+          for (let qi = 0; qi < 4; qi++) {
+            const m = hash2D(x * 2 + (qi & 1), y * 2 + (qi >> 1)) % 5
+            if (m === 3) ctx.fillStyle = ROCK.mid
+            else if (m === 4) ctx.fillStyle = ROCK.light
+            else continue
+            ctx.fillRect(px + (qi & 1) * half, py + (qi >> 1) * half, half, half)
+          }
           const h = hash2D(x, y)
-          if (h % 3 === 0) { ctx.fillStyle = ROCK.mid; ctx.fillRect(px, py, half, half) }
-          if (h % 5 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + half, py + half, half, half) }
-          if (h % 7 === 0) { ctx.fillStyle = ROCK.light; ctx.fillRect(px + half, py, half, half) }
-          if (h % 19 === 0) { ctx.fillStyle = ROCK.hi; ctx.fillRect(px + half - hq / 2, py + half - hq / 2, hq, hq) } // chip / boulder
+          if (h % 11 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + (h % 2 ? half : 0), py + (h % 3 ? half : 0), hq, hq) } // dark grain
+          else if (h % 17 === 0) { ctx.fillStyle = ROCK.hi; ctx.fillRect(px + half - hq / 2, py + half - hq / 2, hq, hq) } // bright chip
           // Dark carved edges where rock meets a tunnel.
           ctx.fillStyle = ROCK.edge
           if (op(x - 1, y)) ctx.fillRect(px, py, t, cs)
