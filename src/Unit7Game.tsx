@@ -24,6 +24,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   const gameRef = useRef<Game | null>(null)
   const controlsRef = useRef<GameControls | null>(null)
   const [hud, setHud] = useState<HudState | null>(null)
+  const [err, setErr] = useState<string | null>(null)
   // Touch UI shows on touch-capable devices; `?touch` forces it for testing on desktop.
   const touch = useMemo(
     () => isTouchDevice() || (typeof location !== 'undefined' && location.search.includes('touch')),
@@ -34,10 +35,18 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     const container = containerRef.current
     if (!container) return
 
-    const game = new Game(container, config ?? {}, setHud)
-    gameRef.current = game
-    controlsRef.current = game.controls
-    game.start()
+    let game: Game
+    try {
+      game = new Game(container, config ?? {}, setHud)
+      gameRef.current = game
+      controlsRef.current = game.controls
+      game.start()
+    } catch (e) {
+      // Surface a startup crash on-screen instead of a silent black page.
+      console.error('[Unit7] startup failed:', e)
+      setErr(String((e as Error)?.stack || (e as Error)?.message || e))
+      return
+    }
 
     return () => {
       game.dispose()
@@ -50,6 +59,12 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
+      {err && (
+        <div style={errStyle}>
+          <div style={{ color: '#ff2bd0', fontWeight: 800, marginBottom: 8 }}>UNIT 7 — STARTUP ERROR</div>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{err}</pre>
+        </div>
+      )}
       {hud && !hud.intro && !hud.minigame && (
         <HUD hud={hud} touch={touch} onRestart={() => controlsRef.current?.restartIntro()} />
       )}
@@ -115,3 +130,13 @@ const skipBtn: CSSProperties = {
   borderRadius: 999,
 }
 const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}`
+const errStyle: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  zIndex: 50,
+  padding: 20,
+  overflow: 'auto',
+  background: 'rgba(5,6,11,0.96)',
+  color: 'rgba(223,238,255,0.92)',
+  font: '500 12px/1.5 ui-monospace, Menlo, monospace',
+}
