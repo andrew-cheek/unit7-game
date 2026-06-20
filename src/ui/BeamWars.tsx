@@ -13,7 +13,7 @@ const COLS = 64
 const ROWS = 40
 const TICK_MS = 78 // beam step interval
 const BOT_RANDOM = 0 // play the best line every move (no deliberate mistakes)
-const SEARCH_DEPTH = 6 // alpha-beta plies (3 moves each for bot + player)
+const SEARCH_DEPTH = 8 // alpha-beta plies (4 moves each for bot + player)
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
 interface Vec { x: number; y: number }
