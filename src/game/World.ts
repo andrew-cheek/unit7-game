@@ -33,6 +33,9 @@ export class World {
 
   private scene: THREE.Scene
   private boxGeo = new THREE.BoxGeometry(1, 1, 1)
+  // Shared unit roof caps (scaled per tower) for building-silhouette variety.
+  private domeGeo = new THREE.SphereGeometry(0.5, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2)
+  private spireGeo = new THREE.ConeGeometry(0.5, 1, 10)
   private groundMat!: THREE.MeshStandardMaterial
   private windowTex: THREE.CanvasTexture[] = []
   private ownedMats: THREE.Material[] = []
@@ -88,6 +91,7 @@ export class World {
       t.anisotropy = config.tier.anisotropy
       this.ownedTex.push(t)
     })
+    this.ownedGeos.push(this.domeGeo, this.spireGeo)
   }
 
   private buildGround() {
@@ -158,6 +162,31 @@ export class World {
       trim.position.set(cx, h + 0.1, cz)
       this.group.add(trim)
     }
+    // Roof-shape variety so the skyline isn't all flat boxes.
+    const roof = hash01(seed * 4.4)
+    if (roof < 0.18) {
+      // Domed cap.
+      const dome = new THREE.Mesh(this.domeGeo, mat)
+      dome.scale.set(fx, Math.min(fx, fz) * 0.6, fz)
+      dome.position.set(cx, h, cz)
+      this.group.add(dome)
+    } else if (roof < 0.34) {
+      // Spire cap (glowing).
+      const spire = new THREE.Mesh(this.spireGeo, this.glow(config.palette.cyan, 2.4))
+      const sh = 6 + hash01(seed * 4.9) * 10
+      spire.scale.set(fx * 0.5, sh, fz * 0.5)
+      spire.position.set(cx, h + sh / 2, cz)
+      this.group.add(spire)
+    } else if (roof < 0.5) {
+      // Stepped setback (a smaller box stacked on top).
+      const step = new THREE.Mesh(this.boxGeo, mat)
+      const sh = 6 + hash01(seed * 4.1) * 12
+      step.scale.set(fx * 0.62, sh, fz * 0.62)
+      step.position.set(cx, h + sh / 2, cz)
+      step.castShadow = true
+      this.group.add(step)
+    }
+
     // Rooftop antenna mast with a glowing tip on some towers (adds verticality).
     if (hash01(seed * 8.3) > 0.6) {
       const mast = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.5 })))

@@ -22,6 +22,7 @@ interface Alien {
   model: CharacterModel
   alive: boolean
   cap: Capturable
+  boarding: boolean // walking back to a departing ship to "board" and vanish
 }
 interface Drone {
   model: VehicleModel
@@ -307,7 +308,16 @@ export class Events {
     } else if (s.phase === 'landed') {
       g.rotation.y += dt * 0.3
       s.timer -= dt
-      if (s.timer <= 0) s.phase = 'leaving'
+      if (s.timer <= 0) {
+        s.phase = 'leaving'
+        // Call nearby aliens back to board the departing ship.
+        for (const a of this.aliens) {
+          if (a.alive && Math.hypot(a.pos.x - s.pos.x, a.pos.z - s.pos.z) < 16) {
+            a.boarding = true
+            a.target.set(s.pos.x, 0, s.pos.z)
+          }
+        }
+      }
     } else if (s.phase === 'leaving') {
       s.pos.y += (10 + (s.pos.y - s.groundY)) * dt
       g.position.copy(s.pos)
@@ -338,6 +348,7 @@ export class Events {
       target: this.clearPoint(70),
       model,
       alive: true,
+      boarding: false,
       cap: {
         position: pos,
         alive: true,
@@ -368,9 +379,20 @@ export class Events {
       const tx = a.target.x - a.pos.x
       const tz = a.target.z - a.pos.z
       const td = Math.hypot(tx, tz)
-      if (td < 3) a.target = this.clearPoint(70)
-      a.vel.x = approach(a.vel.x, td > 0.01 ? (tx / td) * speed : 0, 8 * dt)
-      a.vel.z = approach(a.vel.z, td > 0.01 ? (tz / td) * speed : 0, 8 * dt)
+      if (a.boarding) {
+        // Reached the ship: vanish (boarded). Cleaned up next frame by the
+        // dead-alien handling at the top of the loop.
+        if (td < 2.5) {
+          a.alive = false
+          a.cap.alive = false
+          continue
+        }
+      } else if (td < 3) {
+        a.target = this.clearPoint(70)
+      }
+      const mv = a.boarding ? speed * 1.6 : speed // hustle to board
+      a.vel.x = approach(a.vel.x, td > 0.01 ? (tx / td) * mv : 0, 8 * dt)
+      a.vel.z = approach(a.vel.z, td > 0.01 ? (tz / td) * mv : 0, 8 * dt)
       a.pos.x += a.vel.x * dt
       a.pos.z += a.vel.z * dt
       this.physics.resolveHorizontal(a.pos, a.vel, 0.4, 1.6)

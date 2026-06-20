@@ -166,8 +166,8 @@ export const config = {
   },
 
   events: {
-    spaceshipInterval: 22, // seconds between landing-ship events
-    aliensPerShip: 3,
+    spaceshipInterval: 16, // seconds between landing-ship events
+    aliensPerShip: 4,
     powerupCount: 14,
     droneCount: 12,
     trafficCount: 6,
