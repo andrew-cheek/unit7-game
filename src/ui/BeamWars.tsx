@@ -12,7 +12,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 const COLS = 64
 const ROWS = 40
 const TICK_MS = 78 // beam step interval
-const BOT_RANDOM = 0.02 // small chance of a non-optimal (but safe) move so it stays beatable
+const BOT_RANDOM = 0.01 // small chance of a non-optimal (but safe) move so it stays beatable
+const SEARCH_DEPTH = 6 // alpha-beta plies (3 moves each for bot + player)
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
 interface Vec { x: number; y: number }
@@ -39,8 +40,12 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
   const phaseRef = useRef<Phase>('ready')
   const timer = useRef<number | null>(null)
   // Reusable scratch buffers for the bot's Voronoi search (no per-tick allocs).
+  // Generation stamps let each flood skip clearing the whole board first.
   const botDist = useRef<Int16Array>(new Int16Array(COLS * ROWS))
   const playerDist = useRef<Int16Array>(new Int16Array(COLS * ROWS))
+  const botStamp = useRef<Int32Array>(new Int32Array(COLS * ROWS))
+  const playerStamp = useRef<Int32Array>(new Int32Array(COLS * ROWS))
+  const genCounter = useRef(0)
   const bfsQueue = useRef<Int32Array>(new Int32Array(COLS * ROWS))
 
   const idx = (x: number, y: number) => y * COLS + x
@@ -64,67 +69,125 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     beam.next = d
   }, [])
 
-  // Breadth-first distance fill from (sx,sy) over free cells into `dist`
-  // (-1 = unreached). The source cell itself is the head: it's occupied, but we
-  // still expand from it. Uses the shared queue buffer - no allocation.
-  const bfsFill = useCallback((sx: number, sy: number, dist: Int16Array) => {
-    dist.fill(-1)
+  // Breadth-first distance fill from (sx,sy) over free cells into `dist`,
+  // tagging visited cells with `gen` in `stamp` (so we never clear the board).
+  // The source cell is the head: occupied, but we still expand from it.
+  const bfsFill = useCallback((sx: number, sy: number, dist: Int16Array, stamp: Int32Array, gen: number) => {
     const q = bfsQueue.current
     const g = grid.current
     let head = 0
     let tail = 0
     const s = idx(sx, sy)
     dist[s] = 0
+    stamp[s] = gen
     q[tail++] = s
     while (head < tail) {
       const cur = q[head++]
       const cx = cur % COLS
       const cy = (cur - cx) / COLS
       const d = dist[cur] + 1
-      // 4-neighbourhood
-      if (cx + 1 < COLS) { const n = cur + 1; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
-      if (cx - 1 >= 0) { const n = cur - 1; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
-      if (cy + 1 < ROWS) { const n = cur + COLS; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
-      if (cy - 1 >= 0) { const n = cur - COLS; if (g[n] === 0 && dist[n] < 0) { dist[n] = d; q[tail++] = n } }
+      if (cx + 1 < COLS) { const n = cur + 1; if (g[n] === 0 && stamp[n] !== gen) { stamp[n] = gen; dist[n] = d; q[tail++] = n } }
+      if (cx - 1 >= 0) { const n = cur - 1; if (g[n] === 0 && stamp[n] !== gen) { stamp[n] = gen; dist[n] = d; q[tail++] = n } }
+      if (cy + 1 < ROWS) { const n = cur + COLS; if (g[n] === 0 && stamp[n] !== gen) { stamp[n] = gen; dist[n] = d; q[tail++] = n } }
+      if (cy - 1 >= 0) { const n = cur - COLS; if (g[n] === 0 && stamp[n] !== gen) { stamp[n] = gen; dist[n] = d; q[tail++] = n } }
     }
   }, [])
 
-  // Voronoi heuristic (the classic strong lightcycle eval): flood from both
-  // heads, count the cells each reaches first, and score the board by the
-  // bot's territory minus the player's. Maximizing this both denies the player
-  // space and keeps the bot out of dead ends - expert-ish play.
+  // Voronoi heuristic: flood from both heads and score the board by the cells
+  // the bot reaches first minus the cells the player reaches first. Maximizing
+  // it both denies the player space and keeps the bot out of dead ends.
   const evaluateBoard = useCallback((bx: number, by: number, px: number, py: number) => {
     const bd = botDist.current
     const pd = playerDist.current
-    bfsFill(bx, by, bd)
-    bfsFill(px, py, pd)
+    const bs = botStamp.current
+    const ps = playerStamp.current
+    const genB = ++genCounter.current
+    const genP = ++genCounter.current
+    bfsFill(bx, by, bd, bs, genB)
+    bfsFill(px, py, pd, ps, genP)
     let botCells = 0
     let playerCells = 0
     let botReach = 0
     const total = COLS * ROWS
     for (let i = 0; i < total; i++) {
-      const a = bd[i]
-      const c = pd[i]
+      const a = bs[i] === genB ? bd[i] : -1
+      const c = ps[i] === genP ? pd[i] : -1
       if (a >= 0) botReach++
       if (a >= 0 && (c < 0 || a < c)) botCells++
       else if (c >= 0 && (a < 0 || c < a)) playerCells++
     }
-    // Almost no room left = effectively dead; bail out of that line.
-    if (botReach < 3) return -10000 + botReach
+    if (botReach < 3) return -50000 + botReach // boxed in: effectively dead
     return botCells - playerCells
   }, [bfsFill])
 
-  // Bot picks among straight / left / right by evaluating the board after each
-  // move, with a small chance of a random (still safe) move so it's beatable.
+  // Alpha-beta minimax over alternating moves (bot maximizes, player minimizes)
+  // with the Voronoi score at the leaves. Trails are laid on the shared grid as
+  // we descend and undone on the way out. Modelling the player's replies is what
+  // lets the bot set up cut-offs that survive evasion - real expert play.
+  const search = useCallback(
+    (depth: number, botTurn: boolean, bx: number, by: number, bdx: number, bdy: number, px: number, py: number, pdx: number, pdy: number, alpha: number, beta: number): number => {
+      if (depth === 0) return evaluateBoard(bx, by, px, py)
+      const g = grid.current
+      if (botTurn) {
+        // dirs: straight, left, right (never reverse)
+        const dirs = [bdx, bdy, bdy, -bdx, -bdy, bdx]
+        let best = -Infinity
+        let any = false
+        for (let k = 0; k < 6; k += 2) {
+          const dx = dirs[k]
+          const dy = dirs[k + 1]
+          const nx = bx + dx
+          const ny = by + dy
+          if (!free(nx, ny)) continue
+          any = true
+          const id = idx(nx, ny)
+          g[id] = BOT
+          const v = search(depth - 1, false, nx, ny, dx, dy, px, py, pdx, pdy, alpha, beta)
+          g[id] = 0
+          if (v > best) best = v
+          if (best > alpha) alpha = best
+          if (alpha >= beta) break // prune
+        }
+        if (!any) return -50000 - depth // trapped; dying sooner is worse
+        return best
+      } else {
+        const dirs = [pdx, pdy, pdy, -pdx, -pdy, pdx]
+        let best = Infinity
+        let any = false
+        for (let k = 0; k < 6; k += 2) {
+          const dx = dirs[k]
+          const dy = dirs[k + 1]
+          const nx = px + dx
+          const ny = py + dy
+          if (!free(nx, ny)) continue
+          any = true
+          const id = idx(nx, ny)
+          g[id] = PLAYER
+          const v = search(depth - 1, true, bx, by, bdx, bdy, nx, ny, dx, dy, alpha, beta)
+          g[id] = 0
+          if (v < best) best = v
+          if (best < beta) beta = best
+          if (alpha >= beta) break // prune
+        }
+        if (!any) return 50000 + depth // player trapped: great for the bot
+        return best
+      }
+    },
+    [evaluateBoard],
+  )
+
+  // Bot move: alpha-beta search over the next several moves, with a tiny chance
+  // of a random (still safe) move so a perfect line can't be memorised.
   const botThink = useCallback(() => {
     const b = bot.current
     if (!b.alive) return
     const p = player.current
-    const straight = b.dir
-    const left = { x: b.dir.y, y: -b.dir.x }
-    const right = { x: -b.dir.y, y: b.dir.x }
-    const options = [straight, left, right]
-    const safe = options.filter((o) => free(b.head.x + o.x, b.head.y + o.y))
+    const dirs = [b.dir.x, b.dir.y, b.dir.y, -b.dir.x, -b.dir.y, b.dir.x]
+    const safe: Vec[] = []
+    for (let k = 0; k < 6; k += 2) {
+      const d = { x: dirs[k], y: dirs[k + 1] }
+      if (free(b.head.x + d.x, b.head.y + d.y)) safe.push(d)
+    }
     if (safe.length === 0) return // doomed; keep going straight
     if (Math.random() < BOT_RANDOM) {
       b.next = safe[Math.floor(Math.random() * safe.length)]
@@ -133,21 +196,21 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     const g = grid.current
     let best = safe[0]
     let bestScore = -Infinity
-    for (const o of safe) {
-      const nx = b.head.x + o.x
-      const ny = b.head.y + o.y
+    for (const d of safe) {
+      const nx = b.head.x + d.x
+      const ny = b.head.y + d.y
       const id = idx(nx, ny)
-      g[id] = BOT // tentatively lay the trail, evaluate, then undo
-      let score = evaluateBoard(nx, ny, p.head.x, p.head.y)
+      g[id] = BOT
+      let score = search(SEARCH_DEPTH - 1, false, nx, ny, d.x, d.y, p.head.x, p.head.y, p.dir.x, p.dir.y, -Infinity, Infinity)
       g[id] = 0
-      if (o === straight) score += 0.1 // tie-break: prefer not turning
+      if (d.x === b.dir.x && d.y === b.dir.y) score += 0.1 // tie-break: go straight
       if (score > bestScore) {
         bestScore = score
-        best = o
+        best = d
       }
     }
     b.next = best
-  }, [evaluateBoard])
+  }, [search])
 
   const step = useCallback(() => {
     if (phaseRef.current !== 'playing') return
