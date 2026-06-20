@@ -33,6 +33,7 @@ export interface HudState {
   stamina: number // 0..1
   fuel: number // 0..1
   score: number
+  best: number // best score this device (persisted)
   captured: number
   speed: number // m/s
   altitude: number // m above ground

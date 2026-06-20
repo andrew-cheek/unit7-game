@@ -44,6 +44,12 @@ export class Engine {
   private saoPass: SAOPass | null = null
   private bokehPass: BokehPass | null = null
   private smaaPass: SMAAPass | null = null
+  // Adaptive resolution: scales the drawing-buffer pixel ratio up/down to hold
+  // a smooth frame rate. 1 = full (capped) res; floor keeps it from getting too
+  // soft. Re-evaluated on a timer so we don't reallocate buffers every frame.
+  private renderScale = 1
+  private adaptTimer = 0
+  private static readonly SCALE_FLOOR = 0.6
 
   constructor(container: HTMLElement, tier: QualityTier) {
     this.container = container
@@ -185,7 +191,45 @@ export class Engine {
     // Hit the catch-up cap: drop the leftover so we don't spiral after a hitch.
     if (steps === maxSteps) this.accumulator = 0
 
+    this.adapt(frame)
     this.composer.render()
+  }
+
+  /**
+   * Adaptive resolution: every second, nudge the render scale down when the
+   * frame rate is struggling and back up when there's headroom. This is the
+   * mobile "never drop below ~30fps" guarantee - it trades a little sharpness
+   * for a steady frame rate, then restores sharpness once the load eases.
+   */
+  private adapt(frame: number) {
+    this.adaptTimer += frame
+    if (this.adaptTimer < 1) return
+    this.adaptTimer = 0
+    const prev = this.renderScale
+    if (this.fps < 30 && this.renderScale > Engine.SCALE_FLOOR) {
+      this.renderScale = Math.max(Engine.SCALE_FLOOR, this.renderScale - 0.1)
+    } else if (this.fps > 52 && this.renderScale < 1) {
+      this.renderScale = Math.min(1, this.renderScale + 0.1)
+    }
+    if (Math.abs(this.renderScale - prev) > 0.001) this.applyResolution()
+  }
+
+  /** Effective drawing-buffer pixel ratio (device ratio, capped, then scaled). */
+  private effectiveDpr() {
+    return Math.min(window.devicePixelRatio || 1, this.pixelCap) * this.renderScale
+  }
+
+  private applyResolution() {
+    const w = Math.max(1, this.container.clientWidth)
+    const h = Math.max(1, this.container.clientHeight)
+    const dpr = this.effectiveDpr()
+    this.renderer.setPixelRatio(dpr)
+    this.renderer.setSize(w, h)
+    this.composer.setPixelRatio(dpr)
+    this.composer.setSize(w, h)
+    this.bloomPass.setSize(w, h)
+    this.saoPass?.setSize(w, h)
+    this.smaaPass?.setSize(w * dpr, h * dpr)
   }
 
   resize = () => {
@@ -194,13 +238,13 @@ export class Engine {
     const h = Math.max(1, this.container.clientHeight)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.pixelCap))
+    const dpr = this.effectiveDpr()
+    this.renderer.setPixelRatio(dpr)
     this.renderer.setSize(w, h)
-    this.composer.setPixelRatio(this.renderer.getPixelRatio())
+    this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
     this.bloomPass.setSize(w, h)
     this.saoPass?.setSize(w, h)
-    const dpr = this.renderer.getPixelRatio()
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }
 

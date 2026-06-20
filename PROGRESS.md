@@ -461,3 +461,21 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   chase you and lob arcing water balloons; a hit bursts into a splash and flashes
   SOAKED. Invaders are worth more on capture. New WaterBalloons projectile system
   (ballistic arc + splash). Triggers once, Earth only.
+
+## Mobile-focused performance + retention pass
+
+- **Adaptive resolution** (Engine): a 1s-cadence controller scales the drawing-
+  buffer pixel ratio down (floor 0.6) when smoothed FPS dips below 30 and back up
+  past 52, so weak devices hold a steady frame rate instead of dropping frames.
+- **Code-split minigames** (Unit7Game): BeamWars + DigDuel are `React.lazy`
+  dynamic imports (now ~9KB/13KB chunks fetched on portal entry) instead of being
+  bundled into the initial download. `base: './'` in preview keeps the chunk URLs
+  relative so they load on the githack subpath.
+- **Instanced skyline** (World.buildSkyline): the ~150-mesh distant city ring is
+  now two InstancedMeshes (bodies + per-instance-colored neon caps), a big draw-
+  call cut on the far field.
+- **Persistence** (storage.ts): localStorage profile (best score, lifetime
+  captures, credits). HUD shows BEST; best saves live, lifetime/credits on exit.
+- **Haptics**: navigator.vibrate on net capture, missile kills and getting soaked.
+- **Screen wake lock**: keeps the phone screen awake while playing, re-acquired on
+  tab focus. All guarded for unsupported devices.

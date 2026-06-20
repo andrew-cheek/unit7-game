@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
 import type { GameControls, HudState, Unit7Config } from './game/types'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
-import { BeamWars } from './ui/BeamWars'
-import { DigDuel } from './ui/DigDuel'
+
+// The arcade minigames are split into their own chunks and only fetched when a
+// portal is entered, so the initial city load stays light (important on mobile
+// over cellular). Suspense shows nothing while the small chunk streams in.
+const BeamWars = lazy(() => import('./ui/BeamWars').then((m) => ({ default: m.BeamWars })))
+const DigDuel = lazy(() => import('./ui/DigDuel').then((m) => ({ default: m.DigDuel })))
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -57,6 +61,32 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Keep the screen awake while playing (mobile). Re-acquire when the tab
+  // becomes visible again, since the OS drops the lock on blur. No-op where the
+  // Screen Wake Lock API is unavailable.
+  useEffect(() => {
+    type Sentinel = { release: () => Promise<void> }
+    const wl = (navigator as unknown as { wakeLock?: { request: (t: string) => Promise<Sentinel> } }).wakeLock
+    if (!wl) return
+    let sentinel: Sentinel | null = null
+    let cancelled = false
+    const acquire = async () => {
+      try {
+        if (document.visibilityState === 'visible') sentinel = await wl.request('screen')
+      } catch {
+        /* lock denied (e.g. low battery) - ignore */
+      }
+    }
+    const onVis = () => { if (!cancelled && document.visibilityState === 'visible' && !sentinel) acquire() }
+    acquire()
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVis)
+      sentinel?.release().catch(() => {})
+    }
+  }, [])
+
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
@@ -75,10 +105,14 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
-        <BeamWars touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        <Suspense fallback={null}>
+          <BeamWars touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
       )}
       {hud?.minigame === 'digduel' && controlsRef.current && (
-        <DigDuel touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        <Suspense fallback={null}>
+          <DigDuel touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
       )}
     </div>
   )

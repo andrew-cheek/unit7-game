@@ -17,6 +17,7 @@ import { CameraController } from './Camera'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
+import { loadProfile, saveProfile, type Profile } from './storage'
 import type { HudState, MinigameKind, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
@@ -27,6 +28,15 @@ export interface Capturable {
 }
 
 const NET_SEGMENTS = 22
+
+/** Short haptic pulse on capable devices (mobile). No-op where unsupported. */
+function vibrate(pattern: number | number[]) {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern)
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Top-level orchestrator. Owns the Engine and every gameplay subsystem, drives
@@ -79,6 +89,7 @@ export class Game {
   private netTimer = 0
   private missileCooldown = 0
   private invasionTriggered = false
+  private profile: Profile = loadProfile()
   private scratchFwd = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
@@ -122,6 +133,7 @@ export class Game {
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH! SOAKED'
       this.bannerTimer = 0.9
+      vibrate([30, 40, 30])
     }
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
@@ -165,7 +177,7 @@ export class Game {
     }
 
     this.hud = {
-      mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, captured: 0,
+      mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, captured: 0,
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
@@ -476,6 +488,7 @@ export class Game {
       const award = best.capture()
       this.hud.score += Math.round(award * this.scoreMul)
       this.hud.captured += 1
+      vibrate(25)
     }
   }
 
@@ -510,6 +523,7 @@ export class Game {
   /** Apply a missile blast: capture every live target inside the radius. */
   private detonate(pos: THREE.Vector3, radius: number) {
     const r2 = radius * radius
+    let hits = 0
     for (const c of this.capturables) {
       if (!c.alive) continue
       const dx = c.position.x - pos.x
@@ -518,7 +532,9 @@ export class Game {
       const award = c.capture()
       this.hud.score += Math.round(award * this.scoreMul)
       this.hud.captured += 1
+      hits++
     }
+    if (hits > 0) vibrate(40)
   }
 
   private updateTransition(dt: number) {
@@ -791,6 +807,13 @@ export class Game {
       if (near) prompt = `Press G - ${near.name}`
     }
 
+    // Track + persist the best score (only writes storage when it improves).
+    if (this.hud.score > this.profile.best) {
+      this.profile.best = this.hud.score
+      saveProfile(this.profile)
+    }
+    this.hud.best = this.profile.best
+
     this.hud.fps = Math.round(this.engine.fps)
     this.hud.stamina = this.player.stamina / config.player.staminaMax
     this.hud.fuel = this.player.fuel / config.jetpack.fuelMax
@@ -810,6 +833,10 @@ export class Game {
   }
 
   dispose() {
+    // Persist session takings into the lifetime profile (best is saved live).
+    this.profile.lifetimeCaptured += this.hud.captured
+    this.profile.credits += this.hud.score
+    saveProfile(this.profile)
     this.input.dispose()
     this.player.dispose()
     this.vehicles.dispose()

@@ -28,6 +28,7 @@ export const OFFICE_ANCHORS: OfficeAnchor[] = [
   { office: new THREE.Vector3(-48, 0, -10), door: new THREE.Vector3(-44, 0, -10), stop: new THREE.Vector3(-38, 0, -10), face: Math.PI / 2 },
 ]
 
+const ROT_NONE = new THREE.Quaternion() // identity rotation for instanced transforms
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const smooth01 = (x: number) => {
   const t = Math.min(1, Math.max(0, x))
@@ -542,9 +543,18 @@ export class World {
    *  reads through the fog as far-off city), for a sense of vast scale. */
   private buildSkyline() {
     const R = config.world.half + 90
-    const body = this.own(new THREE.MeshBasicMaterial({ color: 0x0a1124, fog: false }))
     const neon = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange]
     const n = config.tier.name === 'high' ? 72 : 38
+    // Instanced: the whole ring is two draw calls (bodies + neon caps) instead
+    // of ~150 meshes - a big draw-call saving on mobile for the far field.
+    const bodyMat = this.own(new THREE.MeshBasicMaterial({ color: 0x0a1124, fog: false }))
+    const capMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })) // tinted per-instance
+    const bodies = new THREE.InstancedMesh(this.boxGeo, bodyMat, n)
+    const caps = new THREE.InstancedMesh(this.boxGeo, capMat, n)
+    bodies.frustumCulled = false
+    caps.frustumCulled = false
+    const m = new THREE.Matrix4()
+    const col = new THREE.Color()
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2
       const r = R + hash01(i * 3.1) * 90
@@ -552,16 +562,16 @@ export class World {
       const w = 14 + hash01(i * 2.3) * 28
       const x = Math.cos(a) * r
       const z = Math.sin(a) * r
-      const t = new THREE.Mesh(this.boxGeo, body)
-      t.scale.set(w, h, w)
-      t.position.set(x, h / 2 - 10, z)
-      this.group.add(t)
-      // Neon roofline so the distant towers twinkle against the night sky.
-      const cap = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshBasicMaterial({ color: neon[i % neon.length], fog: false })))
-      cap.scale.set(w + 2, 3, w + 2)
-      cap.position.set(x, h - 10, z)
-      this.group.add(cap)
+      m.compose(new THREE.Vector3(x, h / 2 - 10, z), ROT_NONE, new THREE.Vector3(w, h, w))
+      bodies.setMatrixAt(i, m)
+      m.compose(new THREE.Vector3(x, h - 10, z), ROT_NONE, new THREE.Vector3(w + 2, 3, w + 2))
+      caps.setMatrixAt(i, m)
+      caps.setColorAt(i, col.setHex(neon[i % neon.length]))
     }
+    bodies.instanceMatrix.needsUpdate = true
+    caps.instanceMatrix.needsUpdate = true
+    if (caps.instanceColor) caps.instanceColor.needsUpdate = true
+    this.group.add(bodies, caps)
   }
 
   /** One colossal arcology + a space-elevator tether, visible from anywhere as a

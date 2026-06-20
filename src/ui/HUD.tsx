@@ -46,6 +46,7 @@ export function HUD({ hud, touch, onRestart }: { hud: HudState; touch: boolean; 
         <div style={statRow}>
           <Stat label="ZONE" value={hud.zone.toUpperCase()} color={NEON.magenta} />
           <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
+          <Stat label="BEST" value={String(hud.best)} color={NEON.orange} />
           <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
         </div>
         <div style={statRow}>

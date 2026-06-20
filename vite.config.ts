@@ -18,6 +18,10 @@ export default defineConfig({
   plugins: [react()],
   assetsInclude: ['**/*.hdr', '**/*.glb', '**/*.gltf', '**/*.exr'],
   server: { host: true },
+  // Relative base for the githack preview so the entry, the lazy minigame chunks
+  // and any vendor chunk all resolve under the served subpath (not the domain
+  // root). Normal builds keep the default absolute base.
+  base: preview ? './' : '/',
   build: preview
     ? {
         rollupOptions: {
