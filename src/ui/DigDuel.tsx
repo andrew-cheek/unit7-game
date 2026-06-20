@@ -10,8 +10,11 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
  * runs; onExit returns to Humanoid City.
  */
 
-const COLS = 44
-const ROWS = 30
+const COLS = 60 // bigger field; a zoomed scrolling camera follows your tank
+const ROWS = 42
+const VIEW = 15 // how many cells span the short screen edge (smaller = closer)
+const TUNNELS = 6 // branch tunnels carved at start (lower = more solid dirt)
+const TUNNEL_LEN = 70
 const DIG_BRUSH = 0.9
 const MOVE_OPEN = 11
 const MOVE_DIG = 4.5
@@ -73,15 +76,15 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
         if (Math.random() < 0.3) { if (Math.random() < 0.5) x = cx(x + (Math.random() < 0.5 ? 1 : -1)); else y = cy(y + (Math.random() < 0.5 ? 1 : -1)) }
       }
     }
-    // Free-wandering branch tunnel.
+    // Free-wandering branch tunnel (thinner, so the field stays mostly dirt).
     const wander = (x: number, y: number, len: number) => {
       let d = r4()
-      for (let i = 0; i < len; i++) { blob(x, y, 1.3, 0); if (Math.random() < 0.2) d = r4(); x = cx(x + d.x); y = cy(y + d.y) }
+      for (let i = 0; i < len; i++) { blob(x, y, 1.1, 0); if (Math.random() < 0.2) d = r4(); x = cx(x + d.x); y = cy(y + d.y) }
     }
     const ps = { x: Math.floor(COLS / 2), y: ROWS - 4 }
     const bs = { x: Math.floor(COLS / 2), y: 4 }
     digTo(ps.x, ps.y, bs.x, bs.y) // main artery between the two tanks
-    for (let k = 0; k < 5; k++) wander(cx(4 + Math.random() * (COLS - 8)), cy(4 + Math.random() * (ROWS - 8)), 55)
+    for (let k = 0; k < TUNNELS; k++) wander(cx(4 + Math.random() * (COLS - 8)), cy(4 + Math.random() * (ROWS - 8)), TUNNEL_LEN)
     blob(ps.x, ps.y, 2.4, 0)
     blob(bs.x, bs.y, 2.4, 0)
     player.current = { pos: { ...ps }, dir: DIRS.up, hp: MAX_HP, cooldown: 0, flash: 0 }
@@ -212,24 +215,34 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     if (!ctx) return
     const W = cv.width
     const H = cv.height
-    const cell = Math.floor(Math.min(W / COLS, H / ROWS))
-    const ox = Math.floor((W - cell * COLS) / 2)
-    const oy = Math.floor((H - cell * ROWS) / 2)
-    const sx = (gx: number) => ox + gx * cell
-    const sy = (gy: number) => oy + gy * cell
+    // Zoomed-in camera that scrolls to follow the player tank, clamped to the map.
+    const cell = Math.max(13, Math.min(W, H) / VIEW)
+    const halfW = W / (2 * cell)
+    const halfH = H / (2 * cell)
+    const p0 = player.current.pos
+    const camX = halfW * 2 >= COLS ? COLS / 2 : Math.max(halfW, Math.min(COLS - halfW, p0.x))
+    const camY = halfH * 2 >= ROWS ? ROWS / 2 : Math.max(halfH, Math.min(ROWS - halfH, p0.y))
+    const sx = (gx: number) => W / 2 + (gx - camX) * cell
+    const sy = (gy: number) => H / 2 + (gy - camY) * cell
+    const cs = Math.ceil(cell) + 1 // fill size avoids seams at fractional cells
 
-    // Speckled brown dirt field with black carved tunnels (classic look).
+    // Speckled brown dirt field with black carved tunnels (classic look). Only
+    // the visible window is drawn.
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, W, H)
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
+    const x0 = Math.max(0, Math.floor(camX - halfW - 1))
+    const x1 = Math.min(COLS - 1, Math.ceil(camX + halfW + 1))
+    const y0 = Math.max(0, Math.floor(camY - halfH - 1))
+    const y1 = Math.min(ROWS - 1, Math.ceil(camY + halfH + 1))
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         if (dirt.current[di(x, y)] === 0) {
           ctx.fillStyle = '#070707' // tunnel
         } else {
           const k = 0.72 + noise.current[di(x, y)] * 0.5 // per-cell speckle
           ctx.fillStyle = `rgb(${Math.min(255, (152 * k) | 0)},${Math.min(255, (114 * k) | 0)},${Math.min(255, (58 * k) | 0)})`
         }
-        ctx.fillRect(sx(x), sy(y), cell, cell)
+        ctx.fillRect(sx(x), sy(y), cs, cs)
       }
     }
 
@@ -247,6 +260,33 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
 
     drawTank(ctx, sx, sy, cell, player.current, PLAYER_COLOR)
     drawTank(ctx, sx, sy, cell, bot.current, BOT_COLOR)
+
+    // Off-screen enemy indicator (edge arrow + distance) so the hunt stays fun.
+    const b = bot.current
+    const onScreen = b.pos.x >= x0 && b.pos.x <= x1 && b.pos.y >= y0 && b.pos.y <= y1
+    if (!onScreen) {
+      const ang = Math.atan2(b.pos.y - p0.y, b.pos.x - p0.x)
+      const rad = Math.min(W, H) / 2 - 40
+      const ex = W / 2 + Math.cos(ang) * rad
+      const ey = H / 2 + Math.sin(ang) * rad
+      ctx.save()
+      ctx.translate(ex, ey)
+      ctx.rotate(ang)
+      ctx.fillStyle = BOT_COLOR
+      ctx.shadowColor = BOT_COLOR
+      ctx.shadowBlur = 10
+      ctx.beginPath()
+      ctx.moveTo(13, 0)
+      ctx.lineTo(-9, 8)
+      ctx.lineTo(-9, -8)
+      ctx.closePath()
+      ctx.fill()
+      ctx.restore()
+      ctx.fillStyle = BOT_COLOR
+      ctx.font = '700 12px ui-monospace, Menlo, monospace'
+      ctx.textAlign = 'center'
+      ctx.fillText(`${Math.round(Math.hypot(b.pos.x - p0.x, b.pos.y - p0.y))}`, ex, ey - 14)
+    }
 
     if (player.current.flash > 0) {
       ctx.save()
