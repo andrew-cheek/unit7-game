@@ -10,14 +10,21 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
  * runs; onExit returns to Humanoid City.
  */
 
-const COLS = 60 // bigger field; a zoomed scrolling camera follows your tank
-const ROWS = 42
-const VIEW = 15 // how many cells span the short screen edge (smaller = closer)
-const TUNNELS = 6 // branch tunnels carved at start (lower = more solid dirt)
-const TUNNEL_LEN = 70
+const COLS = 88 // a large underground world; the camera shows only a small window
+const ROWS = 60
+const VIEW = 14 // how many cells span the short screen edge (smaller = closer)
+const TUNNELS = 9 // branch tunnels carved at start (lower = more solid dirt)
+const TUNNEL_LEN = 95
 const DIG_BRUSH = 0.9
 const MOVE_OPEN = 11
 const MOVE_DIG = 4.5
+
+// Stable per-cell feature hash (boulders / minerals / crystals) - deterministic
+// so the terrain detail doesn't shimmer between frames.
+const fhash = (x: number, y: number) => {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
+  return s - Math.floor(s)
+}
 const BULLET_SPEED = 30
 const MAX_HP = 6
 
@@ -226,25 +233,68 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     const sy = (gy: number) => H / 2 + (gy - camY) * cell
     const cs = Math.ceil(cell) + 1 // fill size avoids seams at fractional cells
 
-    // Speckled brown dirt field with black carved tunnels (classic look). Only
-    // the visible window is drawn.
-    ctx.fillStyle = '#000'
+    // Layered underground rock with black carved tunnels. Only the visible
+    // window is drawn. The brown is built from a few flat tone bands (not raw
+    // noise) plus sparse boulders, mineral flecks and glowing crystals, with
+    // shadowed edges where rock meets a tunnel so the caves feel carved.
+    ctx.fillStyle = '#05050a'
     ctx.fillRect(0, 0, W, H)
     const x0 = Math.max(0, Math.floor(camX - halfW - 1))
     const x1 = Math.min(COLS - 1, Math.ceil(camX + halfW + 1))
     const y0 = Math.max(0, Math.floor(camY - halfH - 1))
     const y1 = Math.min(ROWS - 1, Math.ceil(camY + halfH + 1))
+    const op = (nx: number, ny: number) => nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && dirt.current[ny * COLS + nx] === 0
+    const t = Math.max(1, cs * 0.24) // carved-edge shadow thickness
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
+        const px = sx(x)
+        const py = sy(y)
         if (dirt.current[di(x, y)] === 0) {
-          ctx.fillStyle = '#070707' // tunnel
-        } else {
-          const k = 0.72 + noise.current[di(x, y)] * 0.5 // per-cell speckle
-          ctx.fillStyle = `rgb(${Math.min(255, (152 * k) | 0)},${Math.min(255, (114 * k) | 0)},${Math.min(255, (58 * k) | 0)})`
+          ctx.fillStyle = '#070709' // tunnel / void
+          ctx.fillRect(px, py, cs, cs)
+          continue
         }
-        ctx.fillRect(sx(x), sy(y), cs, cs)
+        // Base copper-brown: quantized tone bands (less noisy) + faint depth shade.
+        const band = Math.floor(noise.current[di(x, y)] * 5) / 5
+        const k = (0.78 + band * 0.34) * (0.9 + (y / ROWS) * 0.16)
+        ctx.fillStyle = `rgb(${Math.min(255, (126 * k) | 0)},${Math.min(255, (88 * k) | 0)},${Math.min(255, (52 * k) | 0)})`
+        ctx.fillRect(px, py, cs, cs)
+
+        // Sparse, deterministic terrain features.
+        const f = fhash(x, y)
+        if (f > 0.982) {
+          ctx.save()
+          ctx.shadowColor = '#46e6ff'
+          ctx.shadowBlur = 9
+          ctx.fillStyle = '#bfeeff'
+          ctx.fillRect(px + cs * 0.36, py + cs * 0.36, cs * 0.3, cs * 0.3) // glowing crystal
+          ctx.restore()
+        } else if (f > 0.9) {
+          ctx.fillStyle = 'rgba(54,38,22,0.85)'
+          ctx.beginPath()
+          ctx.arc(px + cs / 2, py + cs / 2, cs * 0.42, 0, Math.PI * 2)
+          ctx.fill() // boulder
+        } else if (f < 0.06) {
+          ctx.fillStyle = 'rgba(206,166,116,0.45)'
+          ctx.fillRect(px + cs * 0.2, py + cs * 0.18, cs * 0.24, cs * 0.24) // mineral fleck
+        }
+
+        // Carved/shadowed edges toward open tunnels.
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'
+        if (op(x - 1, y)) ctx.fillRect(px, py, t, cs)
+        if (op(x + 1, y)) ctx.fillRect(px + cs - t, py, t, cs)
+        if (op(x, y - 1)) ctx.fillRect(px, py, cs, t)
+        if (op(x, y + 1)) ctx.fillRect(px, py + cs - t, cs, t)
       }
     }
+
+    // Atmosphere: darken the edges so the window feels like a small light in a
+    // vast cave (kept subtle so the centre stays readable).
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.62)
+    vg.addColorStop(0, 'rgba(0,0,0,0)')
+    vg.addColorStop(1, 'rgba(0,0,0,0.55)')
+    ctx.fillStyle = vg
+    ctx.fillRect(0, 0, W, H)
 
     drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: ROWS - 4 }, PLAYER_COLOR)
     drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: 4 }, BOT_COLOR)
