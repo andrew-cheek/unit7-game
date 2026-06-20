@@ -227,7 +227,7 @@ export class Game {
   private buildArcadePortals() {
     // Two neon doorways just ahead of the spawn, side by side.
     this.arcadePortals.push(this.buildPortal('beamwars', 0x27e7ff, 0x8a5cff, 'BEAM WARS', new THREE.Vector3(-6, 0, 12)))
-    this.arcadePortals.push(this.buildPortal('tunneler', 0xff8a1e, 0x9bff4d, 'TUNNELER', new THREE.Vector3(10, 0, 12)))
+    this.arcadePortals.push(this.buildPortal('digduel', 0xff8a1e, 0x9bff4d, 'DIG DUEL', new THREE.Vector3(10, 0, 12)))
   }
 
   private buildPortal(kind: MinigameKind, ringColor: number, discColor: number, label: string, pos: THREE.Vector3) {

@@ -6,7 +6,7 @@ import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
 import { BeamWars } from './ui/BeamWars'
-import { Tunneler } from './ui/Tunneler'
+import { DigDuel } from './ui/DigDuel'
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -77,8 +77,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {hud?.minigame === 'beamwars' && controlsRef.current && (
         <BeamWars touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
       )}
-      {hud?.minigame === 'tunneler' && controlsRef.current && (
-        <Tunneler touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+      {hud?.minigame === 'digduel' && controlsRef.current && (
+        <DigDuel touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
       )}
     </div>
   )
