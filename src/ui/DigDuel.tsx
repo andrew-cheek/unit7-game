@@ -38,6 +38,7 @@ interface Tank { pos: Vec; dir: Vec; hp: number; cooldown: number; flash: number
 interface Bullet { x: number; y: number; dx: number; dy: number; life: number; mine: boolean }
 
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }
+const BUILD = 'DD-7' // bump each deploy; shown on screen to confirm freshness
 const PLAYER_COLOR = '#7cff4f' // green tank, like the classic
 const BOT_COLOR = '#ff5036'
 
@@ -157,13 +158,19 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     if (!cv) return
     const fit = () => {
       const r = cv.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2) return
       const dpr = Math.min(window.devicePixelRatio || 1, 3)
-      cv.width = Math.max(2, Math.round(r.width * dpr))
-      cv.height = Math.max(2, Math.round(r.height * dpr))
+      const w = Math.round(r.width * dpr)
+      const h = Math.round(r.height * dpr)
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h }
     }
     fit()
+    // ResizeObserver fires immediately with the laid-out size, so this is
+    // reliable even if the first measure happened before layout.
+    const ro = new ResizeObserver(fit)
+    ro.observe(cv)
     window.addEventListener('resize', fit)
-    return () => window.removeEventListener('resize', fit)
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit) }
   }, [])
 
   const driveTank = (t: Tank, dir: Vec | null, dt: number) => {
@@ -366,6 +373,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
         <span style={{ color: '#9bff4d', textShadow: '0 0 14px #9bff4d' }}> DUEL</span>
       </div>
       <button style={exitBtn} onClick={onExit}>RETURN TO HUMANOID CITY</button>
+      <div style={buildTag}>{BUILD}</div>
 
       {phase === 'playing' && (
         <div style={readout}>
@@ -468,6 +476,7 @@ const root: CSSProperties = { position: 'absolute', inset: 0, zIndex: 30, backgr
 const canvasStyle: CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%' }
 const titleBar: CSSProperties = { position: 'absolute', top: 16, left: 0, right: 0, textAlign: 'center', font: '800 22px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.3em', pointerEvents: 'none' }
 const exitBtn: CSSProperties = { position: 'absolute', top: 14, right: 14, zIndex: 32, cursor: 'pointer', padding: '8px 14px', font: '700 11px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.12em', color: 'rgba(223,238,255,0.92)', background: 'rgba(8,12,24,0.7)', border: '1px solid rgba(255,138,30,0.55)', borderRadius: 999 }
+const buildTag: CSSProperties = { position: 'absolute', bottom: 6, left: 8, zIndex: 32, font: '700 10px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.1em', color: 'rgba(159,216,255,0.7)', pointerEvents: 'none' }
 const readout: CSSProperties = { position: 'absolute', top: 50, left: 14, zIndex: 31, display: 'flex', flexDirection: 'column', gap: 8 }
 const panel: CSSProperties = { position: 'relative', zIndex: 31, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '28px 34px', background: 'rgba(6,9,18,0.85)', border: '1px solid rgba(255,138,30,0.45)', borderRadius: 16, boxShadow: '0 0 40px rgba(255,138,30,0.18)', textAlign: 'center', maxWidth: 360 }
 const panelTitle: CSSProperties = { font: '800 30px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.18em', color: '#ff8a1e', textShadow: '0 0 16px #ff8a1e' }
