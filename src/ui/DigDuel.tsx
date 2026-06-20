@@ -24,6 +24,8 @@ interface Tank { pos: Vec; dir: Vec; hp: number; cooldown: number; flash: number
 interface Bullet { x: number; y: number; dx: number; dy: number; life: number; mine: boolean }
 
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }
+const PLAYER_COLOR = '#7cff4f' // green tank, like the classic
+const BOT_COLOR = '#ff5036'
 
 export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -31,6 +33,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   const [, force] = useState(0)
 
   const dirt = useRef<Uint8Array>(new Uint8Array(COLS * ROWS))
+  const noise = useRef<Float32Array>(new Float32Array(COLS * ROWS)) // per-cell dirt speckle
   const player = useRef<Tank>(newTank())
   const bot = useRef<Tank>(newTank())
   const bullets = useRef<Bullet[]>([])
@@ -54,18 +57,35 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   }
 
   const reset = useCallback(() => {
-    dirt.current.fill(0) // open arena
+    dirt.current.fill(1) // solid dirt field
     bullets.current = []
-    // Scatter destructible cover clumps.
-    const clumps = 18
-    for (let i = 0; i < clumps; i++) {
-      blob(4 + Math.random() * (COLS - 8), 5 + Math.random() * (ROWS - 10), 1.4 + Math.random() * 2.0, 1)
+    for (let i = 0; i < noise.current.length; i++) noise.current[i] = Math.random()
+    const cx = (x: number) => Math.max(2, Math.min(COLS - 3, x))
+    const cy = (y: number) => Math.max(2, Math.min(ROWS - 3, y))
+    const r4 = () => [DIRS.up, DIRS.down, DIRS.left, DIRS.right][Math.floor(Math.random() * 4)]
+    // Carve a meandering tunnel from a point toward a target.
+    const digTo = (x: number, y: number, tx: number, ty: number) => {
+      let guard = 0
+      while (Math.hypot(tx - x, ty - y) > 2 && guard++ < 700) {
+        blob(x, y, 1.3, 0)
+        if (Math.random() < 0.55) x = cx(x + (Math.sign(tx - x) || 1))
+        else y = cy(y + (Math.sign(ty - y) || 1))
+        if (Math.random() < 0.3) { if (Math.random() < 0.5) x = cx(x + (Math.random() < 0.5 ? 1 : -1)); else y = cy(y + (Math.random() < 0.5 ? 1 : -1)) }
+      }
     }
-    // Tanks start at opposite ends, facing in; clear their start spots.
-    player.current = { pos: { x: COLS / 2, y: ROWS - 4 }, dir: DIRS.up, hp: MAX_HP, cooldown: 0, flash: 0 }
-    bot.current = { pos: { x: COLS / 2, y: 4 }, dir: DIRS.down, hp: MAX_HP, cooldown: 0, flash: 0 }
-    blob(player.current.pos.x, player.current.pos.y, 2.4, 0)
-    blob(bot.current.pos.x, bot.current.pos.y, 2.4, 0)
+    // Free-wandering branch tunnel.
+    const wander = (x: number, y: number, len: number) => {
+      let d = r4()
+      for (let i = 0; i < len; i++) { blob(x, y, 1.3, 0); if (Math.random() < 0.2) d = r4(); x = cx(x + d.x); y = cy(y + d.y) }
+    }
+    const ps = { x: Math.floor(COLS / 2), y: ROWS - 4 }
+    const bs = { x: Math.floor(COLS / 2), y: 4 }
+    digTo(ps.x, ps.y, bs.x, bs.y) // main artery between the two tanks
+    for (let k = 0; k < 5; k++) wander(cx(4 + Math.random() * (COLS - 8)), cy(4 + Math.random() * (ROWS - 8)), 55)
+    blob(ps.x, ps.y, 2.4, 0)
+    blob(bs.x, bs.y, 2.4, 0)
+    player.current = { pos: { ...ps }, dir: DIRS.up, hp: MAX_HP, cooldown: 0, flash: 0 }
+    bot.current = { pos: { ...bs }, dir: DIRS.down, hp: MAX_HP, cooldown: 0, flash: 0 }
     held.current = null
     botStrafe.current = null
   }, [])
@@ -198,41 +218,35 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     const sx = (gx: number) => ox + gx * cell
     const sy = (gy: number) => oy + gy * cell
 
-    // Bright arena floor + grid.
-    ctx.fillStyle = '#0a0f1e'
+    // Speckled brown dirt field with black carved tunnels (classic look).
+    ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, W, H)
-    ctx.fillStyle = '#111a33'
-    ctx.fillRect(ox, oy, cell * COLS, cell * ROWS)
-    ctx.strokeStyle = 'rgba(39,231,255,0.06)'
-    ctx.lineWidth = 1
-    for (let x = 0; x <= COLS; x += 2) { ctx.beginPath(); ctx.moveTo(sx(x), oy); ctx.lineTo(sx(x), oy + cell * ROWS); ctx.stroke() }
-    for (let y = 0; y <= ROWS; y += 2) { ctx.beginPath(); ctx.moveTo(ox, sy(y)); ctx.lineTo(ox + cell * COLS, sy(y)); ctx.stroke() }
-
-    // Destructible cover.
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
-        if (dirt.current[di(x, y)] !== 1) continue
-        ctx.fillStyle = '#4a3b22'
+        if (dirt.current[di(x, y)] === 0) {
+          ctx.fillStyle = '#070707' // tunnel
+        } else {
+          const k = 0.72 + noise.current[di(x, y)] * 0.5 // per-cell speckle
+          ctx.fillStyle = `rgb(${Math.min(255, (152 * k) | 0)},${Math.min(255, (114 * k) | 0)},${Math.min(255, (58 * k) | 0)})`
+        }
         ctx.fillRect(sx(x), sy(y), cell, cell)
-        ctx.fillStyle = '#5e4d2e'
-        ctx.fillRect(sx(x), sy(y), cell, cell * 0.35)
       }
     }
 
-    drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: ROWS - 4 }, '#27e7ff')
-    drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: 4 }, '#ff2bd0')
+    drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: ROWS - 4 }, PLAYER_COLOR)
+    drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: 4 }, BOT_COLOR)
 
     for (const bl of bullets.current) {
       ctx.save()
-      ctx.shadowColor = bl.mine ? '#bfefff' : '#ffd0ec'
+      ctx.shadowColor = bl.mine ? PLAYER_COLOR : BOT_COLOR
       ctx.shadowBlur = 8
-      ctx.fillStyle = bl.mine ? '#eaffff' : '#ffe0f2'
+      ctx.fillStyle = '#ffffff'
       ctx.fillRect(sx(bl.x) - cell * 0.18, sy(bl.y) - cell * 0.18, cell * 0.55, cell * 0.55)
       ctx.restore()
     }
 
-    drawTank(ctx, sx, sy, cell, player.current, '#27e7ff')
-    drawTank(ctx, sx, sy, cell, bot.current, '#ff2bd0')
+    drawTank(ctx, sx, sy, cell, player.current, PLAYER_COLOR)
+    drawTank(ctx, sx, sy, cell, bot.current, BOT_COLOR)
 
     if (player.current.flash > 0) {
       ctx.save()
@@ -256,8 +270,8 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
 
       {phase === 'playing' && (
         <div style={readout}>
-          <Pips label="YOU" hp={player.current.hp} color="#27e7ff" />
-          <Pips label="ENEMY" hp={bot.current.hp} color="#ff2bd0" />
+          <Pips label="YOU" hp={player.current.hp} color={PLAYER_COLOR} />
+          <Pips label="ENEMY" hp={bot.current.hp} color={BOT_COLOR} />
         </div>
       )}
 
