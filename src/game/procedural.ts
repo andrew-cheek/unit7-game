@@ -981,6 +981,90 @@ export function createMech(accent = config.palette.magenta): CharacterModel {
   }
 }
 
+/**
+ * Massive four-legged walker war-machine (~18m tall) for distant/outskirt
+ * patrols - the "giant robot on the horizon" beat. Original design: a long
+ * command hull on splayed segmented legs with a sensor head and chin cannons,
+ * neon-trimmed to match the city. Legs animate a slow, heavy gait.
+ */
+export function createMassiveWalker(accent = config.palette.cyan): CharacterModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const body = new THREE.MeshStandardMaterial({ color: 0x1c2430, metalness: 0.85, roughness: 0.4 })
+  const plate = new THREE.MeshStandardMaterial({ color: 0x2c3748, metalness: 0.8, roughness: 0.45 })
+  mats.push(body, plate)
+  const trim = glowMat(mats, accent, 2.6)
+  const core = new THREE.Group()
+  group.add(core)
+
+  const hullY = 15
+  const hull = box(5.5, 4.5, 12, body)
+  hull.position.set(0, hullY, 0)
+  core.add(hull)
+  const belly = box(4.8, 2.2, 10, plate)
+  belly.position.set(0, hullY - 2.6, 0)
+  core.add(belly)
+  for (const sx of [-2.85, 2.85]) {
+    const strip = box(0.2, 0.5, 9, trim)
+    strip.position.set(sx, hullY, 0)
+    core.add(strip)
+  }
+  // Sensor head on a short neck at the front (+Z).
+  const neck = box(1.6, 1.6, 1.6, plate)
+  neck.position.set(0, hullY + 1.4, 6.4)
+  core.add(neck)
+  const head = box(3.2, 2.4, 3.0, body)
+  head.position.set(0, hullY + 2.6, 7.8)
+  core.add(head)
+  const eye = box(2.3, 0.5, 0.3, trim)
+  eye.position.set(0, hullY + 2.8, 9.35)
+  core.add(eye)
+  for (const sx of [-0.8, 0.8]) {
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 2.4, 10), body)
+    barrel.rotation.x = Math.PI / 2
+    barrel.position.set(sx, hullY + 1.4, 9.3)
+    core.add(barrel)
+  }
+
+  // Four long segmented legs: hip pivot on the hull, knee pivot partway down.
+  const hips: THREE.Group[] = []
+  const knees: THREE.Group[] = []
+  const mkLeg = (sx: number, sz: number) => {
+    const hip = new THREE.Group()
+    hip.position.set(sx, hullY - 1.5, sz)
+    const thigh = box(1.0, 7, 1.0, plate)
+    thigh.position.y = -3.5
+    const knee = new THREE.Group()
+    knee.position.y = -7
+    const shin = box(0.8, 7.5, 0.8, body)
+    shin.position.y = -3.75
+    const foot = box(1.6, 0.6, 2.2, plate)
+    foot.position.set(0, -7.5, 0.3)
+    knee.add(shin, foot)
+    hip.add(thigh, knee)
+    core.add(hip)
+    hips.push(hip)
+    knees.push(knee)
+  }
+  mkLeg(-2.6, 4); mkLeg(2.6, 4); mkLeg(-2.6, -4); mkLeg(2.6, -4)
+  shadowAll(group)
+  let phase = 0
+  return {
+    group,
+    update: (dt, s01) => {
+      const s = clamp01(s01)
+      phase += dt * (0.8 + s * 1.3) // slow and ponderous
+      hips.forEach((h, i) => {
+        const ph = phase + (i === 0 || i === 3 ? 0 : Math.PI)
+        h.rotation.x = Math.sin(ph) * (0.12 + s * 0.3)
+        knees[i].rotation.x = Math.max(0, Math.sin(ph + 0.6)) * (0.18 + s * 0.4)
+      })
+      core.position.y = Math.abs(Math.sin(phase * 2)) * 0.22 * s // heavy sway
+    },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
 /** Small sleek flier with a glowing engine. VehicleModel; Sky positions it. */
 export function createSmallShip(accent = config.palette.cyan): VehicleModel {
   const group = new THREE.Group()

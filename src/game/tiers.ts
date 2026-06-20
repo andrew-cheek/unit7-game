@@ -33,6 +33,11 @@ export interface QualityTier {
   shadowMapSize: number
   /** PCFSoft (true, nicer) vs PCF (false, cheaper). */
   softShadows: boolean
+  /** Let the (many) city buildings cast shadows. Off on mobile - big perf win. */
+  buildingShadows: boolean
+  /** Max fixed-timestep catch-up steps per frame. Low on mobile so a slow frame
+   *  can't trigger a multi-step hitch (it eases into mild slow-mo instead). */
+  maxSubSteps: number
 
   // --- scene density ---
   /** Multiplier applied to the configured crowd/prop counts. */
@@ -63,6 +68,8 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     shadows: true,
     shadowMapSize: 2048,
     softShadows: true,
+    buildingShadows: true,
+    maxSubSteps: 5,
     densityScale: 1,
     accentLights: true,
     starCount: 1800,
@@ -72,18 +79,20 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
   },
   low: {
     name: 'low',
-    pixelRatioCap: 1.5,
+    pixelRatioCap: 1.25, // fewer fragments on dense phone screens
     msaaSamples: 0,
     bloom: true, // kept on - it is the whole neon look - but cheaper params
     ssao: false,
     dof: false,
-    smaa: true, // cheap edge AA since there is no MSAA
+    smaa: false, // skip the extra full-screen AA pass on mobile
     shadows: true,
     shadowMapSize: 1024,
     softShadows: false,
-    densityScale: 0.5,
+    buildingShadows: false, // only the player/vehicles cast shadows on mobile
+    maxSubSteps: 2,
+    densityScale: 0.45,
     accentLights: false,
-    starCount: 700,
+    starCount: 500,
     anisotropy: 2,
     drawDistance: 220,
     envMapIntensity: 1.0,

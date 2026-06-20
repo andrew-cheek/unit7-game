@@ -161,6 +161,7 @@ export const config = {
     fleeRadius: 9, // aliens scatter when the player gets this close
     quadrupeds: 4, // four-legged robot walkers patrolling
     mechs: 2, // big mech walkers patrolling slowly
+    giants: 2, // massive walker war-machines on the outskirts
     smallShips: 6, // small ships looping between the towers
     bigShipInterval: 24, // seconds between big-ship flyovers
   },

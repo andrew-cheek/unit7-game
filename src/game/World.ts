@@ -60,9 +60,8 @@ export class World {
     this.buildGround()
     this.buildRoads()
     this.buildCity()
-    this.buildSignage()
+    this.buildNearbyBuildings()
     this.buildElevatedPlatform()
-    this.buildPlazaNeon()
     this.buildExtras()
     this.buildLights()
     this.addBoundaryColliders()
@@ -148,7 +147,7 @@ export class World {
     const mesh = new THREE.Mesh(this.boxGeo, mat)
     mesh.scale.set(fx, h, fz)
     mesh.position.set(cx, h / 2, cz)
-    mesh.castShadow = true
+    mesh.castShadow = config.tier.buildingShadows // off on mobile (perf)
     mesh.receiveShadow = true
     this.group.add(mesh)
     this.solidMeshes.push(mesh)
@@ -229,6 +228,24 @@ export class World {
   }
 
   /** Big holographic billboards on the avenues; they pulse in World.update. */
+  /** Cluster of smaller buildings around the spawn plaza (kept clear of the
+   *  portals/vehicles) so the immediate area has structures, not empty ground. */
+  private buildNearbyBuildings() {
+    const spots: Array<[number, number]> = [
+      [-26, 24], [24, 26], [-30, -6], [30, -4], [-16, 34], [16, 36],
+      [-38, 16], [38, 18], [-22, -28], [22, -30], [0, 42], [-40, -22], [40, -24],
+    ]
+    for (let i = 0; i < spots.length; i++) {
+      const [cx, cz] = spots[i]
+      if (Math.hypot(cx, cz) < 20) continue // keep the immediate spawn clear
+      const seed = 900 + i * 13
+      const fx = 8 + hash01(seed) * 8
+      const fz = 8 + hash01(seed * 1.7) * 8
+      const h = 8 + hash01(seed * 2.3) * 16 // short, neighborhood-scale
+      this.addBuilding(cx, cz, fx, fz, h, seed)
+    }
+  }
+
   private buildSignage() {
     const colors = [config.palette.cyan, config.palette.magenta, config.palette.orange, config.palette.lime, config.palette.purple]
     const spots: Array<[number, number, number]> = [
@@ -308,35 +325,12 @@ export class World {
   }
 
   /**
-   * Extra sci-fi dressing: walkable floating platforms, ground landing pads,
-   * walk-through energy gates and scattered glow crates. Static meshes only, so
-   * it's cheap; counts scale loosely with config.city.density.
+   * Ground-level dressing only (the sky is kept clear): a few lit landing pads
+   * and scattered glow crates. Static meshes, cheap; scales with city.density.
    */
   private buildExtras() {
     const d = Math.max(0, config.city.density)
     const neon = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime]
-    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a1f2c, metalness: 0.6, roughness: 0.4 }))
-
-    // Floating platforms you can jetpack up to and land on.
-    const platSpots: Array<[number, number, number]> = [
-      [-70, 18, 40], [60, 26, -30], [-40, 15, -84], [92, 22, 70], [22, 31, -112], [-104, 17, -44],
-    ]
-    for (let i = 0; i < platSpots.length; i++) {
-      if (i / platSpots.length > d) break
-      const [x, y, z] = platSpots[i]
-      const p = new THREE.Mesh(this.boxGeo, deckMat)
-      p.scale.set(13, 1, 13)
-      p.position.set(x, y, z)
-      p.castShadow = true
-      p.receiveShadow = true
-      this.group.add(p)
-      this.groundMeshes.push(p)
-      this.solidMeshes.push(p)
-      const edge = new THREE.Mesh(this.boxGeo, this.glow(neon[i % neon.length], 2.6))
-      edge.scale.set(13.6, 0.28, 13.6)
-      edge.position.set(x, y - 0.55, z)
-      this.group.add(edge)
-    }
 
     // Ground landing pads (lit rings).
     const padGeo = this.ownG(new THREE.CylinderGeometry(5, 5.4, 0.18, 28))
@@ -346,30 +340,6 @@ export class World {
       const pad = new THREE.Mesh(padGeo, this.glow(neon[i % neon.length], 2.2))
       pad.position.set(x, 0.1, z)
       this.group.add(pad)
-    }
-
-    // Walk-through energy gates (arch + translucent field).
-    const fieldGeo = this.ownG(new THREE.PlaneGeometry(5.6, 8))
-    const gateSpots: Array<[number, number, number]> = [[0, 36, 1.1], [-28, -8, 0.4], [40, -42, 2.2]]
-    for (let i = 0; i < gateSpots.length; i++) {
-      const [x, z, rot] = gateSpots[i]
-      const c = neon[i % neon.length]
-      const post = (sx: number) => {
-        const m = new THREE.Mesh(this.boxGeo, this.glow(c, 2.6))
-        m.scale.set(0.5, 9, 0.5)
-        m.position.set(x + Math.cos(rot) * sx * 3, 4.5, z - Math.sin(rot) * sx * 3)
-        this.group.add(m)
-      }
-      post(-1); post(1)
-      const bar = new THREE.Mesh(this.boxGeo, this.glow(c, 2.6))
-      bar.scale.set(6.6, 0.5, 0.5)
-      bar.position.set(x, 9, z)
-      bar.rotation.y = rot
-      this.group.add(bar)
-      const field = new THREE.Mesh(fieldGeo, this.own(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.16, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })))
-      field.position.set(x, 4.6, z)
-      field.rotation.y = rot
-      this.group.add(field)
     }
 
     // Scattered glow crates near the central plaza.

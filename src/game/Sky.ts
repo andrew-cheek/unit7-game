@@ -32,6 +32,12 @@ export class Sky {
   private bigTo = new THREE.Vector3()
   private bigT = 0
 
+  // Elevated winding "cyber highway" + the cars racing along it.
+  private hwSamples: { p: THREE.Vector3; tan: THREE.Vector3 }[] = []
+  private hwCars: { mesh: THREE.Mesh; t: number; speed: number }[] = []
+  private extraMats: THREE.Material[] = []
+  private extraGeos: THREE.BufferGeometry[] = []
+
   constructor(scene: THREE.Scene, densityScale: number) {
     this.scene = scene
     scene.add(this.group)
@@ -67,6 +73,67 @@ export class Sky {
     bigTrail.position.z = -26
     this.big.group.add(bigTrail)
     this.group.add(this.big.group)
+
+    this.buildHighway(densityScale)
+  }
+
+  /**
+   * A winding elevated highway high over the city with cars racing along it.
+   * The deck is translucent neon so you can see the bright cars zipping through
+   * it. A closed Catmull-Rom loop is pre-sampled once; cars just index along the
+   * sample table each frame (cheap - no per-frame curve math).
+   */
+  private buildHighway(densityScale: number) {
+    const ownM = <T extends THREE.Material>(m: T) => { this.extraMats.push(m); return m }
+    const ownG = <T extends THREE.BufferGeometry>(g: T) => { this.extraGeos.push(g); return g }
+
+    // Winding control loop, high in the sky, with rolling height for a "cool"
+    // undulating road.
+    const ctrl: THREE.Vector3[] = []
+    const N = 9
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2
+      const r = 150 + Math.sin(a * 3) * 55 // weaves in and out
+      const y = 58 + Math.sin(a * 2) * 16 // rolls up and down
+      ctrl.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r))
+    }
+    const curve = new THREE.CatmullRomCurve3(ctrl, true, 'catmullrom', 0.5)
+
+    // Pre-sample positions + tangents.
+    const S = 360
+    for (let i = 0; i < S; i++) {
+      const t = i / S
+      this.hwSamples.push({ p: curve.getPointAt(t), tan: curve.getTangentAt(t) })
+    }
+
+    // Translucent deck + glowing edge rails (see-through neon).
+    const deck = new THREE.Mesh(
+      ownG(new THREE.TubeGeometry(curve, S, 3.2, 4, true)),
+      ownM(new THREE.MeshBasicMaterial({ color: 0x12203a, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, fog: false })),
+    )
+    this.group.add(deck)
+    for (const off of [-3.2, 3.2]) {
+      const railPts = this.hwSamples.map((s) => {
+        const right = new THREE.Vector3().crossVectors(s.tan, new THREE.Vector3(0, 1, 0)).normalize()
+        return s.p.clone().addScaledVector(right, off)
+      })
+      const rail = new THREE.Mesh(
+        ownG(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPts, true), S, 0.35, 5, true)),
+        ownM(new THREE.MeshBasicMaterial({ color: off < 0 ? 0x27e7ff : 0xff2bd0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
+      )
+      this.group.add(rail)
+    }
+
+    // The cars: bright, additive so they glow through the translucent deck.
+    const carGeo = ownG(new THREE.BoxGeometry(1.4, 0.6, 3.0))
+    const colors = [0x9bff4d, 0xffffff, 0xffd27f, 0x7fd8ff]
+    const count = Math.round(16 * densityScale)
+    for (let i = 0; i < count; i++) {
+      const mat = ownM(new THREE.MeshBasicMaterial({ color: colors[i % colors.length], fog: false }))
+      const mesh = new THREE.Mesh(carGeo, mat)
+      this.group.add(mesh)
+      this.hwCars.push({ mesh, t: i / count, speed: (0.05 + Math.random() * 0.04) }) // fast laps
+    }
   }
 
   setVisible(v: boolean) {
@@ -88,6 +155,18 @@ export class Sky {
       s.model.update(dt, 1)
     }
     this.updateBig(dt)
+    this.updateHighway(dt)
+  }
+
+  private updateHighway(dt: number) {
+    const S = this.hwSamples.length
+    if (S === 0) return
+    for (const c of this.hwCars) {
+      c.t = (c.t + c.speed * dt) % 1
+      const s = this.hwSamples[Math.floor(c.t * S) % S]
+      c.mesh.position.copy(s.p).y += 0.5 // ride on top of the deck
+      c.mesh.lookAt(s.p.x + s.tan.x, s.p.y + 0.5 + s.tan.y, s.p.z + s.tan.z)
+    }
   }
 
   private updateBig(dt: number) {
@@ -128,6 +207,8 @@ export class Sky {
     for (const s of this.ships) s.model.dispose()
     this.big.dispose()
     this.bigTrailMat.dispose()
+    this.extraMats.forEach((m) => m.dispose())
+    this.extraGeos.forEach((g) => g.dispose())
     this.group.traverse((o) => {
       const m = o as THREE.Mesh
       if (m.geometry && (m.material as THREE.Material)?.transparent) m.geometry.dispose()

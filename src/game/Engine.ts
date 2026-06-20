@@ -168,8 +168,9 @@ export class Engine {
     this.accumulator += frame
 
     const fixed = config.render.fixedDelta
+    const maxSteps = this.tier.maxSubSteps
     let steps = 0
-    while (this.accumulator >= fixed && steps < config.render.maxSubSteps) {
+    while (this.accumulator >= fixed && steps < maxSteps) {
       this.elapsed += fixed
       if (this.onUpdate) {
         try {
@@ -182,7 +183,7 @@ export class Engine {
       steps++
     }
     // Hit the catch-up cap: drop the leftover so we don't spiral after a hitch.
-    if (steps === config.render.maxSubSteps) this.accumulator = 0
+    if (steps === maxSteps) this.accumulator = 0
 
     this.composer.render()
   }

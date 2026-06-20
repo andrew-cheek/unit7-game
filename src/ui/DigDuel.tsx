@@ -1,35 +1,29 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 
 /**
- * DIG DUEL - an original game in the classic "two tanks digging through dirt"
- * style. The signature feel of that genre, recreated from the mechanics (no
- * original code or assets used):
- *
- *  - You only see a small window around your own tank. The rest of the field is
- *    unknown black - you navigate blind through the tunnels you've carved.
- *  - One ENERGY bar is both your fuel and your health. Driving and especially
- *    digging drains it; firing costs a chunk; getting shot costs a lot. It only
- *    recharges while you sit on your home base, so you must keep returning.
- *  - Tunnels are tank-width; digging is slow and deliberate, cruising open
- *    tunnels is fast. Find the enemy tank and drain its energy to zero.
- *
- * Self-contained canvas game; the city is paused while it runs. onExit returns
- * to Humanoid City.
+ * DIG DUEL - an original take on the classic "two tanks digging through dirt"
+ * duel. You only see a window around your own tank, so you hunt the enemy
+ * through the tunnels you carve. To keep the hunt fun (not just wandering in the
+ * dark), a compass arrow always points to the enemy with its distance. One
+ * ENERGY bar is fuel + health: driving/digging/firing drain it, hits hurt, and
+ * your home base recharges it fast (with a slow trickle everywhere so you're
+ * never stuck). Drain the enemy to zero to win. Self-contained canvas game; the
+ * city is paused while it runs. All original - no external code or assets.
  */
 
-const COLS = 66
-const ROWS = 46
-const SIGHT = 7.5 // how far you can see around your tank (cells) - tight, on purpose
-const DIG_BRUSH = 1.0 // tank-width tunnels
-const MOVE_OPEN = 8 // cells/sec cruising a clear tunnel
-const MOVE_DIG = 3.8 // cells/sec chewing fresh dirt
-const BULLET_SPEED = 30
+const COLS = 52
+const ROWS = 34
+const SIGHT = 9
+const DIG_BRUSH = 1.0
+const MOVE_OPEN = 9.5
+const MOVE_DIG = 4.2
+const BULLET_SPEED = 34
 const ENERGY_MAX = 100
-const HIT_COST = 26 // energy lost per shell hit (~4 hits kills)
+const HIT_COST = 22
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
 interface Vec { x: number; y: number }
-interface Tank { pos: Vec; dir: Vec; energy: number; cooldown: number }
+interface Tank { pos: Vec; dir: Vec; energy: number; cooldown: number; flash: number }
 interface Bullet { x: number; y: number; dx: number; dy: number; life: number; mine: boolean }
 
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }
@@ -39,7 +33,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   const [phase, setPhase] = useState<Phase>('ready')
   const [, force] = useState(0)
 
-  const dirt = useRef<Uint8Array>(new Uint8Array(COLS * ROWS)) // 1 = dirt, 0 = dug
+  const dirt = useRef<Uint8Array>(new Uint8Array(COLS * ROWS))
   const player = useRef<Tank>(newTank())
   const bot = useRef<Tank>(newTank())
   const bullets = useRef<Bullet[]>([])
@@ -58,10 +52,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     const r2 = r * r
     for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
       for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
-        if (!inb(x, y)) continue
-        const dx = x - cx
-        const dy = y - cy
-        if (dx * dx + dy * dy <= r2) dirt.current[di(x, y)] = 0
+        if (inb(x, y) && (x - cx) ** 2 + (y - cy) ** 2 <= r2) dirt.current[di(x, y)] = 0
       }
     }
   }
@@ -69,12 +60,12 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   const reset = useCallback(() => {
     dirt.current.fill(1)
     bullets.current = []
-    const pb = pBase.current
-    const bb = bBase.current
-    player.current = { pos: { x: pb.x, y: pb.y }, dir: DIRS.up, energy: ENERGY_MAX, cooldown: 0 }
-    bot.current = { pos: { x: bb.x, y: bb.y }, dir: DIRS.down, energy: ENERGY_MAX, cooldown: 0 }
-    carve(pb.x, pb.y, 2.6)
-    carve(bb.x, bb.y, 2.6)
+    player.current = { pos: { ...pBase.current }, dir: DIRS.up, energy: ENERGY_MAX, cooldown: 0, flash: 0 }
+    bot.current = { pos: { ...bBase.current }, dir: DIRS.down, energy: ENERGY_MAX, cooldown: 0, flash: 0 }
+    carve(pBase.current.x, pBase.current.y, 2.6)
+    carve(bBase.current.x, bBase.current.y, 2.6)
+    // Carve a little starter passage so you're not walled in.
+    carve(pBase.current.x, pBase.current.y - 3, 1.4)
     held.current = null
   }, [])
 
@@ -82,10 +73,10 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   const start = useCallback(() => { reset(); phaseRef.current = 'playing'; setPhase('playing'); last.current = performance.now() }, [reset])
 
   const shoot = (t: Tank, mine: boolean) => {
-    if (t.energy < 8 || t.cooldown > 0) return
-    t.energy -= 7
-    t.cooldown = 0.32
-    bullets.current.push({ x: t.pos.x + t.dir.x, y: t.pos.y + t.dir.y, dx: t.dir.x, dy: t.dir.y, life: 30, mine })
+    if (t.energy < 6 || t.cooldown > 0) return
+    t.energy -= 6
+    t.cooldown = 0.25
+    bullets.current.push({ x: t.pos.x + t.dir.x, y: t.pos.y + t.dir.y, dx: t.dir.x, dy: t.dir.y, life: 28, mine })
   }
 
   // --- input ---
@@ -125,15 +116,15 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   }, [])
 
   const driveTank = (t: Tank, dir: Vec | null, dt: number, base: Vec) => {
-    const onBase = Math.hypot(t.pos.x - base.x, t.pos.y - base.y) < 2.8
-    if (onBase) t.energy = Math.min(ENERGY_MAX, t.energy + 70 * dt) // recharge only at base
     t.cooldown = Math.max(0, t.cooldown - dt)
+    t.flash = Math.max(0, t.flash - dt)
+    const onBase = Math.hypot(t.pos.x - base.x, t.pos.y - base.y) < 2.8
+    // Fast recharge on base; slow trickle everywhere so you can recover.
+    t.energy = Math.min(ENERGY_MAX, t.energy + (onBase ? 70 : 5) * dt)
     if (!dir || t.energy <= 0) return
-    const ax = Math.round(t.pos.x + dir.x * 0.8)
-    const ay = Math.round(t.pos.y + dir.y * 0.8)
-    const digging = isDirt(ax, ay)
+    const digging = isDirt(Math.round(t.pos.x + dir.x * 0.8), Math.round(t.pos.y + dir.y * 0.8))
     const speed = digging ? MOVE_DIG : MOVE_OPEN
-    t.energy -= (digging ? 12 : 3) * dt
+    t.energy -= (digging ? 10 : 2.5) * dt
     carve(t.pos.x + dir.x, t.pos.y + dir.y, DIG_BRUSH)
     t.pos.x = Math.max(0.5, Math.min(COLS - 1.5, t.pos.x + dir.x * speed * dt))
     t.pos.y = Math.max(0.5, Math.min(ROWS - 1.5, t.pos.y + dir.y * speed * dt))
@@ -156,10 +147,11 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
         const cx = Math.round(bl.x)
         const cy = Math.round(bl.y)
         if (!inb(cx, cy) || bl.life <= 0) { alive = false; break }
-        if (dirt.current[di(cx, cy)] === 1) dirt.current[di(cx, cy)] = 0 // shells chew dirt a little
+        if (dirt.current[di(cx, cy)] === 1) dirt.current[di(cx, cy)] = 0 // shells carve a firing channel
         const tgt = bl.mine ? b : p
-        if (Math.hypot(bl.x - tgt.pos.x, bl.y - tgt.pos.y) < 1.1) {
+        if (Math.hypot(bl.x - tgt.pos.x, bl.y - tgt.pos.y) < 1.2) {
           tgt.energy -= HIT_COST
+          tgt.flash = 0.3
           alive = false
           break
         }
@@ -178,21 +170,21 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     const p = player.current
     botBrain.current -= dt
     if (botBrain.current <= 0) {
-      botBrain.current = 0.3 + Math.random() * 0.3
+      botBrain.current = 0.25 + Math.random() * 0.3 // reaction delay (beatable)
       const dx = p.pos.x - b.pos.x
       const dy = p.pos.y - b.pos.y
-      if (b.energy < 30) {
+      if (b.energy < 28) {
         const tx = bBase.current.x - b.pos.x
         const ty = bBase.current.y - b.pos.y
         b.dir = Math.abs(tx) > Math.abs(ty) ? (tx > 0 ? DIRS.right : DIRS.left) : (ty > 0 ? DIRS.down : DIRS.up)
-      } else if (Math.random() < 0.8) {
+      } else if (Math.random() < 0.85) {
         b.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? DIRS.right : DIRS.left) : (dy > 0 ? DIRS.down : DIRS.up)
       } else {
         b.dir = [DIRS.up, DIRS.down, DIRS.left, DIRS.right][Math.floor(Math.random() * 4)]
       }
-      const aligned = (Math.abs(dx) < 1.6 && Math.sign(dy) === b.dir.y && b.dir.x === 0) ||
-        (Math.abs(dy) < 1.6 && Math.sign(dx) === b.dir.x && b.dir.y === 0)
-      if (aligned && Math.hypot(dx, dy) < 16 && Math.random() < 0.7) shoot(b, false)
+      const aligned = (Math.abs(dx) < 1.8 && Math.sign(dy) === b.dir.y && b.dir.x === 0) ||
+        (Math.abs(dy) < 1.8 && Math.sign(dx) === b.dir.x && b.dir.y === 0)
+      if (aligned && Math.hypot(dx, dy) < 20 && Math.random() < 0.75) shoot(b, false)
     }
     driveTank(b, b.dir, dt, bBase.current)
   }
@@ -205,45 +197,76 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     const W = cv.width
     const H = cv.height
     const cell = Math.floor(Math.min(W / COLS, H / ROWS))
-    const aw = cell * COLS
-    const ah = cell * ROWS
-    const ox = Math.floor((W - aw) / 2)
-    const oy = Math.floor((H - ah) / 2)
+    const ox = Math.floor((W - cell * COLS) / 2)
+    const oy = Math.floor((H - cell * ROWS) / 2)
+    const sx = (gx: number) => ox + gx * cell
+    const sy = (gy: number) => oy + gy * cell
 
-    // Everything unknown is black; only the window around the player is drawn.
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, W, H)
 
     const p = player.current
+    const b = bot.current
     const r = Math.ceil(SIGHT)
     for (let y = Math.max(0, Math.floor(p.pos.y - r)); y <= Math.min(ROWS - 1, Math.ceil(p.pos.y + r)); y++) {
       for (let x = Math.max(0, Math.floor(p.pos.x - r)); x <= Math.min(COLS - 1, Math.ceil(p.pos.x + r)); x++) {
         const dist = Math.hypot(x - p.pos.x, y - p.pos.y)
         if (dist > SIGHT) continue
-        const edge = dist > SIGHT - 1.4 ? 0.5 : 1 // soft vignette at the sight edge
-        const dug = dirt.current[di(x, y)] === 0
-        ctx.globalAlpha = edge
-        ctx.fillStyle = dug ? '#0c1422' : '#3a2c18'
-        ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
+        ctx.globalAlpha = dist > SIGHT - 1.6 ? 0.45 : 1
+        ctx.fillStyle = dirt.current[di(x, y)] === 0 ? '#0c1422' : '#3a2c18'
+        ctx.fillRect(sx(x), sy(y), cell, cell)
       }
     }
     ctx.globalAlpha = 1
 
-    // Bases (only visible when within the window).
-    drawBaseIfSeen(ctx, ox, oy, cell, pBase.current, '#27e7ff', p.pos)
-    drawBaseIfSeen(ctx, ox, oy, cell, bBase.current, '#ff2bd0', p.pos)
+    drawBaseIfSeen(ctx, sx, sy, cell, pBase.current, '#27e7ff', p.pos)
+    drawBaseIfSeen(ctx, sx, sy, cell, bBase.current, '#ff2bd0', p.pos)
 
-    // Bullets within view.
     for (const bl of bullets.current) {
       if (Math.hypot(bl.x - p.pos.x, bl.y - p.pos.y) > SIGHT) continue
       ctx.fillStyle = bl.mine ? '#bfefff' : '#ffd0ec'
-      ctx.fillRect(ox + bl.x * cell - 1, oy + bl.y * cell - 1, cell * 0.6, cell * 0.6)
+      ctx.fillRect(sx(bl.x) - 1, sy(bl.y) - 1, cell * 0.6, cell * 0.6)
     }
 
-    // Tanks (enemy only when inside the window - the whole point of the fog).
-    drawTank(ctx, ox, oy, cell, player.current, '#27e7ff')
-    if (Math.hypot(bot.current.pos.x - p.pos.x, bot.current.pos.y - p.pos.y) < SIGHT) {
-      drawTank(ctx, ox, oy, cell, bot.current, '#ff2bd0')
+    drawTank(ctx, sx, sy, cell, p, '#27e7ff')
+    const enemyDist = Math.hypot(b.pos.x - p.pos.x, b.pos.y - p.pos.y)
+    if (enemyDist < SIGHT) drawTank(ctx, sx, sy, cell, b, '#ff2bd0')
+
+    // Enemy compass: an arrow around the player pointing at the foe + distance.
+    const ang = Math.atan2(b.pos.y - p.pos.y, b.pos.x - p.pos.x)
+    const rad = SIGHT * cell * 0.86
+    const cxp = sx(p.pos.x) + cell / 2
+    const cyp = sy(p.pos.y) + cell / 2
+    const axx = cxp + Math.cos(ang) * rad
+    const ayy = cyp + Math.sin(ang) * rad
+    ctx.save()
+    ctx.translate(axx, ayy)
+    ctx.rotate(ang)
+    ctx.fillStyle = '#ff2bd0'
+    ctx.shadowColor = '#ff2bd0'
+    ctx.shadowBlur = 10
+    ctx.globalAlpha = enemyDist < SIGHT ? 0.5 : 1
+    ctx.beginPath()
+    ctx.moveTo(12, 0)
+    ctx.lineTo(-8, 7)
+    ctx.lineTo(-8, -7)
+    ctx.closePath()
+    ctx.fill()
+    ctx.restore()
+    ctx.globalAlpha = 1
+    ctx.fillStyle = 'rgba(255,43,208,0.9)'
+    ctx.font = '700 12px ui-monospace, Menlo, monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText(`${Math.round(enemyDist)}`, axx, ayy - 12)
+
+    // Damage vignette when you've just been hit.
+    if (p.flash > 0) {
+      ctx.save()
+      ctx.globalAlpha = Math.min(0.6, p.flash * 2)
+      ctx.strokeStyle = '#ff2b3c'
+      ctx.lineWidth = 18
+      ctx.strokeRect(0, 0, W, H)
+      ctx.restore()
     }
   }
 
@@ -259,21 +282,22 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
 
       {phase === 'playing' && (
         <div style={readout}>
-          <Meter label="ENERGY" v={player.current.energy / ENERGY_MAX} color="#27e7ff" />
+          <Meter label="YOUR ENERGY" v={player.current.energy / ENERGY_MAX} color="#27e7ff" />
+          <Meter label="ENEMY" v={bot.current.energy / ENERGY_MAX} color="#ff2bd0" />
         </div>
       )}
 
       {phase === 'ready' && (
         <Panel>
           <div style={panelTitle}>DIG DUEL</div>
-          <div style={panelText}>You only see what's around you. Dig through the dirt, hunt the enemy tank, and drain its energy. Recharge on your blue base - and don't get caught empty.</div>
-          <div style={panelHint}>{touch ? 'Pad to drive, FIRE to shoot' : 'Arrows / WASD drive · SPACE fires'}</div>
+          <div style={panelText}>Dig through the dirt and hunt the enemy tank. You only see what's around you - follow the pink arrow to find it. Fire to blast it; recharge on your blue base.</div>
+          <div style={panelHint}>{touch ? 'Pad drives · FIRE shoots' : 'Arrows / WASD drive · SPACE fires'}</div>
           <button style={primaryBtn} onClick={start}>START</button>
         </Panel>
       )}
       {phase === 'dead' && (
         <Panel>
-          <div style={{ ...panelTitle, color: '#ff2bd0', textShadow: '0 0 16px #ff2bd0' }}>TANK DESTROYED</div>
+          <div style={{ ...panelTitle, color: '#ff2bd0', textShadow: '0 0 16px #ff2bd0' }}>YOU WERE DESTROYED</div>
           <button style={primaryBtn} onClick={start}>REPLAY</button>
           <button style={ghostBtn} onClick={onExit}>RETURN TO HUMANOID CITY</button>
         </Panel>
@@ -301,21 +325,22 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   )
 }
 
-function newTank(): Tank { return { pos: { x: 0, y: 0 }, dir: DIRS.up, energy: ENERGY_MAX, cooldown: 0 } }
+function newTank(): Tank { return { pos: { x: 0, y: 0 }, dir: DIRS.up, energy: ENERGY_MAX, cooldown: 0, flash: 0 } }
 
-function drawTank(ctx: CanvasRenderingContext2D, ox: number, oy: number, cell: number, t: Tank, color: string) {
+type Proj = (g: number) => number
+function drawTank(ctx: CanvasRenderingContext2D, sx: Proj, sy: Proj, cell: number, t: Tank, color: string) {
   ctx.save()
   ctx.shadowColor = color
   ctx.shadowBlur = 12
-  ctx.fillStyle = color
+  ctx.fillStyle = t.flash > 0 ? '#ffffff' : color
   const s = cell * 1.7
-  ctx.fillRect(ox + t.pos.x * cell - s / 2, oy + t.pos.y * cell - s / 2, s, s)
+  ctx.fillRect(sx(t.pos.x) + cell / 2 - s / 2, sy(t.pos.y) + cell / 2 - s / 2, s, s)
   ctx.fillStyle = '#ffffff'
-  ctx.fillRect(ox + t.pos.x * cell - cell * 0.22 + t.dir.x * cell * 1.1, oy + t.pos.y * cell - cell * 0.22 + t.dir.y * cell * 1.1, cell * 0.44, cell * 0.44)
+  ctx.fillRect(sx(t.pos.x) + cell / 2 - cell * 0.22 + t.dir.x * cell * 1.1, sy(t.pos.y) + cell / 2 - cell * 0.22 + t.dir.y * cell * 1.1, cell * 0.44, cell * 0.44)
   ctx.restore()
 }
 
-function drawBaseIfSeen(ctx: CanvasRenderingContext2D, ox: number, oy: number, cell: number, c: Vec, color: string, eye: Vec) {
+function drawBaseIfSeen(ctx: CanvasRenderingContext2D, sx: Proj, sy: Proj, cell: number, c: Vec, color: string, eye: Vec) {
   if (Math.hypot(c.x - eye.x, c.y - eye.y) > SIGHT + 3) return
   ctx.save()
   ctx.globalAlpha = 0.55
@@ -323,7 +348,7 @@ function drawBaseIfSeen(ctx: CanvasRenderingContext2D, ox: number, oy: number, c
   ctx.shadowBlur = 16
   ctx.strokeStyle = color
   ctx.lineWidth = 2
-  ctx.strokeRect(ox + (c.x - 2.6) * cell, oy + (c.y - 2.6) * cell, cell * 5.2, cell * 5.2)
+  ctx.strokeRect(sx(c.x - 2.6), sy(c.y - 2.6), cell * 5.2, cell * 5.2)
   ctx.restore()
 }
 
@@ -333,7 +358,7 @@ function Meter({ label, v, color }: { label: string; v: number; color: string })
     <div style={{ width: 150 }}>
       <div style={{ font: '600 9px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.14em', color: 'rgba(223,238,255,0.6)' }}>{label}</div>
       <div style={{ height: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 4, overflow: 'hidden', marginTop: 2 }}>
-        <div style={{ width: `${Math.max(0, Math.min(1, v)) * 100}%`, height: '100%', background: color, boxShadow: `0 0 8px ${color}` }} />
+        <div style={{ width: `${Math.max(0, Math.min(1, v)) * 100}%`, height: '100%', background: color, boxShadow: `0 0 8px ${color}`, transition: 'width 0.1s linear' }} />
       </div>
     </div>
   )

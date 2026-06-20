@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createMech, createQuadruped, type CharacterModel } from './procedural'
+import { createMassiveWalker, createMech, createQuadruped, type CharacterModel } from './procedural'
 import { dampAngle, randRange } from './utils'
 import type { Physics } from './Physics'
+
+type PatrolKind = 'quad' | 'mech' | 'giant'
 
 interface Patroller {
   model: CharacterModel
@@ -11,7 +13,7 @@ interface Patroller {
   waypoints: THREE.Vector3[]
   wp: number
   speed: number
-  big: boolean // mech vs quadruped (affects ground offset + radar size)
+  big: boolean // mech/giant vs quadruped (affects radar size)
 }
 
 /**
@@ -33,17 +35,20 @@ export class Patrols {
     this.physics = physics
     const quad = Math.round(config.city.quadrupeds * densityScale)
     const mech = Math.round(config.city.mechs * densityScale)
-    for (let i = 0; i < quad; i++) this.spawn(false, i)
-    for (let i = 0; i < mech; i++) this.spawn(true, i + 100)
+    const giant = Math.round(config.city.giants * densityScale)
+    for (let i = 0; i < quad; i++) this.spawn('quad', i)
+    for (let i = 0; i < mech; i++) this.spawn('mech', i + 100)
+    for (let i = 0; i < giant; i++) this.spawn('giant', i + 200)
   }
 
-  private spawn(big: boolean, seed: number) {
-    const model = big ? createMech() : createQuadruped()
+  private spawn(kind: PatrolKind, seed: number) {
+    const model = kind === 'giant' ? createMassiveWalker() : kind === 'mech' ? createMech() : createQuadruped()
     this.scene.add(model.group)
-    // A rectangular beat at a random offset/size, kept clear of the very centre.
-    const cx = randRange(-110, 110)
-    const cz = randRange(-110, 110)
-    const r = big ? randRange(40, 80) : randRange(20, 50)
+    // A rectangular beat; giants roam the far outskirts, quads stay central.
+    const range = kind === 'giant' ? 150 : 110
+    const cx = randRange(-range, range)
+    const cz = randRange(-range, range)
+    const r = kind === 'giant' ? randRange(80, 130) : kind === 'mech' ? randRange(40, 80) : randRange(20, 50)
     const waypoints = [
       new THREE.Vector3(cx + r, 0, cz + r),
       new THREE.Vector3(cx + r, 0, cz - r),
@@ -53,7 +58,8 @@ export class Patrols {
     const pos = waypoints[seed % 4].clone()
     pos.y = this.physics.sampleGround(pos.x, pos.z, 60)?.y ?? 0
     model.group.position.copy(pos)
-    this.list.push({ model, pos, yaw: 0, waypoints, wp: (seed + 1) % 4, speed: big ? 4.5 : 7, big })
+    const speed = kind === 'giant' ? 2 : kind === 'mech' ? 4.5 : 7
+    this.list.push({ model, pos, yaw: 0, waypoints, wp: (seed + 1) % 4, speed, big: kind !== 'quad' })
   }
 
   setVisible(v: boolean) {
