@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 const COLS = 64
 const ROWS = 40
 const TICK_MS = 78 // beam step interval
-const BOT_RANDOM = 0.01 // small chance of a non-optimal (but safe) move so it stays beatable
+const BOT_RANDOM = 0 // play the best line every move (no deliberate mistakes)
 const SEARCH_DEPTH = 6 // alpha-beta plies (3 moves each for bot + player)
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
@@ -93,9 +93,12 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     }
   }, [])
 
-  // Voronoi heuristic: flood from both heads and score the board by the cells
-  // the bot reaches first minus the cells the player reaches first. Maximizing
-  // it both denies the player space and keeps the bot out of dead ends.
+  // Board evaluation. Flood from both heads (Voronoi) to split the board into
+  // "whose cell is this", then score each side by how long a snake can actually
+  // survive in its territory - not raw area. On a grid a trail alternates
+  // colours, so the usable path length of a region is ~2*min(white,black): this
+  // is what stops the bot grabbing comb-shaped area it can't traverse and then
+  // trapping itself, which is what made it beatable in the endgame.
   const evaluateBoard = useCallback((bx: number, by: number, px: number, py: number) => {
     const bd = botDist.current
     const pd = playerDist.current
@@ -105,19 +108,26 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     const genP = ++genCounter.current
     bfsFill(bx, by, bd, bs, genB)
     bfsFill(px, py, pd, ps, genP)
-    let botCells = 0
-    let playerCells = 0
+    let bw = 0, bb = 0, pw = 0, pb = 0 // bot/player white/black reachable-first cells
     let botReach = 0
-    const total = COLS * ROWS
-    for (let i = 0; i < total; i++) {
-      const a = bs[i] === genB ? bd[i] : -1
-      const c = ps[i] === genP ? pd[i] : -1
-      if (a >= 0) botReach++
-      if (a >= 0 && (c < 0 || a < c)) botCells++
-      else if (c >= 0 && (a < 0 || c < a)) playerCells++
+    for (let y = 0; y < ROWS; y++) {
+      const row = y * COLS
+      for (let x = 0; x < COLS; x++) {
+        const i = row + x
+        const a = bs[i] === genB ? bd[i] : -1
+        const c = ps[i] === genP ? pd[i] : -1
+        if (a >= 0) botReach++
+        const color = (x + y) & 1
+        if (a >= 0 && (c < 0 || a < c)) { if (color) bw++; else bb++ }
+        else if (c >= 0 && (a < 0 || c < a)) { if (color) pw++; else pb++ }
+      }
     }
     if (botReach < 3) return -50000 + botReach // boxed in: effectively dead
-    return botCells - playerCells
+    // Traversable-length estimate of each side's territory, plus a small raw-area
+    // tiebreak so equal-survival positions still prefer grabbing more ground.
+    const botSurv = 2 * Math.min(bw, bb) + 0.05 * (bw + bb)
+    const playerSurv = 2 * Math.min(pw, pb) + 0.05 * (pw + pb)
+    return botSurv - playerSurv
   }, [bfsFill])
 
   // Alpha-beta minimax over alternating moves (bot maximizes, player minimizes)
