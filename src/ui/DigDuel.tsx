@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 
 const COLS = 140 // a large underground world; the camera shows only a window
 const ROWS = 100
-const VIEW = 66 // tiles across the short side of each panel (higher = zoomed out)
+const VIEW = 46 // tiles across the short side of the viewport (higher = zoomed out)
 const TUNNELS = 22 // branch tunnels carved at start (lower = more solid dirt)
 const TUNNEL_LEN = 170
 const DIG_BRUSH = 0.9
@@ -38,7 +38,7 @@ interface Tank { pos: Vec; dir: Vec; hp: number; cooldown: number; flash: number
 interface Bullet { x: number; y: number; dx: number; dy: number; life: number; mine: boolean }
 
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }
-const BUILD = 'DD-7' // bump each deploy; shown on screen to confirm freshness
+const BUILD = 'DD-8' // bump each deploy; shown on screen to confirm freshness
 const PLAYER_COLOR = '#7cff4f' // green tank, like the classic
 const BOT_COLOR = '#ff5036'
 
@@ -260,14 +260,11 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     ctx.fillStyle = ROCK.border
     ctx.fillRect(0, 0, W, H)
     const border = Math.max(8, Math.round(Math.min(W, H) * 0.016))
-    // Two side-by-side near-square viewports (like the reference), centered, with
-    // the blue frame filling the remaining space (letterboxed on tall screens).
-    const pw = Math.floor((W - border * 3) / 2)
-    const ph = Math.min(H - border * 2, Math.round(pw * 1.15))
-    const oy = Math.floor((H - ph) / 2)
+    // Single full-screen viewport following the player, inside the blue frame.
+    const pw = W - border * 2
+    const ph = H - border * 2
     const panels = [
-      { rx: border, ry: oy, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
-      { rx: border * 2 + pw, ry: oy, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
+      { rx: border, ry: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
     ]
 
     for (const pan of panels) {
@@ -359,7 +356,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
       ctx.globalAlpha = Math.min(0.5, p.flash * 2)
       ctx.strokeStyle = '#ff2b3c'
       ctx.lineWidth = 8
-      ctx.strokeRect(border, oy, pw, ph)
+      ctx.strokeRect(border, border, pw, ph)
       ctx.restore()
     }
   }
