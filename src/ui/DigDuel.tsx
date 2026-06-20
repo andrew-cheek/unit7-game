@@ -19,11 +19,14 @@ const DIG_BRUSH = 0.9
 const MOVE_OPEN = 11
 const MOVE_DIG = 4.5
 
-// Stable per-cell feature hash (boulders / minerals / crystals) - deterministic
-// so the terrain detail doesn't shimmer between frames.
-const fhash = (x: number, y: number) => {
-  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
-  return s - Math.floor(s)
+// Retro cave palette (per the agreed rendering spec).
+const ROCK = { void: '#050505', border: '#0500a8', base: '#9a642f', mid: '#7a502b', dark: '#4d351f', light: '#c18443', hi: '#d69a57', edge: '#2a1c13' }
+
+// Deterministic integer hash for stable, non-flickering per-tile pixel texture.
+const hash2D = (x: number, y: number) => {
+  let h = (x * 374761393 + y * 668265263) | 0
+  h = (h ^ (h >> 13)) * 1274126177
+  return Math.abs(h ^ (h >> 16))
 }
 const BULLET_SPEED = 30
 const MAX_HP = 6
@@ -228,7 +231,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
 
     // Retro split-screen: thick dark-blue frame + center divider. Each panel is
     // a small camera window into the large map (left = you, right = enemy).
-    ctx.fillStyle = '#0b1f8c'
+    ctx.fillStyle = ROCK.border
     ctx.fillRect(0, 0, W, H)
     const border = Math.max(8, Math.round(Math.min(W, H) * 0.016))
     const pw = Math.floor((W - border * 3) / 2)
@@ -261,32 +264,29 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
       const half = cs / 2
       const t = Math.max(1, Math.round(cs * 0.2))
 
-      ctx.fillStyle = '#070709' // void / tunnels (stays black for contrast)
+      ctx.fillStyle = ROCK.void // tunnels / void (stays black for contrast)
       ctx.fillRect(rx, ry, pw, ph)
       const x0 = Math.max(0, Math.floor(camX - halfW - 1))
       const x1 = Math.min(COLS - 1, Math.ceil(camX + halfW + 1))
       const y0 = Math.max(0, Math.floor(camY - halfH - 1))
       const y1 = Math.min(ROWS - 1, Math.ceil(camY + halfH + 1))
+      const hq = Math.ceil(half * 0.7)
 
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
           if (dirt.current[di(x, y)] === 0) continue // tunnel: leave it black
           const px = sx(x)
           const py = sy(y)
-          // Flat copper-brown tone bands (clean pixel look, not noise).
-          const band = Math.floor(noise.current[di(x, y)] * 4) / 4
-          const k = 0.82 + band * 0.3
-          ctx.fillStyle = `rgb(${(128 * k) | 0},${(92 * k) | 0},${(54 * k) | 0})`
+          // Base rock + deterministic quadrant pixel texture (clean, non-random).
+          ctx.fillStyle = ROCK.base
           ctx.fillRect(px, py, cs, cs)
-          // 16-bit detail: a darker chip or a tan highlight in one quadrant.
-          const f = fhash(x, y)
-          const qx = fhash(x + 9, y) < 0.5 ? 0 : half
-          const qy = fhash(x, y + 9) < 0.5 ? 0 : half
-          if (f < 0.42) { ctx.fillStyle = 'rgba(64,42,22,0.6)'; ctx.fillRect(px + qx, py + qy, half, half) }
-          else if (f > 0.72) { ctx.fillStyle = 'rgba(198,160,110,0.5)'; ctx.fillRect(px + qx, py + qy, Math.ceil(half * 0.7), Math.ceil(half * 0.7)) }
-          if (f > 0.955) { ctx.fillStyle = 'rgba(36,24,12,0.92)'; ctx.fillRect(px + cs * 0.18, py + cs * 0.18, cs * 0.64, cs * 0.64) } // boulder
-          // Carved shadow edges where rock meets a tunnel.
-          ctx.fillStyle = 'rgba(0,0,0,0.45)'
+          const h = hash2D(x, y)
+          if (h % 3 === 0) { ctx.fillStyle = ROCK.mid; ctx.fillRect(px, py, half, half) }
+          if (h % 5 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + half, py + half, half, half) }
+          if (h % 7 === 0) { ctx.fillStyle = ROCK.light; ctx.fillRect(px + half, py, half, half) }
+          if (h % 19 === 0) { ctx.fillStyle = ROCK.hi; ctx.fillRect(px + half - hq / 2, py + half - hq / 2, hq, hq) } // chip / boulder
+          // Dark carved edges where rock meets a tunnel.
+          ctx.fillStyle = ROCK.edge
           if (op(x - 1, y)) ctx.fillRect(px, py, t, cs)
           if (op(x + 1, y)) ctx.fillRect(px + cs - t, py, t, cs)
           if (op(x, y - 1)) ctx.fillRect(px, py, cs, t)
