@@ -79,7 +79,7 @@ export class Game {
 
   // Beam Wars portal (a doorway near the spawn car into the minigame).
   private beamPortal!: THREE.Group
-  private beamPortalPos = new THREE.Vector3(10, 0, 14)
+  private beamPortalPos = new THREE.Vector3(0, 0, 11)
   private beamPortalDisc!: THREE.Mesh
   private beamPortalBeam!: THREE.Mesh
   private beamPortalMats: THREE.Material[] = []
@@ -235,31 +235,31 @@ export class Game {
     const own = <T extends THREE.Material>(m: T) => { this.beamPortalMats.push(m); return m }
     const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.beamPortalGeos.push(geo); return geo }
 
-    // Glow pad on the ground so it reads even from a distance.
-    const padGeo = ownG(new THREE.CylinderGeometry(2.8, 3.1, 0.18, 28))
-    const pad = new THREE.Mesh(padGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 2.4, roughness: 0.4 })))
-    pad.position.y = 0.09
+    // Big glow pad on the ground so it reads even from a distance.
+    const padGeo = ownG(new THREE.CylinderGeometry(3.4, 3.8, 0.2, 32))
+    const pad = new THREE.Mesh(padGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 2.8, roughness: 0.4 })))
+    pad.position.y = 0.1
     g.add(pad)
 
     // Glowing ring standing on the ground (a doorway you walk into).
-    const ringGeo = ownG(new THREE.TorusGeometry(2.4, 0.22, 16, 44))
-    const ring = new THREE.Mesh(ringGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 3.2, roughness: 0.4 })))
-    ring.position.y = 2.6
+    const ringGeo = ownG(new THREE.TorusGeometry(3.0, 0.28, 16, 48))
+    const ring = new THREE.Mesh(ringGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 3.4, roughness: 0.4 })))
+    ring.position.y = 3.1
     g.add(ring)
 
     // Swirling translucent disc inside the ring.
-    const discGeo = ownG(new THREE.CircleGeometry(2.3, 44))
-    const discMat = own(new THREE.MeshBasicMaterial({ color: 0x8a5cff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }))
+    const discGeo = ownG(new THREE.CircleGeometry(2.85, 48))
+    const discMat = own(new THREE.MeshBasicMaterial({ color: 0x8a5cff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }))
     const disc = new THREE.Mesh(discGeo, discMat)
-    disc.position.y = 2.6
+    disc.position.y = 3.1
     g.add(disc)
     this.beamPortalDisc = disc
 
-    // Tall light beam rising from the portal - visible from across the city.
-    const beamGeo = ownG(new THREE.CylinderGeometry(0.6, 1.1, 60, 16, 1, true))
-    const beamMat = own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    // Tall, wide light beam rising from the portal - visible from across the city.
+    const beamGeo = ownG(new THREE.CylinderGeometry(1.2, 2.2, 90, 18, 1, true))
+    const beamMat = own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     const beam = new THREE.Mesh(beamGeo, beamMat)
-    beam.position.y = 30
+    beam.position.y = 45
     g.add(beam)
     this.beamPortalBeam = beam
 
@@ -268,8 +268,8 @@ export class Game {
     this.beamPortalTex = tex
     const spriteMat = own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
     const sprite = new THREE.Sprite(spriteMat)
-    sprite.position.set(0, 5.6, 0)
-    sprite.scale.set(5.0, 1.25, 1)
+    sprite.position.set(0, 6.6, 0)
+    sprite.scale.set(6.5, 1.6, 1)
     g.add(sprite)
 
     this.engine.scene.add(g)
@@ -299,7 +299,7 @@ export class Game {
     if (this.inMinigame || this.beamCooldown > 0 || this.player.mode !== 'robot') return
     const dx = this.player.position.x - this.beamPortalPos.x
     const dz = this.player.position.z - this.beamPortalPos.z
-    if (dx * dx + dz * dz < 2.8 * 2.8) this.enterBeamWars()
+    if (dx * dx + dz * dz < 3.4 * 3.4) this.enterBeamWars()
   }
 
   private enterBeamWars() {

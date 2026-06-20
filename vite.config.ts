@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Minimal local declaration so tsc doesn't need @types/node just for this flag.
+declare const process: { env: Record<string, string | undefined> }
+
 // .hdr / .glb / .gltf are treated as static assets so `import url from './x.glb'`
 // resolves to a served URL that GLTFLoader / RGBELoader can fetch.
 //
