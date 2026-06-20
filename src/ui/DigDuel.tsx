@@ -222,128 +222,126 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     if (!ctx) return
     const W = cv.width
     const H = cv.height
-    // Zoomed-in camera that scrolls to follow the player tank, clamped to the map.
-    const cell = Math.max(13, Math.min(W, H) / VIEW)
-    const halfW = W / (2 * cell)
-    const halfH = H / (2 * cell)
-    const p0 = player.current.pos
-    const camX = halfW * 2 >= COLS ? COLS / 2 : Math.max(halfW, Math.min(COLS - halfW, p0.x))
-    const camY = halfH * 2 >= ROWS ? ROWS / 2 : Math.max(halfH, Math.min(ROWS - halfH, p0.y))
-    const sx = (gx: number) => W / 2 + (gx - camX) * cell
-    const sy = (gy: number) => H / 2 + (gy - camY) * cell
-    const cs = Math.ceil(cell) + 1 // fill size avoids seams at fractional cells
-
-    // Layered underground rock with black carved tunnels. Only the visible
-    // window is drawn. The brown is built from a few flat tone bands (not raw
-    // noise) plus sparse boulders, mineral flecks and glowing crystals, with
-    // shadowed edges where rock meets a tunnel so the caves feel carved.
-    ctx.fillStyle = '#05050a'
-    ctx.fillRect(0, 0, W, H)
-    const x0 = Math.max(0, Math.floor(camX - halfW - 1))
-    const x1 = Math.min(COLS - 1, Math.ceil(camX + halfW + 1))
-    const y0 = Math.max(0, Math.floor(camY - halfH - 1))
-    const y1 = Math.min(ROWS - 1, Math.ceil(camY + halfH + 1))
-    const op = (nx: number, ny: number) => nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && dirt.current[ny * COLS + nx] === 0
-    const t = Math.max(1, cs * 0.24) // carved-edge shadow thickness
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const px = sx(x)
-        const py = sy(y)
-        if (dirt.current[di(x, y)] === 0) {
-          ctx.fillStyle = '#070709' // tunnel / void
-          ctx.fillRect(px, py, cs, cs)
-          continue
-        }
-        // Base copper-brown: quantized tone bands (less noisy) + faint depth shade.
-        const band = Math.floor(noise.current[di(x, y)] * 5) / 5
-        const k = (0.78 + band * 0.34) * (0.9 + (y / ROWS) * 0.16)
-        ctx.fillStyle = `rgb(${Math.min(255, (126 * k) | 0)},${Math.min(255, (88 * k) | 0)},${Math.min(255, (52 * k) | 0)})`
-        ctx.fillRect(px, py, cs, cs)
-
-        // Sparse, deterministic terrain features.
-        const f = fhash(x, y)
-        if (f > 0.982) {
-          ctx.save()
-          ctx.shadowColor = '#46e6ff'
-          ctx.shadowBlur = 9
-          ctx.fillStyle = '#bfeeff'
-          ctx.fillRect(px + cs * 0.36, py + cs * 0.36, cs * 0.3, cs * 0.3) // glowing crystal
-          ctx.restore()
-        } else if (f > 0.9) {
-          ctx.fillStyle = 'rgba(54,38,22,0.85)'
-          ctx.beginPath()
-          ctx.arc(px + cs / 2, py + cs / 2, cs * 0.42, 0, Math.PI * 2)
-          ctx.fill() // boulder
-        } else if (f < 0.06) {
-          ctx.fillStyle = 'rgba(206,166,116,0.45)'
-          ctx.fillRect(px + cs * 0.2, py + cs * 0.18, cs * 0.24, cs * 0.24) // mineral fleck
-        }
-
-        // Carved/shadowed edges toward open tunnels.
-        ctx.fillStyle = 'rgba(0,0,0,0.5)'
-        if (op(x - 1, y)) ctx.fillRect(px, py, t, cs)
-        if (op(x + 1, y)) ctx.fillRect(px + cs - t, py, t, cs)
-        if (op(x, y - 1)) ctx.fillRect(px, py, cs, t)
-        if (op(x, y + 1)) ctx.fillRect(px, py + cs - t, cs, t)
-      }
-    }
-
-    // Atmosphere: darken the edges so the window feels like a small light in a
-    // vast cave (kept subtle so the centre stays readable).
-    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.62)
-    vg.addColorStop(0, 'rgba(0,0,0,0)')
-    vg.addColorStop(1, 'rgba(0,0,0,0.55)')
-    ctx.fillStyle = vg
-    ctx.fillRect(0, 0, W, H)
-
-    drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: ROWS - 4 }, PLAYER_COLOR)
-    drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: 4 }, BOT_COLOR)
-
-    for (const bl of bullets.current) {
-      ctx.save()
-      ctx.shadowColor = bl.mine ? PLAYER_COLOR : BOT_COLOR
-      ctx.shadowBlur = 8
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(sx(bl.x) - cell * 0.18, sy(bl.y) - cell * 0.18, cell * 0.55, cell * 0.55)
-      ctx.restore()
-    }
-
-    drawTank(ctx, sx, sy, cell, player.current, PLAYER_COLOR)
-    drawTank(ctx, sx, sy, cell, bot.current, BOT_COLOR)
-
-    // Off-screen enemy indicator (edge arrow + distance) so the hunt stays fun.
+    const p = player.current
     const b = bot.current
-    const onScreen = b.pos.x >= x0 && b.pos.x <= x1 && b.pos.y >= y0 && b.pos.y <= y1
-    if (!onScreen) {
-      const ang = Math.atan2(b.pos.y - p0.y, b.pos.x - p0.x)
-      const rad = Math.min(W, H) / 2 - 40
-      const ex = W / 2 + Math.cos(ang) * rad
-      const ey = H / 2 + Math.sin(ang) * rad
+    const op = (nx: number, ny: number) => nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && dirt.current[ny * COLS + nx] === 0
+
+    // Retro split-screen: thick dark-blue frame + center divider. Each panel is
+    // a small camera window into the large map (left = you, right = enemy).
+    ctx.fillStyle = '#0b1f8c'
+    ctx.fillRect(0, 0, W, H)
+    const border = Math.max(8, Math.round(Math.min(W, H) * 0.016))
+    const pw = Math.floor((W - border * 3) / 2)
+    const ph = H - border * 2
+
+    const panels = [
+      { rx: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
+      { rx: border * 2 + pw, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
+    ]
+
+    for (const pan of panels) {
+      const rx = pan.rx
+      const ry = border
       ctx.save()
-      ctx.translate(ex, ey)
-      ctx.rotate(ang)
-      ctx.fillStyle = BOT_COLOR
-      ctx.shadowColor = BOT_COLOR
-      ctx.shadowBlur = 10
       ctx.beginPath()
-      ctx.moveTo(13, 0)
-      ctx.lineTo(-9, 8)
-      ctx.lineTo(-9, -8)
-      ctx.closePath()
-      ctx.fill()
+      ctx.rect(rx, ry, pw, ph)
+      ctx.clip()
+
+      // Cell size keeps a small window in BOTH dimensions (vast map feel).
+      const cell = Math.max(pw / 15, ph / 24)
+      const halfW = pw / (2 * cell)
+      const halfH = ph / (2 * cell)
+      const camX = halfW * 2 >= COLS ? COLS / 2 : Math.max(halfW, Math.min(COLS - halfW, pan.cam.x))
+      const camY = halfH * 2 >= ROWS ? ROWS / 2 : Math.max(halfH, Math.min(ROWS - halfH, pan.cam.y))
+      const cx0 = rx + pw / 2
+      const cy0 = ry + ph / 2
+      const sx = (gx: number) => cx0 + (gx - camX) * cell
+      const sy = (gy: number) => cy0 + (gy - camY) * cell
+      const cs = Math.ceil(cell) + 1
+      const half = cs / 2
+      const t = Math.max(1, Math.round(cs * 0.2))
+
+      ctx.fillStyle = '#070709' // void / tunnels (stays black for contrast)
+      ctx.fillRect(rx, ry, pw, ph)
+      const x0 = Math.max(0, Math.floor(camX - halfW - 1))
+      const x1 = Math.min(COLS - 1, Math.ceil(camX + halfW + 1))
+      const y0 = Math.max(0, Math.floor(camY - halfH - 1))
+      const y1 = Math.min(ROWS - 1, Math.ceil(camY + halfH + 1))
+
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          if (dirt.current[di(x, y)] === 0) continue // tunnel: leave it black
+          const px = sx(x)
+          const py = sy(y)
+          // Flat copper-brown tone bands (clean pixel look, not noise).
+          const band = Math.floor(noise.current[di(x, y)] * 4) / 4
+          const k = 0.82 + band * 0.3
+          ctx.fillStyle = `rgb(${(128 * k) | 0},${(92 * k) | 0},${(54 * k) | 0})`
+          ctx.fillRect(px, py, cs, cs)
+          // 16-bit detail: a darker chip or a tan highlight in one quadrant.
+          const f = fhash(x, y)
+          const qx = fhash(x + 9, y) < 0.5 ? 0 : half
+          const qy = fhash(x, y + 9) < 0.5 ? 0 : half
+          if (f < 0.42) { ctx.fillStyle = 'rgba(64,42,22,0.6)'; ctx.fillRect(px + qx, py + qy, half, half) }
+          else if (f > 0.72) { ctx.fillStyle = 'rgba(198,160,110,0.5)'; ctx.fillRect(px + qx, py + qy, Math.ceil(half * 0.7), Math.ceil(half * 0.7)) }
+          if (f > 0.955) { ctx.fillStyle = 'rgba(36,24,12,0.92)'; ctx.fillRect(px + cs * 0.18, py + cs * 0.18, cs * 0.64, cs * 0.64) } // boulder
+          // Carved shadow edges where rock meets a tunnel.
+          ctx.fillStyle = 'rgba(0,0,0,0.45)'
+          if (op(x - 1, y)) ctx.fillRect(px, py, t, cs)
+          if (op(x + 1, y)) ctx.fillRect(px + cs - t, py, t, cs)
+          if (op(x, y - 1)) ctx.fillRect(px, py, cs, t)
+          if (op(x, y + 1)) ctx.fillRect(px, py + cs - t, cs, t)
+        }
+      }
+
+      drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: ROWS - 4 }, PLAYER_COLOR)
+      drawBase(ctx, sx, sy, cell, { x: COLS / 2, y: 4 }, BOT_COLOR)
+
+      for (const bl of bullets.current) {
+        if (bl.x < x0 || bl.x > x1 || bl.y < y0 || bl.y > y1) continue
+        ctx.save()
+        ctx.shadowColor = bl.mine ? PLAYER_COLOR : BOT_COLOR
+        ctx.shadowBlur = 8
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(sx(bl.x) - cell * 0.18, sy(bl.y) - cell * 0.18, cell * 0.55, cell * 0.55)
+        ctx.restore()
+      }
+
+      drawTank(ctx, sx, sy, cell, p, PLAYER_COLOR)
+      drawTank(ctx, sx, sy, cell, b, BOT_COLOR)
+
+      // Edge arrow to the other vehicle when it's outside this panel's window.
+      const e = pan.enemy
+      if (e.x < x0 || e.x > x1 || e.y < y0 || e.y > y1) {
+        const ang = Math.atan2(e.y - pan.cam.y, e.x - pan.cam.x)
+        const rad = Math.min(pw, ph) / 2 - 20
+        const ex = cx0 + Math.cos(ang) * rad
+        const ey = cy0 + Math.sin(ang) * rad
+        ctx.save()
+        ctx.translate(ex, ey)
+        ctx.rotate(ang)
+        ctx.fillStyle = pan.enemyColor
+        ctx.shadowColor = pan.enemyColor
+        ctx.shadowBlur = 10
+        ctx.beginPath()
+        ctx.moveTo(12, 0)
+        ctx.lineTo(-8, 7)
+        ctx.lineTo(-8, -7)
+        ctx.closePath()
+        ctx.fill()
+        ctx.restore()
+      }
+
       ctx.restore()
-      ctx.fillStyle = BOT_COLOR
-      ctx.font = '700 12px ui-monospace, Menlo, monospace'
-      ctx.textAlign = 'center'
-      ctx.fillText(`${Math.round(Math.hypot(b.pos.x - p0.x, b.pos.y - p0.y))}`, ex, ey - 14)
     }
 
-    if (player.current.flash > 0) {
+    // Damage flash on the player's (left) panel.
+    if (p.flash > 0) {
       ctx.save()
-      ctx.globalAlpha = Math.min(0.6, player.current.flash * 2)
+      ctx.globalAlpha = Math.min(0.5, p.flash * 2)
       ctx.strokeStyle = '#ff2b3c'
-      ctx.lineWidth = 18
-      ctx.strokeRect(0, 0, W, H)
+      ctx.lineWidth = 8
+      ctx.strokeRect(border, border, pw, ph)
       ctx.restore()
     }
   }
