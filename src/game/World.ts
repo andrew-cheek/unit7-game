@@ -46,6 +46,15 @@ export class World {
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
   private time = 0
+  // Atmosphere + set dressing.
+  private rain?: THREE.Points
+  private rainGeo?: THREE.BufferGeometry
+  private rainCount = 0
+  private embers?: THREE.Points
+  private emberGeo?: THREE.BufferGeometry
+  private shafts: THREE.Mesh[] = []
+  private dishes: THREE.Group[] = []
+  private adPanels: THREE.MeshStandardMaterial[] = []
 
   constructor(scene: THREE.Scene, zone: Zone = 'earth') {
     this.scene = scene
@@ -63,6 +72,12 @@ export class World {
     this.buildNearbyBuildings()
     this.buildElevatedPlatform()
     this.buildExtras()
+    this.buildSkyline()
+    this.buildLandmark()
+    this.buildMarket()
+    this.buildSetPieces()
+    this.buildAdPanels()
+    this.buildAtmosphere()
     this.buildLights()
     this.addBoundaryColliders()
     this.applyZone(zone)
@@ -362,6 +377,189 @@ export class World {
     }
   }
 
+  /** Distant silhouette skyline ringing the playable area (fog-immune so it
+   *  reads through the fog as far-off city), for a sense of vast scale. */
+  private buildSkyline() {
+    const R = config.world.half + 90
+    const body = this.own(new THREE.MeshBasicMaterial({ color: 0x0a1124, fog: false }))
+    const neon = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange]
+    const n = config.tier.name === 'high' ? 72 : 38
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2
+      const r = R + hash01(i * 3.1) * 90
+      const h = 60 + hash01(i * 7.7) * 230
+      const w = 14 + hash01(i * 2.3) * 28
+      const x = Math.cos(a) * r
+      const z = Math.sin(a) * r
+      const t = new THREE.Mesh(this.boxGeo, body)
+      t.scale.set(w, h, w)
+      t.position.set(x, h / 2 - 10, z)
+      this.group.add(t)
+      // Neon roofline so the distant towers twinkle against the night sky.
+      const cap = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshBasicMaterial({ color: neon[i % neon.length], fog: false })))
+      cap.scale.set(w + 2, 3, w + 2)
+      cap.position.set(x, h - 10, z)
+      this.group.add(cap)
+    }
+  }
+
+  /** One colossal arcology + a space-elevator tether, visible from anywhere as a
+   *  scale landmark (fog-immune). */
+  private buildLandmark() {
+    const x = -250
+    const z = -210
+    const body = this.own(new THREE.MeshBasicMaterial({ color: 0x111a30, fog: false }))
+    const neon = this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+    for (let i = 0; i < 5; i++) {
+      const w = 86 - i * 14
+      const seg = new THREE.Mesh(this.boxGeo, body)
+      seg.scale.set(w, 72, w)
+      seg.position.set(x, 36 + i * 72, z)
+      this.group.add(seg)
+      const ring = new THREE.Mesh(this.boxGeo, neon)
+      ring.scale.set(w + 3, 2.5, w + 3)
+      ring.position.set(x, 72 + i * 72, z)
+      this.group.add(ring)
+    }
+    const tether = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.6, 1.6, 950, 8)), neon)
+    tether.position.set(x + 150, 470, z + 70)
+    this.group.add(tether)
+  }
+
+  /** A small alien market district: canopied stalls, glow signs, crates, pods. */
+  private buildMarket() {
+    const ox = -80
+    const oz = 72
+    const canopyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x342654, roughness: 0.7, metalness: 0.2 }))
+    const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x20242f, roughness: 0.6, metalness: 0.4 }))
+    const podMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0b2a1c, emissive: 0x2bff8a, emissiveIntensity: 1.4, roughness: 0.4, metalness: 0.2 }))
+    const neon = [config.palette.cyan, config.palette.magenta, config.palette.lime, config.palette.orange]
+    for (let gx = 0; gx < 4; gx++) {
+      for (let gz = 0; gz < 2; gz++) {
+        const x = ox + gx * 9
+        const z = oz + gz * 11
+        const c = neon[(gx + gz) % neon.length]
+        const canopy = new THREE.Mesh(this.boxGeo, canopyMat)
+        canopy.scale.set(5, 0.3, 5)
+        canopy.position.set(x, 3.0, z)
+        canopy.rotation.x = 0.08
+        this.group.add(canopy)
+        for (const sx of [-2.1, 2.1]) {
+          for (const sz of [-2.1, 2.1]) {
+            const post = new THREE.Mesh(this.boxGeo, postMat)
+            post.scale.set(0.18, 3, 0.18)
+            post.position.set(x + sx, 1.5, z + sz)
+            this.group.add(post)
+          }
+        }
+        const sign = new THREE.Mesh(this.boxGeo, this.glow(c, 2.6))
+        sign.scale.set(4.2, 0.5, 0.2)
+        sign.position.set(x, 3.4, z - 2.2)
+        this.group.add(sign)
+        const crate = new THREE.Mesh(this.boxGeo, this.glow(c, 1.6))
+        crate.scale.set(0.8, 0.8, 0.8)
+        crate.position.set(x + 1.2, 0.4, z + 1.0)
+        this.group.add(crate)
+        if ((gx + gz) % 2 === 0) {
+          const pod = new THREE.Mesh(this.domeGeo, podMat)
+          pod.scale.set(1.4, 2.4, 1.4)
+          pod.position.set(x - 1.4, 0, z + 1.4)
+          this.group.add(pod)
+        }
+      }
+    }
+  }
+
+  /** Rotating radar dishes on tall poles - small animated "alive" detail. */
+  private buildSetPieces() {
+    const spots: Array<[number, number]> = [[64, -44], [-52, -96], [104, 44]]
+    const poleMat = this.own(new THREE.MeshStandardMaterial({ color: 0x20242f, metalness: 0.7, roughness: 0.5 }))
+    const dishMat = this.own(new THREE.MeshStandardMaterial({ color: 0x3a4456, metalness: 0.6, roughness: 0.5, side: THREE.DoubleSide }))
+    const dishGeo = this.ownG(new THREE.CylinderGeometry(3, 0.5, 1.4, 16, 1, true))
+    for (const [x, z] of spots) {
+      const pole = new THREE.Mesh(this.boxGeo, poleMat)
+      pole.scale.set(0.6, 14, 0.6)
+      pole.position.set(x, 7, z)
+      this.group.add(pole)
+      const pivot = new THREE.Group()
+      pivot.position.set(x, 14, z)
+      const dish = new THREE.Mesh(dishGeo, dishMat)
+      dish.rotation.z = 0.7
+      dish.position.y = 1
+      const emitter = new THREE.Mesh(this.boxGeo, this.glow(config.palette.magenta, 3))
+      emitter.scale.set(0.3, 0.3, 0.3)
+      emitter.position.set(0, 1.6, 0)
+      pivot.add(dish, emitter)
+      this.group.add(pivot)
+      this.dishes.push(pivot)
+    }
+  }
+
+  /** Wall-mounted animated neon ad panels (pulse in update). Not free-floating. */
+  private buildAdPanels() {
+    const spots: Array<[number, number, number]> = [[34, 20, 0.4], [-30, -40, 1.8], [70, 56, -0.6], [-64, 30, 2.4], [18, 90, 0.1]]
+    const neon = [config.palette.cyan, config.palette.magenta, config.palette.orange, config.palette.lime, config.palette.purple]
+    for (let i = 0; i < spots.length; i++) {
+      const [x, z, rot] = spots[i]
+      const mat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: neon[i % neon.length], emissiveIntensity: 1.8, roughness: 0.5 }))
+      const panel = new THREE.Mesh(this.boxGeo, mat)
+      panel.scale.set(7, 11, 0.4)
+      panel.position.set(x, 14 + (i % 3) * 5, z)
+      panel.rotation.y = rot
+      this.group.add(panel)
+      this.adPanels.push(mat)
+    }
+  }
+
+  /** Neon drizzle near the player + drifting embers + (desktop) light shafts. */
+  private buildAtmosphere() {
+    const high = config.tier.name === 'high'
+    // Rain (follows the focus point each frame).
+    this.rainCount = high ? 700 : 200
+    const rp = new Float32Array(this.rainCount * 3)
+    for (let i = 0; i < this.rainCount; i++) {
+      rp[i * 3] = (Math.random() - 0.5) * 130
+      rp[i * 3 + 1] = Math.random() * 80
+      rp[i * 3 + 2] = (Math.random() - 0.5) * 130
+    }
+    this.rainGeo = new THREE.BufferGeometry()
+    this.rainGeo.setAttribute('position', new THREE.BufferAttribute(rp, 3))
+    this.ownedGeos.push(this.rainGeo)
+    const rainMat = this.own(new THREE.PointsMaterial({ color: 0x8fd8ff, size: 0.5, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending }))
+    this.rain = new THREE.Points(this.rainGeo, rainMat)
+    this.rain.frustumCulled = false
+    this.group.add(this.rain)
+
+    // Embers drifting upward near the streets.
+    const ec = high ? 130 : 50
+    const ep = new Float32Array(ec * 3)
+    for (let i = 0; i < ec; i++) {
+      ep[i * 3] = (Math.random() - 0.5) * 120
+      ep[i * 3 + 1] = Math.random() * 30
+      ep[i * 3 + 2] = (Math.random() - 0.5) * 120
+    }
+    this.emberGeo = new THREE.BufferGeometry()
+    this.emberGeo.setAttribute('position', new THREE.BufferAttribute(ep, 3))
+    this.ownedGeos.push(this.emberGeo)
+    const emberMat = this.own(new THREE.PointsMaterial({ color: 0xff9a3c, size: 0.35, transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending }))
+    this.embers = new THREE.Points(this.emberGeo, emberMat)
+    this.embers.frustumCulled = false
+    this.group.add(this.embers)
+
+    // Volumetric-ish light shafts at a few neon hotspots (desktop only).
+    if (high) {
+      const shaftGeo = this.ownG(new THREE.CylinderGeometry(0.8, 6, 60, 14, 1, true))
+      const spots: Array<[number, number, number]> = [[0, 0, config.palette.cyan], [34, 8, config.palette.magenta], [-34, -20, config.palette.purple], [44, -60, config.palette.orange]]
+      for (const [x, z, c] of spots) {
+        const mat = this.own(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }))
+        const shaft = new THREE.Mesh(shaftGeo, mat)
+        shaft.position.set(x, 30, z)
+        this.group.add(shaft)
+        this.shafts.push(shaft)
+      }
+    }
+  }
+
   private buildLights() {
     this.hemi = new THREE.HemisphereLight(0x4a5a80, 0x0a0a12, 0.55)
     this.scene.add(this.hemi)
@@ -445,6 +643,35 @@ export class World {
     this.sunTarget.updateMatrixWorld()
     for (const b of this.billboards) {
       b.mat.opacity = b.base + Math.sin(this.time * b.rate + b.phase) * 0.25
+    }
+
+    // Rain falls and follows the player; embers drift up; shafts/ads pulse.
+    if (this.rain && this.rainGeo) {
+      this.rain.position.set(focus.x, 0, focus.z)
+      const a = this.rainGeo.attributes.position as THREE.BufferAttribute
+      const arr = a.array as Float32Array
+      for (let i = 1; i < arr.length; i += 3) {
+        arr[i] -= 55 * dt
+        if (arr[i] < 0) arr[i] += 80
+      }
+      a.needsUpdate = true
+    }
+    if (this.embers && this.emberGeo) {
+      this.embers.position.set(focus.x, 0, focus.z)
+      const a = this.emberGeo.attributes.position as THREE.BufferAttribute
+      const arr = a.array as Float32Array
+      for (let i = 1; i < arr.length; i += 3) {
+        arr[i] += 4 * dt
+        if (arr[i] > 32) arr[i] -= 32
+      }
+      a.needsUpdate = true
+    }
+    for (let i = 0; i < this.shafts.length; i++) {
+      ;(this.shafts[i].material as THREE.MeshBasicMaterial).opacity = 0.06 + Math.sin(this.time * 1.5 + i) * 0.03
+    }
+    for (const d of this.dishes) d.rotation.y += dt * 0.5
+    for (let i = 0; i < this.adPanels.length; i++) {
+      this.adPanels[i].emissiveIntensity = 1.6 + Math.sin(this.time * (2 + i * 0.4) + i) * 0.8
     }
   }
 

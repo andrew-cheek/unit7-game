@@ -481,6 +481,28 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
   const stars = new THREE.Points(sg, starMat)
   group.add(stars)
 
+  // Distant ringed planet hanging in the sky (fog-immune).
+  const planetGeo = new THREE.SphereGeometry(70, 24, 18)
+  const planetMat = new THREE.MeshBasicMaterial({ color: 0x6a4bd0, fog: false })
+  const planet = new THREE.Mesh(planetGeo, planetMat)
+  planet.position.set(-420, 320, -650)
+  group.add(planet)
+  const ringGeo = new THREE.RingGeometry(95, 140, 48)
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xb89cff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, fog: false, depthWrite: false })
+  const planetRing = new THREE.Mesh(ringGeo, ringMat)
+  planetRing.position.copy(planet.position)
+  planetRing.rotation.set(1.2, 0.4, 0)
+  group.add(planetRing)
+
+  // A single reusable shooting-star streak.
+  const streakGeo = new THREE.BoxGeometry(0.6, 0.6, 46)
+  const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, fog: false, blending: THREE.AdditiveBlending, depthWrite: false })
+  const streak = new THREE.Mesh(streakGeo, streakMat)
+  streak.visible = false
+  group.add(streak)
+  const streakDir = new THREE.Vector3()
+  let nextStreak = 3 + Math.random() * 5
+
   let t = 0
   return {
     group,
@@ -489,12 +511,34 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
       t += dt
       group.rotation.y = t * 0.004
       starMat.opacity = 0.75 + Math.sin(t * 0.6) * 0.25
+      if (streak.visible) {
+        streak.position.addScaledVector(streakDir, 620 * dt)
+        streakMat.opacity = Math.max(0, streakMat.opacity - dt * 1.3)
+        if (streakMat.opacity <= 0) streak.visible = false
+      } else {
+        nextStreak -= dt
+        if (nextStreak <= 0) {
+          nextStreak = 4 + Math.random() * 7
+          streak.position.set((Math.random() - 0.5) * 800, 250 + Math.random() * 200, -300 - Math.random() * 350)
+          const a = Math.random() * Math.PI * 2
+          streakDir.set(Math.cos(a), -0.2 - Math.random() * 0.25, Math.sin(a)).normalize()
+          streak.lookAt(streak.position.clone().add(streakDir))
+          streakMat.opacity = 0.9
+          streak.visible = true
+        }
+      }
     },
     dispose: () => {
       geo.dispose()
       domeMat.dispose()
       sg.dispose()
       starMat.dispose()
+      planetGeo.dispose()
+      planetMat.dispose()
+      ringGeo.dispose()
+      ringMat.dispose()
+      streakGeo.dispose()
+      streakMat.dispose()
     },
   }
 }

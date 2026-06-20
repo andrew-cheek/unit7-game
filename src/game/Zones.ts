@@ -257,6 +257,25 @@ export class Zones {
       mech.group.rotation.y = randRange(0, 6.28)
       group.add(mech.group)
     }
+
+    // A crashed derelict ship half-buried in the dust.
+    const hullMat = new THREE.MeshStandardMaterial({ color: 0x4a4f5a, metalness: 0.7, roughness: 0.5 })
+    const dx = randRange(-100, 100)
+    const dz = randRange(-100, 100)
+    const dy = displace(dx, dz)
+    const hull = new THREE.Mesh(new THREE.CylinderGeometry(3, 4, 16, 12), hullMat)
+    hull.position.set(dx, dy + 1.5, dz)
+    hull.rotation.set(0.5, randRange(0, 6.28), 0.3)
+    hull.castShadow = true
+    group.add(hull)
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(11, 0.5, 4), hullMat)
+    wing.position.set(dx + 2, dy + 3, dz)
+    wing.rotation.set(0.5, 0, 0.6)
+    group.add(wing)
+    const portMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 2, roughness: 0.4 })
+    const port = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 8), portMat)
+    port.position.set(dx, dy + 2, dz + 7)
+    group.add(port)
   }
 
   private buildMoon(): PlanetEnv {
