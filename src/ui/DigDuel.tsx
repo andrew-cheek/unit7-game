@@ -10,18 +10,18 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
  * runs; onExit returns to Humanoid City.
  */
 
-const COLS = 100 // a large underground world; the camera shows only a window
-const ROWS = 68
-const VIEW = 30 // tiles across the short side of each near-square panel
-const TUNNELS = 10 // branch tunnels carved at start (lower = more solid dirt)
-const TUNNEL_LEN = 110
+const COLS = 120 // a large underground world; the camera shows only a window
+const ROWS = 84
+const VIEW = 42 // tiles across the short side of each near-square panel
+const TUNNELS = 14 // branch tunnels carved at start (lower = more solid dirt)
+const TUNNEL_LEN = 130
 const DIG_BRUSH = 0.9
 const MOVE_OPEN = 11
 const MOVE_DIG = 4.5
 
 // Retro cave palette (per the agreed rendering spec).
-// Lower-contrast browns so the dirt reads as fine grain, not a checkerboard.
-const ROCK = { void: '#050505', border: '#0500a8', base: '#9a642f', mid: '#875729', dark: '#5a3c20', light: '#b07a40', hi: '#c98c4f', edge: '#241710' }
+// Dense fine-grain browns tuned to the reference dirt.
+const ROCK = { void: '#050505', border: '#0a12c0', base: '#97632f', mid: '#6e4824', dark: '#4a3018', light: '#b9824a', hi: '#c98c4f', edge: '#241710' }
 
 // Deterministic integer hash for stable, non-flickering per-tile pixel texture.
 const hash2D = (x: number, y: number) => {
@@ -235,20 +235,15 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     ctx.fillStyle = ROCK.border
     ctx.fillRect(0, 0, W, H)
     const border = Math.max(8, Math.round(Math.min(W, H) * 0.016))
-    // Split side-by-side in landscape, stacked top/bottom in portrait, so each
-    // panel stays near-square like the reference instead of a tall skinny strip.
-    const landscape = W >= H
-    const pw = landscape ? Math.floor((W - border * 3) / 2) : W - border * 2
-    const ph = landscape ? H - border * 2 : Math.floor((H - border * 3) / 2)
-    const panels = landscape
-      ? [
-          { rx: border, ry: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
-          { rx: border * 2 + pw, ry: border, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
-        ]
-      : [
-          { rx: border, ry: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
-          { rx: border, ry: border * 2 + ph, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
-        ]
+    // Two side-by-side near-square viewports (like the reference), centered, with
+    // the blue frame filling the remaining space (letterboxed on tall screens).
+    const pw = Math.floor((W - border * 3) / 2)
+    const ph = Math.min(H - border * 2, Math.round(pw * 1.15))
+    const oy = Math.floor((H - ph) / 2)
+    const panels = [
+      { rx: border, ry: oy, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
+      { rx: border * 2 + pw, ry: oy, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
+    ]
 
     for (const pan of panels) {
       const rx = pan.rx
@@ -288,16 +283,17 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
           // Base rock, then fine low-contrast grain. Each quadrant is usually
           // base, occasionally a slightly darker/lighter brown - so the dirt
           // looks uniform-but-textured rather than a high-contrast checkerboard.
-          ctx.fillStyle = ROCK.base
-          ctx.fillRect(px, py, cs, cs)
-          // Fine speckle: a few small grains per tile placed in a 3x3 sub-grid by
-          // hash bits -> reads as the reference's noisy dirt, not coarse blocks.
-          const h = hash2D(x, y)
-          const s = Math.max(1, Math.round(cell * 0.34))
-          const g = cell * 0.34
-          if (h % 2 === 0) { ctx.fillStyle = ROCK.mid; ctx.fillRect(px + (h % 3) * g, py + ((h >> 2) % 3) * g, s, s) }
-          if (h % 3 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + ((h >> 4) % 3) * g, py + ((h >> 6) % 3) * g, s, s) }
-          if (h % 5 === 0) { ctx.fillStyle = ROCK.light; ctx.fillRect(px + ((h >> 8) % 3) * g, py + ((h >> 10) % 3) * g, s, s) }
+          // Dense fine grain: 2x2 sub-tiles, each a brown chosen by hash, so the
+          // dirt reads as the reference's noisy speckle (mostly base, plenty of
+          // darker grain, occasional darkest/tan).
+          const hh = Math.ceil(cs / 2)
+          for (let sxi = 0; sxi < 2; sxi++) {
+            for (let syi = 0; syi < 2; syi++) {
+              const hv = hash2D(x * 2 + sxi, y * 2 + syi) % 8
+              ctx.fillStyle = hv < 4 ? ROCK.base : hv < 6 ? ROCK.mid : hv === 6 ? ROCK.dark : ROCK.light
+              ctx.fillRect(px + sxi * hh, py + syi * hh, hh, hh)
+            }
+          }
         }
       }
 
@@ -348,7 +344,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
       ctx.globalAlpha = Math.min(0.5, p.flash * 2)
       ctx.strokeStyle = '#ff2b3c'
       ctx.lineWidth = 8
-      ctx.strokeRect(border, border, pw, ph)
+      ctx.strokeRect(border, oy, pw, ph)
       ctx.restore()
     }
   }
