@@ -12,9 +12,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 
 const COLS = 100 // a large underground world; the camera shows only a window
 const ROWS = 68
-const VIEW_COLS = 30 // tiles shown across each panel (higher = more zoomed out)
-const VIEW_ROWS = 42 // tiles shown down each panel
-const TUNNELS = 13 // branch tunnels carved at start (lower = more solid dirt)
+const VIEW = 30 // tiles across the short side of each near-square panel
+const TUNNELS = 10 // branch tunnels carved at start (lower = more solid dirt)
 const TUNNEL_LEN = 110
 const DIG_BRUSH = 0.9
 const MOVE_OPEN = 11
@@ -236,24 +235,31 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     ctx.fillStyle = ROCK.border
     ctx.fillRect(0, 0, W, H)
     const border = Math.max(8, Math.round(Math.min(W, H) * 0.016))
-    const pw = Math.floor((W - border * 3) / 2)
-    const ph = H - border * 2
-
-    const panels = [
-      { rx: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
-      { rx: border * 2 + pw, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
-    ]
+    // Split side-by-side in landscape, stacked top/bottom in portrait, so each
+    // panel stays near-square like the reference instead of a tall skinny strip.
+    const landscape = W >= H
+    const pw = landscape ? Math.floor((W - border * 3) / 2) : W - border * 2
+    const ph = landscape ? H - border * 2 : Math.floor((H - border * 3) / 2)
+    const panels = landscape
+      ? [
+          { rx: border, ry: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
+          { rx: border * 2 + pw, ry: border, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
+        ]
+      : [
+          { rx: border, ry: border, cam: p.pos, enemy: b.pos, enemyColor: BOT_COLOR },
+          { rx: border, ry: border * 2 + ph, cam: b.pos, enemy: p.pos, enemyColor: PLAYER_COLOR },
+        ]
 
     for (const pan of panels) {
       const rx = pan.rx
-      const ry = border
+      const ry = pan.ry
       ctx.save()
       ctx.beginPath()
       ctx.rect(rx, ry, pw, ph)
       ctx.clip()
 
-      // Zoomed-out window: show many tiles per panel so the world feels vast.
-      const cell = Math.max(pw / VIEW_COLS, ph / VIEW_ROWS)
+      // Reference-scale window: ~VIEW tiles across the short side of the panel.
+      const cell = Math.max(6, Math.min(pw, ph) / VIEW)
       const halfW = pw / (2 * cell)
       const halfH = ph / (2 * cell)
       const camX = halfW * 2 >= COLS ? COLS / 2 : Math.max(halfW, Math.min(COLS - halfW, pan.cam.x))
@@ -284,25 +290,14 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
           // looks uniform-but-textured rather than a high-contrast checkerboard.
           ctx.fillStyle = ROCK.base
           ctx.fillRect(px, py, cs, cs)
-          // Fine grain only when tiles are big enough to show it (perf when zoomed).
-          if (cell >= 9) {
-            for (let qi = 0; qi < 4; qi++) {
-              const m = hash2D(x * 2 + (qi & 1), y * 2 + (qi >> 1)) % 5
-              if (m === 3) ctx.fillStyle = ROCK.mid
-              else if (m === 4) ctx.fillStyle = ROCK.light
-              else continue
-              ctx.fillRect(px + (qi & 1) * half, py + (qi >> 1) * half, half, half)
-            }
-          }
+          // Fine speckle: a few small grains per tile placed in a 3x3 sub-grid by
+          // hash bits -> reads as the reference's noisy dirt, not coarse blocks.
           const h = hash2D(x, y)
-          if (h % 11 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + (h % 2 ? half : 0), py + (h % 3 ? half : 0), hq, hq) } // dark grain
-          else if (h % 17 === 0) { ctx.fillStyle = ROCK.hi; ctx.fillRect(px + half - hq / 2, py + half - hq / 2, hq, hq) } // bright chip
-          // Dark carved edges where rock meets a tunnel.
-          ctx.fillStyle = ROCK.edge
-          if (op(x - 1, y)) ctx.fillRect(px, py, t, cs)
-          if (op(x + 1, y)) ctx.fillRect(px + cs - t, py, t, cs)
-          if (op(x, y - 1)) ctx.fillRect(px, py, cs, t)
-          if (op(x, y + 1)) ctx.fillRect(px, py + cs - t, cs, t)
+          const s = Math.max(1, Math.round(cell * 0.34))
+          const g = cell * 0.34
+          if (h % 2 === 0) { ctx.fillStyle = ROCK.mid; ctx.fillRect(px + (h % 3) * g, py + ((h >> 2) % 3) * g, s, s) }
+          if (h % 3 === 0) { ctx.fillStyle = ROCK.dark; ctx.fillRect(px + ((h >> 4) % 3) * g, py + ((h >> 6) % 3) * g, s, s) }
+          if (h % 5 === 0) { ctx.fillStyle = ROCK.light; ctx.fillRect(px + ((h >> 8) % 3) * g, py + ((h >> 10) % 3) * g, s, s) }
         }
       }
 
