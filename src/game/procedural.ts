@@ -83,15 +83,14 @@ export interface RobotColors {
 
 /** Stylized humanoid robot, feet at the group origin (y=0), facing +Z. */
 export function createRobot(colors: RobotColors = {}): RobotModel {
-  // "Blue Titan" look: navy-blue plating, silver limbs/head, cyan glow.
-  const body = colors.body ?? 0x1c3c82 // navy blue
-  const trim = colors.trim ?? config.palette.cyan
-  const accent = colors.accent ?? 0xb8bec8 // silver
+  const body = colors.body ?? config.palette.robot
+  const trim = colors.trim ?? config.palette.robotTrim
+  const accent = colors.accent ?? config.palette.purple
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: body, metalness: 0.6, roughness: 0.42 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x14161e, metalness: 0.5, roughness: 0.6 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.72, roughness: 0.4 }) // silver
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: trim, emissiveIntensity: 3.0, roughness: 0.4 })
+  const bodyMat = new THREE.MeshStandardMaterial({ color: body, metalness: 0.85, roughness: 0.32 })
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.6, roughness: 0.5 })
+  const accentMat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.7, roughness: 0.35 })
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: trim, emissiveIntensity: 3.4, roughness: 0.4 })
   const mats: THREE.Material[] = [bodyMat, darkMat, accentMat, trimMat]
 
   const group = new THREE.Group()
@@ -100,108 +99,85 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const core = new THREE.Group()
   group.add(core)
 
-  // Pelvis + bulky torso (blue) with silver shoulder pauldrons.
-  const pelvis = box(0.5, 0.26, 0.34, darkMat)
+  const pelvis = box(0.44, 0.24, 0.3, darkMat)
   pelvis.position.set(0, 1.0, 0)
   core.add(pelvis)
 
-  const torso = box(0.64, 0.66, 0.42, bodyMat)
-  torso.position.set(0, 1.36, 0)
+  const torso = box(0.52, 0.62, 0.34, bodyMat)
+  torso.position.set(0, 1.34, 0)
   core.add(torso)
 
-  for (const sx of [-1, 1]) {
-    const pauldron = box(0.3, 0.28, 0.46, accentMat)
-    pauldron.position.set(sx * 0.46, 1.62, 0)
-    core.add(pauldron)
-  }
+  const chestPlate = box(0.4, 0.34, 0.06, accentMat)
+  chestPlate.position.set(0, 1.4, 0.17)
+  core.add(chestPlate)
 
-  // Triangular glowing chest vent.
-  const vent = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.36, 3), trimMat)
-  vent.rotation.set(Math.PI, Math.PI, 0)
-  vent.position.set(0, 1.4, 0.22)
-  core.add(vent)
+  const chestCore = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 16), trimMat)
+  chestCore.rotation.x = Math.PI / 2
+  chestCore.position.set(0, 1.4, 0.21)
+  core.add(chestCore)
 
-  // Backpack/jetpack (dark) + thruster nozzles.
-  const pack = box(0.42, 0.46, 0.2, darkMat)
-  pack.position.set(0, 1.36, -0.27)
+  const pack = box(0.34, 0.4, 0.18, darkMat)
+  pack.position.set(0, 1.34, -0.24)
   core.add(pack)
-  for (const sx of [-0.1, 0.1]) {
+  for (const sx of [-0.09, 0.09]) {
     const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.12, 12), trimMat)
-    nozzle.position.set(sx, 1.08, -0.29)
+    nozzle.position.set(sx, 1.1, -0.26)
     core.add(nozzle)
   }
 
-  // Neck + silver wedge head with twin fins and a glowing visor.
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.1, 12), darkMat)
-  neck.position.set(0, 1.7, 0)
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.1, 12), darkMat)
+  neck.position.set(0, 1.66, 0)
   core.add(neck)
 
-  const head = box(0.4, 0.34, 0.4, accentMat)
-  head.position.set(0, 1.87, 0)
+  const head = box(0.34, 0.32, 0.34, bodyMat)
+  head.position.set(0, 1.82, 0)
   core.add(head)
 
-  const visor = box(0.34, 0.1, 0.06, trimMat)
-  visor.position.set(0, 1.89, 0.2)
+  const visor = box(0.3, 0.11, 0.06, trimMat)
+  visor.position.set(0, 1.84, 0.17)
   core.add(visor)
 
-  for (const sx of [-1, 1]) {
-    const fin = box(0.1, 0.5, 0.34, accentMat)
-    fin.position.set(sx * 0.13, 2.2, -0.02)
-    fin.rotation.z = sx * 0.26
-    core.add(fin)
-  }
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 8), darkMat)
+  antenna.position.set(0.1, 2.05, 0)
+  core.add(antenna)
+  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 10), trimMat)
+  antennaTip.position.set(0.1, 2.15, 0)
+  core.add(antennaTip)
 
-  // Beefy legs: blue thigh, silver knee band, silver shin + foot.
+  // Slim legs: thigh / shin / foot hung off a hip pivot that swings.
   const makeLeg = (sx: number) => {
     const hip = new THREE.Group()
     hip.position.set(sx, 0.98, 0)
-    const thigh = box(0.26, 0.42, 0.3, bodyMat)
+    const thigh = box(0.16, 0.4, 0.18, darkMat)
     thigh.position.set(0, -0.2, 0)
-    const knee = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.3, 16), accentMat)
-    knee.rotation.z = Math.PI / 2
-    knee.position.set(0, -0.44, 0)
-    const shin = box(0.28, 0.46, 0.32, accentMat)
-    shin.position.set(0, -0.68, 0)
-    const foot = box(0.32, 0.18, 0.44, accentMat)
-    foot.position.set(0, -0.94, 0.07)
-    hip.add(thigh, knee, shin, foot)
+    const shin = box(0.14, 0.42, 0.16, bodyMat)
+    shin.position.set(0, -0.6, 0)
+    const foot = box(0.18, 0.12, 0.32, accentMat)
+    foot.position.set(0, -0.84, 0.06)
+    hip.add(thigh, shin, foot)
     core.add(hip)
     return hip
   }
-  // Arms: left = arm cannon, right = heavy gauntlet. Shoulder pivot swings.
-  const makeArm = (sx: number, cannon: boolean) => {
+  // Slim arms: ball shoulder, upper, forearm, hand. Shoulder pivot swings.
+  const makeArm = (sx: number) => {
     const shoulder = new THREE.Group()
     shoulder.position.set(sx, 1.56, 0)
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), accentMat)
-    const upper = box(0.2, 0.36, 0.22, accentMat)
-    upper.position.set(0, -0.24, 0)
-    shoulder.add(ball, upper)
-    if (cannon) {
-      const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.36, 16), bodyMat)
-      housing.rotation.x = Math.PI / 2
-      housing.position.set(0, -0.52, 0.06)
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.34, 16), accentMat)
-      barrel.rotation.x = Math.PI / 2
-      barrel.position.set(0, -0.52, 0.34)
-      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 12), trimMat)
-      muzzle.rotation.x = Math.PI / 2
-      muzzle.position.set(0, -0.52, 0.52)
-      shoulder.add(housing, barrel, muzzle)
-    } else {
-      const fore = box(0.22, 0.32, 0.24, bodyMat)
-      fore.position.set(0, -0.52, 0)
-      const fist = box(0.28, 0.26, 0.32, accentMat)
-      fist.position.set(0, -0.76, 0)
-      shoulder.add(fore, fist)
-    }
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), accentMat)
+    const upper = box(0.14, 0.34, 0.16, bodyMat)
+    upper.position.set(0, -0.22, 0)
+    const fore = box(0.12, 0.32, 0.14, darkMat)
+    fore.position.set(0, -0.5, 0)
+    const hand = box(0.14, 0.14, 0.16, accentMat)
+    hand.position.set(0, -0.7, 0)
+    shoulder.add(ball, upper, fore, hand)
     core.add(shoulder)
     return shoulder
   }
 
-  const legL = makeLeg(-0.2)
-  const legR = makeLeg(0.2)
-  const armL = makeArm(-0.46, true)
-  const armR = makeArm(0.46, false)
+  const legL = makeLeg(-0.15)
+  const legR = makeLeg(0.15)
+  const armL = makeArm(-0.36)
+  const armR = makeArm(0.36)
 
   // Foldable wings for the plane morph: a pivot at the shoulder, geometry hung
   // outward so scaling the pivot extends the wing from the body.
@@ -770,6 +746,62 @@ export function createHovercar(): VehicleModel {
 }
 
 /**
+ * A long city commuter bus / shuttle (origin at body center, facing +Z). Boxy
+ * hull with a bright lit window strip, a roof sign, headlights and four wheels.
+ * Used by Events to ferry commuter NPCs to the office buildings.
+ */
+export function createBus(): VehicleModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xf0a52a, metalness: 0.5, roughness: 0.5 })
+  const dark = new THREE.MeshStandardMaterial({ color: 0x16181f, metalness: 0.6, roughness: 0.5 })
+  mats.push(bodyMat, dark)
+  const glass = glowMat(mats, 0x9fe6ff, 1.6)
+
+  const hull = box(2.4, 2.2, 7.2, bodyMat)
+  hull.position.y = 1.6
+  group.add(hull)
+  // Lit window band down both sides + the front.
+  for (const sx of [-1.21, 1.21]) {
+    const win = box(0.06, 0.8, 6.2, glass)
+    win.position.set(sx, 1.9, 0)
+    group.add(win)
+  }
+  const windshield = box(2.0, 0.9, 0.06, glass)
+  windshield.position.set(0, 1.9, 3.61)
+  group.add(windshield)
+  // Roof destination sign.
+  const sign = box(1.6, 0.4, 0.1, glowMat(mats, config.palette.orange, 2.4))
+  sign.position.set(0, 2.85, 2.6)
+  group.add(sign)
+  // Headlights + tail lights.
+  for (const sx of [-0.8, 0.8]) {
+    const hl = box(0.4, 0.25, 0.1, glowMat(mats, 0xffffe0, 3))
+    hl.position.set(sx, 0.8, 3.62)
+    group.add(hl)
+    const tl = box(0.4, 0.25, 0.1, glowMat(mats, 0xff3030, 2.6))
+    tl.position.set(sx, 0.8, -3.62)
+    group.add(tl)
+  }
+  // Wheels.
+  const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 14)
+  for (const sx of [-1.15, 1.15]) {
+    for (const sz of [-2.4, 2.2]) {
+      const w = new THREE.Mesh(wheelGeo, dark)
+      w.rotation.z = Math.PI / 2
+      w.position.set(sx, 0.5, sz)
+      group.add(w)
+    }
+  }
+  shadowAll(group)
+  return {
+    group,
+    update: () => {},
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/**
  * Police hover-cruiser (origin at chassis center). Reads as a cop car: dark
  * livery, white door panels, headlights, and a roof light bar whose red/blue
  * halves flash alternately in `update` so the siren is on. Bloom makes the bar
@@ -1216,6 +1248,113 @@ export function createSpeederBike(): VehicleModel {
   return {
     group,
     update: (dt) => { t += dt; underMat.emissiveIntensity = 3.4 + Math.sin(t * 5) * 1.0 },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/**
+ * The Blue Titan: a large pilotable mech the player climbs into near the
+ * portals. Roughly 4.5m tall, heavy blue armor with cyan trim, an open cockpit
+ * the robot drops into, twin shoulder pods and a glowing core. Built as a
+ * VehicleModel so it plugs straight into the vehicle system; the walk cycle is
+ * driven by speed01 like the other walkers.
+ */
+export function createTitan(): VehicleModel {
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const armor = new THREE.MeshStandardMaterial({ color: 0x2348c8, metalness: 0.85, roughness: 0.3 })
+  const dark = new THREE.MeshStandardMaterial({ color: 0x141a2c, metalness: 0.7, roughness: 0.45 })
+  const steel = new THREE.MeshStandardMaterial({ color: 0x9fb4d8, metalness: 0.9, roughness: 0.28 })
+  mats.push(armor, dark, steel)
+  const trim = glowMat(mats, config.palette.cyan, 3.2)
+  const coreGlow = glowMat(mats, 0x6fd8ff, 4)
+
+  const core = new THREE.Group()
+  group.add(core)
+
+  // Hips / waist.
+  const pelvis = box(1.5, 0.7, 1.0, dark)
+  pelvis.position.y = 2.5
+  core.add(pelvis)
+
+  // Chest with an open cockpit recess the pilot drops into.
+  const torso = box(1.9, 1.5, 1.3, armor)
+  torso.position.y = 3.5
+  core.add(torso)
+  const cockpit = box(0.9, 0.8, 0.5, dark)
+  cockpit.position.set(0, 3.7, 0.55)
+  core.add(cockpit)
+  const reactor = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.2, 18), coreGlow)
+  reactor.rotation.x = Math.PI / 2
+  reactor.position.set(0, 3.3, 0.62)
+  core.add(reactor)
+  for (const sx of [-0.95, 0.95]) {
+    const strip = box(0.12, 1.2, 0.2, trim)
+    strip.position.set(sx, 3.5, 0.6)
+    core.add(strip)
+  }
+
+  // Head / sensor.
+  const head = box(0.7, 0.55, 0.7, steel)
+  head.position.y = 4.5
+  core.add(head)
+  const eye = box(0.5, 0.14, 0.2, trim)
+  eye.position.set(0, 4.52, 0.35)
+  core.add(eye)
+
+  // Shoulder pods.
+  const arms: THREE.Group[] = []
+  const mkArm = (sx: number) => {
+    const sh = new THREE.Group()
+    sh.position.set(sx, 4.0, 0)
+    const pod = box(0.7, 0.8, 0.9, armor)
+    sh.add(pod)
+    const upper = box(0.45, 1.0, 0.5, steel)
+    upper.position.set(sx * 0.1, -0.8, 0)
+    const fore = box(0.5, 0.9, 0.55, dark)
+    fore.position.set(sx * 0.1, -1.7, 0)
+    const fist = box(0.6, 0.55, 0.6, steel)
+    fist.position.set(sx * 0.1, -2.25, 0)
+    sh.add(upper, fore, fist)
+    core.add(sh)
+    arms.push(sh)
+    return sh
+  }
+  mkArm(-1.3); mkArm(1.3)
+
+  // Legs.
+  const legs: THREE.Group[] = []
+  const mkLeg = (sx: number) => {
+    const hip = new THREE.Group()
+    hip.position.set(sx, 2.3, 0)
+    const thigh = box(0.6, 1.2, 0.7, armor)
+    thigh.position.y = -0.6
+    const shin = box(0.5, 1.2, 0.55, steel)
+    shin.position.y = -1.7
+    const foot = box(0.75, 0.4, 1.2, dark)
+    foot.position.set(0, -2.4, 0.25)
+    hip.add(thigh, shin, foot)
+    core.add(hip)
+    legs.push(hip)
+  }
+  mkLeg(-0.6); mkLeg(0.6)
+
+  shadowAll(group)
+  const reactorMat = reactor.material as THREE.MeshStandardMaterial
+  let phase = 0
+  let t = 0
+  return {
+    group,
+    update: (dt, s01) => {
+      t += dt
+      const s = clamp01(s01)
+      phase += dt * (1.6 + s * 3.0)
+      legs.forEach((l, i) => { l.rotation.x = Math.sin(phase + (i ? Math.PI : 0)) * (0.08 + s * 0.45) })
+      arms.forEach((a, i) => { a.rotation.x = Math.sin(phase + (i ? 0 : Math.PI)) * (0.06 + s * 0.3) })
+      core.position.y = Math.abs(Math.sin(phase)) * 0.1 * s
+      core.rotation.z = Math.sin(phase) * 0.02 * s
+      reactorMat.emissiveIntensity = 3.6 + Math.sin(t * 4) * 0.8
+    },
     dispose: () => disposeGroup(group, mats),
   }
 }

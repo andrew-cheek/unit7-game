@@ -12,6 +12,57 @@ interface Billboard {
 }
 
 /**
+ * Where the commuter buses stop and where the office buildings sit. Shared with
+ * Events so buses + commuters line up with the lit office rooms. `face` is the
+ * office group's yaw so its open front points back toward the avenue.
+ */
+export interface OfficeAnchor {
+  office: THREE.Vector3 // office building centre
+  door: THREE.Vector3 // where commuters enter (and vanish)
+  stop: THREE.Vector3 // bus stop on the avenue
+  face: number // office rotation.y
+}
+export const OFFICE_ANCHORS: OfficeAnchor[] = [
+  { office: new THREE.Vector3(48, 0, 10), door: new THREE.Vector3(44, 0, 10), stop: new THREE.Vector3(38, 0, 10), face: -Math.PI / 2 },
+  { office: new THREE.Vector3(10, 0, 48), door: new THREE.Vector3(10, 0, 44), stop: new THREE.Vector3(10, 0, 38), face: Math.PI },
+  { office: new THREE.Vector3(-48, 0, -10), door: new THREE.Vector3(-44, 0, -10), stop: new THREE.Vector3(-38, 0, -10), face: Math.PI / 2 },
+]
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const smooth01 = (x: number) => {
+  const t = Math.min(1, Math.max(0, x))
+  return t * t * (3 - 2 * t)
+}
+
+// Earth dawn cycle: night -> warm sunrise. The sun starts low on the horizon
+// and climbs while the sky, fog and fills warm up. Begins after the first
+// `SUNRISE_DELAY` seconds and eases in over `SUNRISE_DUR`.
+const SUNRISE_DELAY = 8
+const SUNRISE_DUR = 16
+const NIGHT = {
+  skyTop: new THREE.Color(0x05070f),
+  skyBot: new THREE.Color(0x180a2c),
+  fog: new THREE.Color(0x070a16),
+  ambient: new THREE.Color(0x223044),
+  ambientI: 0.55,
+  hemiSky: new THREE.Color(0x4a5a80),
+  hemiI: 0.55,
+  sun: new THREE.Color(0xbfd2ff),
+  sunI: 1.0,
+}
+const DAWN = {
+  skyTop: new THREE.Color(0x2a4f9c),
+  skyBot: new THREE.Color(0xff8a4d),
+  fog: new THREE.Color(0x3a5180),
+  ambient: new THREE.Color(0x7186b0),
+  ambientI: 1.25,
+  hemiSky: new THREE.Color(0xa7bdec),
+  hemiI: 0.95,
+  sun: new THREE.Color(0xfff0d8),
+  sunI: 2.2,
+}
+
+/**
  * The futuristic district + its atmosphere. Stage 5 art pass turns the gray test
  * city into a neon-noir skyline: window-lit towers (emissive facade textures),
  * wet reflective roads with a neon grid, holographic billboards, a gradient/star
@@ -55,6 +106,9 @@ export class World {
   private shafts: THREE.Mesh[] = []
   private dishes: THREE.Group[] = []
   private adPanels: THREE.MeshStandardMaterial[] = []
+  private zone: Zone = 'earth'
+  private cTmp = new THREE.Color()
+  private cTmp2 = new THREE.Color()
 
   constructor(scene: THREE.Scene, zone: Zone = 'earth') {
     this.scene = scene
@@ -77,6 +131,7 @@ export class World {
     this.buildMarket()
     this.buildSetPieces()
     this.buildAdPanels()
+    this.buildOffices()
     this.buildAtmosphere()
     this.buildLights()
     this.addBoundaryColliders()
@@ -511,6 +566,67 @@ export class World {
     }
   }
 
+  /**
+   * Glass-fronted ground-floor office rooms at the bus-stop buildings: a lit
+   * interior with desk rows and seated worker robots facing glowing monitors,
+   * so the city's commuters have somewhere to "go to work". The open front faces
+   * the avenue (anchor.face) so you see the workers from the street.
+   */
+  private buildOffices() {
+    const wallMat = this.own(new THREE.MeshStandardMaterial({ color: 0x20242f, metalness: 0.5, roughness: 0.6 }))
+    const floorMat = this.own(new THREE.MeshStandardMaterial({ color: 0x14171f, metalness: 0.4, roughness: 0.7 }))
+    const deskMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3142, metalness: 0.6, roughness: 0.5 }))
+    const workerMat = this.own(new THREE.MeshStandardMaterial({ color: config.palette.robot, metalness: 0.7, roughness: 0.4 }))
+    // Warm interior glow so the office reads as lit and occupied.
+    const lightMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffe6b0 }))
+
+    const W = 8, D = 6, H = 3.6
+    for (const a of OFFICE_ANCHORS) {
+      const g = new THREE.Group()
+      g.position.copy(a.office)
+      g.rotation.y = a.face
+      // Local space: open front at +Z, room extends to -Z.
+      const floor = new THREE.Mesh(this.boxGeo, floorMat)
+      floor.scale.set(W, 0.2, D); floor.position.set(0, 0.1, -D / 2)
+      floor.receiveShadow = true
+      g.add(floor)
+      const back = new THREE.Mesh(this.boxGeo, wallMat)
+      back.scale.set(W, H, 0.3); back.position.set(0, H / 2, -D)
+      g.add(back)
+      for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(this.boxGeo, wallMat)
+        side.scale.set(0.3, H, D); side.position.set(sx * W / 2, H / 2, -D / 2)
+        g.add(side)
+      }
+      const roof = new THREE.Mesh(this.boxGeo, wallMat)
+      roof.scale.set(W, 0.25, D); roof.position.set(0, H, -D / 2)
+      roof.castShadow = true
+      g.add(roof)
+      // Ceiling light strip.
+      const strip = new THREE.Mesh(this.boxGeo, lightMat)
+      strip.scale.set(W * 0.7, 0.12, 0.5); strip.position.set(0, H - 0.2, -D / 2)
+      g.add(strip)
+      // Two desks with a seated worker robot + glowing monitor each.
+      for (const dx of [-W / 4, W / 4]) {
+        const desk = new THREE.Mesh(this.boxGeo, deskMat)
+        desk.scale.set(2.0, 0.12, 1.0); desk.position.set(dx, 1.05, -D + 1.4)
+        g.add(desk)
+        const monitor = new THREE.Mesh(this.boxGeo, this.glow(config.palette.cyan, 2.2))
+        monitor.scale.set(1.0, 0.6, 0.08); monitor.position.set(dx, 1.5, -D + 1.05)
+        g.add(monitor)
+        // Seated worker: torso + head, facing the monitor (toward -Z).
+        const torso = new THREE.Mesh(this.boxGeo, workerMat)
+        torso.scale.set(0.5, 0.7, 0.4); torso.position.set(dx, 1.25, -D + 2.1)
+        torso.castShadow = true
+        g.add(torso)
+        const head = new THREE.Mesh(this.boxGeo, workerMat)
+        head.scale.set(0.3, 0.3, 0.3); head.position.set(dx, 1.75, -D + 2.1)
+        g.add(head)
+      }
+      this.group.add(g)
+    }
+  }
+
   /** Neon drizzle near the player + drifting embers + (desktop) light shafts. */
   private buildAtmosphere() {
     const high = config.tier.name === 'high'
@@ -610,6 +726,7 @@ export class World {
   }
 
   applyZone(zone: Zone) {
+    this.zone = zone
     const z: ZoneCfg = config.zones[zone]
     const fogColor = new THREE.Color(z.fog)
     this.scene.fog = new THREE.FogExp2(fogColor.getHex(), zone === 'moon' ? 0.006 : 0.011)
@@ -633,12 +750,38 @@ export class World {
     this.accentLights.forEach((l) => (l.visible = v))
   }
 
+  /** Blend night -> dawn across the lighting, sky and fog for the given 0..1. */
+  private applyDawn(t: number) {
+    this.sky.setColors(
+      this.cTmp.copy(NIGHT.skyTop).lerp(DAWN.skyTop, t).getHex(),
+      this.cTmp2.copy(NIGHT.skyBot).lerp(DAWN.skyBot, t).getHex(),
+    )
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.copy(NIGHT.fog).lerp(DAWN.fog, t)
+    }
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(NIGHT.fog).lerp(DAWN.fog, t)
+    }
+    this.ambient.color.copy(NIGHT.ambient).lerp(DAWN.ambient, t)
+    this.ambient.intensity = lerp(NIGHT.ambientI, DAWN.ambientI, t)
+    this.hemi.color.copy(NIGHT.hemiSky).lerp(DAWN.hemiSky, t)
+    this.hemi.intensity = lerp(NIGHT.hemiI, DAWN.hemiI, t)
+    this.sun.color.copy(NIGHT.sun).lerp(DAWN.sun, t)
+    this.sun.intensity = lerp(NIGHT.sunI, DAWN.sunI, t)
+  }
+
   /** Update the sky/sun/billboards. Always runs so the sky animates everywhere. */
   update(dt: number, focus: THREE.Vector3) {
     this.time += dt
     this.sky.update(dt)
     this.sky.group.position.set(focus.x, 0, focus.z)
-    this.sun.position.set(focus.x + 60, focus.y + 90, focus.z + 40)
+
+    // Gradual sunrise on Earth: sun climbs from the horizon as the world warms.
+    const dawn = this.zone === 'earth' ? smooth01((this.time - SUNRISE_DELAY) / SUNRISE_DUR) : 0
+    const sunOffX = lerp(120, 60, dawn)
+    const sunOffY = lerp(24, 90, dawn)
+    this.sun.position.set(focus.x + sunOffX, focus.y + sunOffY, focus.z + 40)
+    if (this.zone === 'earth') this.applyDawn(dawn)
     this.sunTarget.position.copy(focus)
     this.sunTarget.updateMatrixWorld()
     for (const b of this.billboards) {

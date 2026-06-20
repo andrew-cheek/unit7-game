@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createAlien, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
+import { createAlien, createBus, createCitizen, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { dampAngle, randRange } from './utils'
+import { OFFICE_ANCHORS } from './World'
 import type { Physics } from './Physics'
 import type { Capturable } from './Game'
 import type { PowerupKind } from './types'
@@ -46,6 +47,28 @@ interface Police {
   wp: number
   speed: number
 }
+interface BusWaypoint {
+  p: THREE.Vector3
+  stopIdx: number // office anchor index if this is a bus stop, else -1
+}
+interface Bus {
+  model: VehicleModel
+  pos: THREE.Vector3
+  yaw: number
+  wp: number
+  speed: number
+  state: 'driving' | 'boarding'
+  timer: number
+}
+interface Commuter {
+  pos: THREE.Vector3
+  vel: THREE.Vector3
+  yaw: number
+  target: THREE.Vector3
+  model: CharacterModel
+  fade: number // 1 -> 0 as they "enter" the building
+  arriving: boolean
+}
 
 const POWERUP_COLOR: Record<PowerupKind, number> = { speed: 0x27e7ff, shield: 0x8a5cff, fuel: 0x9bff4d, score: 0xff8a1e }
 const POWERUP_KINDS: PowerupKind[] = ['speed', 'shield', 'fuel', 'score']
@@ -69,6 +92,9 @@ export class Events {
   private drones: Drone[] = []
   private traffic: Traffic[] = []
   private police: Police | null = null
+  private buses: Bus[] = []
+  private commuters: Commuter[] = []
+  private busRoute: BusWaypoint[] = []
   private ownedMats: THREE.Material[] = []
 
   private shipModel: VehicleModel
@@ -92,6 +118,7 @@ export class Events {
     for (let i = 0; i < Math.round(config.events.droneCount * q); i++) this.spawnDrone(i)
     for (let i = 0; i < Math.round(config.events.trafficCount * q); i++) this.spawnTraffic(i)
     this.spawnPolice()
+    this.spawnBuses()
 
     this.shipModel = createSpaceship()
     this.shipModel.group.visible = false
@@ -191,6 +218,54 @@ export class Events {
     this.police = { model, pos, yaw: 0, waypoints, wp: 1, speed: 16 }
   }
 
+  /**
+   * Commuter buses that loop the avenues, pause at the office stops and let out
+   * pedestrians who walk into the buildings for work. The route is a rectangle
+   * around the plaza with the three office stops inserted on its edges.
+   */
+  private spawnBuses() {
+    const mk = (x: number, z: number, stopIdx: number): BusWaypoint => ({ p: new THREE.Vector3(x, 0, z), stopIdx })
+    this.busRoute = [
+      mk(38, 38, -1),
+      mk(OFFICE_ANCHORS[1].stop.x, OFFICE_ANCHORS[1].stop.z, 1),
+      mk(-38, 38, -1),
+      mk(OFFICE_ANCHORS[2].stop.x, OFFICE_ANCHORS[2].stop.z, 2),
+      mk(-38, -38, -1),
+      mk(38, -38, -1),
+      mk(OFFICE_ANCHORS[0].stop.x, OFFICE_ANCHORS[0].stop.z, 0),
+    ]
+    const n = config.tier.name === 'high' ? 2 : 1
+    for (let i = 0; i < n; i++) {
+      const model = createBus()
+      this.root.add(model.group)
+      // Stagger the buses around the loop so they don't overlap.
+      const wp = Math.floor((i / n) * this.busRoute.length)
+      const start = this.busRoute[wp].p
+      const pos = new THREE.Vector3(start.x, 0, start.z)
+      pos.y = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
+      model.group.position.copy(pos)
+      this.buses.push({ model, pos, yaw: 0, wp: (wp + 1) % this.busRoute.length, speed: 12, state: 'driving', timer: 0 })
+    }
+  }
+
+  private spawnCommuter(at: THREE.Vector3, door: THREE.Vector3) {
+    // Mix of citizens and a few robot workers heading in for the shift.
+    const model = createCitizen()
+    const pos = new THREE.Vector3(at.x + randRange(-1.5, 1.5), 0, at.z + randRange(-1.5, 1.5))
+    pos.y = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
+    model.group.position.copy(pos)
+    this.root.add(model.group)
+    this.commuters.push({
+      pos,
+      vel: new THREE.Vector3(),
+      yaw: 0,
+      target: new THREE.Vector3(door.x + randRange(-1, 1), 0, door.z),
+      model,
+      fade: 1,
+      arriving: false,
+    })
+  }
+
   // --- per-frame -----------------------------------------------------------
 
   update(dt: number, playerPos: THREE.Vector3) {
@@ -199,8 +274,90 @@ export class Events {
     this.updateDrones(dt)
     this.updateTraffic(dt)
     this.updatePolice(dt)
+    this.updateBuses(dt)
+    this.updateCommuters(dt)
     this.updateShip(dt)
     this.updateAliens(dt)
+  }
+
+  private updateBuses(dt: number) {
+    for (const b of this.buses) {
+      b.model.update(dt, 1)
+      if (b.state === 'boarding') {
+        b.timer -= dt
+        if (b.timer <= 0) {
+          b.wp = (b.wp + 1) % this.busRoute.length
+          b.state = 'driving'
+        }
+      } else {
+        const tgt = this.busRoute[b.wp]
+        const dx = tgt.p.x - b.pos.x
+        const dz = tgt.p.z - b.pos.z
+        const d = Math.hypot(dx, dz)
+        if (d < 2.5) {
+          if (tgt.stopIdx >= 0 && this.commuters.length < 14) {
+            // Pull up and let commuters out toward the office door.
+            b.state = 'boarding'
+            b.timer = 3.5
+            const door = OFFICE_ANCHORS[tgt.stopIdx].door
+            const count = 2 + Math.floor(Math.random() * 2)
+            for (let k = 0; k < count; k++) this.spawnCommuter(b.pos, door)
+          } else {
+            b.wp = (b.wp + 1) % this.busRoute.length
+          }
+        } else {
+          b.pos.x += (dx / d) * b.speed * dt
+          b.pos.z += (dz / d) * b.speed * dt
+          b.yaw = dampAngle(b.yaw, Math.atan2(dx, dz), 5, dt)
+        }
+      }
+      const gy = this.physics.sampleGround(b.pos.x, b.pos.z, b.pos.y + 6)?.y ?? 0
+      b.pos.y = gy
+      b.model.group.position.copy(b.pos)
+      b.model.group.rotation.y = b.yaw
+    }
+  }
+
+  private updateCommuters(dt: number) {
+    const speed = config.npc.walkSpeed
+    for (let i = this.commuters.length - 1; i >= 0; i--) {
+      const c = this.commuters[i]
+      if (c.arriving) {
+        // Reached the door: shrink + fade as they step inside, then remove.
+        c.fade -= dt * 1.5
+        const s = Math.max(0.001, c.fade)
+        c.model.group.scale.setScalar(s)
+        if (c.fade <= 0) {
+          this.root.remove(c.model.group)
+          c.model.dispose()
+          this.commuters.splice(i, 1)
+        } else {
+          c.model.update(dt, 0.5, true)
+        }
+        continue
+      }
+      const tx = c.target.x - c.pos.x
+      const tz = c.target.z - c.pos.z
+      const td = Math.hypot(tx, tz)
+      if (td < 1.2) {
+        c.arriving = true
+        continue
+      }
+      c.vel.x = approach(c.vel.x, (tx / td) * speed, 8 * dt)
+      c.vel.z = approach(c.vel.z, (tz / td) * speed, 8 * dt)
+      c.pos.x += c.vel.x * dt
+      c.pos.z += c.vel.z * dt
+      this.physics.resolveHorizontal(c.pos, c.vel, 0.4, 1.6)
+      const g = this.physics.sampleGround(c.pos.x, c.pos.z, c.pos.y + 2)
+      if (g) c.pos.y = g.y
+      const sp = Math.hypot(c.vel.x, c.vel.z)
+      if (sp > 0.1) {
+        c.yaw = dampAngle(c.yaw, Math.atan2(c.vel.x, c.vel.z), 8, dt)
+        c.model.group.rotation.y = c.yaw
+      }
+      c.model.group.position.copy(c.pos)
+      c.model.update(dt, sp / speed, true)
+    }
   }
 
   private updatePolice(dt: number) {
@@ -424,6 +581,8 @@ export class Events {
     for (const d of this.drones) d.model.dispose()
     for (const c of this.traffic) c.model.dispose()
     this.police?.model.dispose()
+    for (const b of this.buses) b.model.dispose()
+    for (const c of this.commuters) c.model.dispose()
     for (const a of this.aliens) a.model.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }

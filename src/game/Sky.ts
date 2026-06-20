@@ -34,7 +34,7 @@ export class Sky {
 
   // Elevated winding "cyber highway" + the cars racing along it.
   private hwSamples: { p: THREE.Vector3; tan: THREE.Vector3 }[] = []
-  private hwCars: { mesh: THREE.Mesh; t: number; speed: number }[] = []
+  private hwCars: { mesh: THREE.Object3D; t: number; speed: number }[] = []
   private extraMats: THREE.Material[] = []
   private extraGeos: THREE.BufferGeometry[] = []
 
@@ -93,8 +93,8 @@ export class Sky {
     const N = 9
     for (let i = 0; i < N; i++) {
       const a = (i / N) * Math.PI * 2
-      const r = 150 + Math.sin(a * 3) * 55 // weaves in and out
-      const y = 58 + Math.sin(a * 2) * 16 // rolls up and down
+      const r = 140 + Math.sin(a * 3) * 50 // weaves in and out
+      const y = 40 + Math.sin(a * 2) * 12 // lower + flatter so it reads clearly
       ctrl.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r))
     }
     const curve = new THREE.CatmullRomCurve3(ctrl, true, 'catmullrom', 0.5)
@@ -106,33 +106,58 @@ export class Sky {
       this.hwSamples.push({ p: curve.getPointAt(t), tan: curve.getTangentAt(t) })
     }
 
-    // Translucent deck + glowing edge rails (see-through neon).
+    // Wider, more solid deck so the road is unmistakable.
     const deck = new THREE.Mesh(
-      ownG(new THREE.TubeGeometry(curve, S, 3.2, 4, true)),
-      ownM(new THREE.MeshBasicMaterial({ color: 0x12203a, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, fog: false })),
+      ownG(new THREE.TubeGeometry(curve, S, 4.5, 4, true)),
+      ownM(new THREE.MeshBasicMaterial({ color: 0x1a2c4e, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, fog: false })),
     )
     this.group.add(deck)
-    for (const off of [-3.2, 3.2]) {
+    // Brighter, thicker glowing edge rails.
+    for (const off of [-4.4, 4.4]) {
       const railPts = this.hwSamples.map((s) => {
         const right = new THREE.Vector3().crossVectors(s.tan, new THREE.Vector3(0, 1, 0)).normalize()
         return s.p.clone().addScaledVector(right, off)
       })
       const rail = new THREE.Mesh(
-        ownG(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPts, true), S, 0.35, 5, true)),
-        ownM(new THREE.MeshBasicMaterial({ color: off < 0 ? 0x27e7ff : 0xff2bd0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
+        ownG(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPts, true), S, 0.6, 6, true)),
+        ownM(new THREE.MeshBasicMaterial({ color: off < 0 ? 0x27e7ff : 0xff2bd0, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
       )
       this.group.add(rail)
     }
+    // A faint centre line for the "two-lane road" read.
+    const centrePts = this.hwSamples.map((s) => s.p.clone().setY(s.p.y + 0.2))
+    const centre = new THREE.Mesh(
+      ownG(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(centrePts, true), S, 0.12, 5, true)),
+      ownM(new THREE.MeshBasicMaterial({ color: 0xffe79a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
+    )
+    this.group.add(centre)
 
-    // The cars: bright, additive so they glow through the translucent deck.
-    const carGeo = ownG(new THREE.BoxGeometry(1.4, 0.6, 3.0))
-    const colors = [0x9bff4d, 0xffffff, 0xffd27f, 0x7fd8ff]
-    const count = Math.round(16 * densityScale)
+    // Shared car geometries so all cars are cheap to build.
+    const bodyGeo = ownG(new THREE.BoxGeometry(1.7, 0.55, 3.4))
+    const cabinGeo = ownG(new THREE.BoxGeometry(1.3, 0.5, 1.6))
+    const lightGeo = ownG(new THREE.BoxGeometry(1.5, 0.18, 0.18))
+    const bodyColors = [0x9bff4d, 0xffffff, 0xffd27f, 0x7fd8ff, 0xff7fb0, 0xb89bff]
+    const count = Math.round(30 * densityScale)
     for (let i = 0; i < count; i++) {
-      const mat = ownM(new THREE.MeshBasicMaterial({ color: colors[i % colors.length], fog: false }))
-      const mesh = new THREE.Mesh(carGeo, mat)
-      this.group.add(mesh)
-      this.hwCars.push({ mesh, t: i / count, speed: (0.05 + Math.random() * 0.04) }) // fast laps
+      // Build a little car: body + glassy cabin + bright head/tail lights, all
+      // additive/fog-free so they glow through the translucent deck.
+      const car = new THREE.Group()
+      const bodyMat = ownM(new THREE.MeshBasicMaterial({ color: bodyColors[i % bodyColors.length], fog: false }))
+      const body = new THREE.Mesh(bodyGeo, bodyMat)
+      car.add(body)
+      const cabin = new THREE.Mesh(cabinGeo, ownM(new THREE.MeshBasicMaterial({ color: 0x0c1830, transparent: true, opacity: 0.85, fog: false })))
+      cabin.position.set(0, 0.5, -0.2)
+      car.add(cabin)
+      const head = new THREE.Mesh(lightGeo, ownM(new THREE.MeshBasicMaterial({ color: 0xffffe0, blending: THREE.AdditiveBlending, fog: false, transparent: true })))
+      head.position.set(0, 0, 1.75)
+      car.add(head)
+      const tail = new THREE.Mesh(lightGeo, ownM(new THREE.MeshBasicMaterial({ color: 0xff3030, blending: THREE.AdditiveBlending, fog: false, transparent: true })))
+      tail.position.set(0, 0, -1.75)
+      car.add(tail)
+      // Spread across both lanes.
+      car.userData.lane = (i % 2 ? 1 : -1) * 2.0
+      this.group.add(car)
+      this.hwCars.push({ mesh: car, t: i / count, speed: 0.05 + Math.random() * 0.05 })
     }
   }
 
@@ -161,11 +186,16 @@ export class Sky {
   private updateHighway(dt: number) {
     const S = this.hwSamples.length
     if (S === 0) return
+    const right = new THREE.Vector3()
+    const up = new THREE.Vector3(0, 1, 0)
     for (const c of this.hwCars) {
       c.t = (c.t + c.speed * dt) % 1
       const s = this.hwSamples[Math.floor(c.t * S) % S]
-      c.mesh.position.copy(s.p).y += 0.5 // ride on top of the deck
-      c.mesh.lookAt(s.p.x + s.tan.x, s.p.y + 0.5 + s.tan.y, s.p.z + s.tan.z)
+      const lane = (c.mesh.userData.lane as number) || 0
+      right.crossVectors(s.tan, up).normalize()
+      c.mesh.position.copy(s.p).addScaledVector(right, lane)
+      c.mesh.position.y += 0.55 // ride on top of the deck
+      c.mesh.lookAt(c.mesh.position.x + s.tan.x, c.mesh.position.y + s.tan.y, c.mesh.position.z + s.tan.z)
     }
   }
 

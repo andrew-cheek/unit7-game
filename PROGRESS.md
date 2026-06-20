@@ -389,3 +389,36 @@ implemented correctly but want a human/device to confirm:
   - `?tier=low` — force the mobile path; confirm no SSAO/DoF and lighter scene.
   - `?tier=high` — force desktop quality.
   - `?touch` — show the touch controls on desktop.
+
+## Feature batch: Titan mech, sunrise, commuter buses + offices, brighter sky highway
+
+Five gameplay/atmosphere additions on top of the environment pass.
+
+- **Original player robot restored.** Reverted `createRobot` (procedural.ts) from
+  the "Blue Titan" restyle back to the slim original (thin legs/arms, purple
+  accent, chest core). The Blue Titan look moved to its own pilotable mech.
+- **Blue Titan mech (pilotable).** New `createTitan()` builds a ~4.5m blue
+  armored walker as a `VehicleModel`. Wired into `Vehicles.ts` as a `'titan'`
+  kind parked by the arcade portals (2,16); `config.vehicle.titan` gives it its
+  own heavy stats. Camera pulls back further (`distanceScale 2.8`) to frame it.
+  Power: CAPTURE becomes a **STOMP** ground-pound (`Game.titanStomp`) that
+  captures every target in a 10m radius; mobile shows a STOMP button in the
+  Titan.
+- **Gradual sunrise (Earth).** `World.update` runs an 8s-delayed, 16s eased
+  dawn: the sun climbs from the horizon while sky gradient, fog, ambient, hemi
+  and sun color/intensity lerp night -> warm dawn (`applyDawn`). Earth only;
+  Mars/Moon untouched.
+- **Commuter buses + offices.** `createBus()` model + a bus system in `Events.ts`
+  that loops the avenues, pauses at three office stops and lets out pedestrian
+  commuters who walk into the building and vanish. `World.buildOffices()` adds
+  glass-fronted ground-floor offices at those stops with desks and seated worker
+  robots at glowing monitors. Shared `OFFICE_ANCHORS` keep stops/doors/offices
+  aligned. Bus count + commuter cap scale with tier.
+- **Brighter sky highway.** `Sky.buildHighway` lowered (y~40) and made more
+  solid: wider translucent deck, thicker brighter rails, a centre line, and ~30
+  proper car-shaped vehicles (body + glass cabin + head/tail lights) running in
+  two lanes instead of plain boxes.
+
+Mobile-vs-desktop: bus count (2 high / 1 low) and highway car count scale with
+`tier.densityScale`; offices and the Titan are static/cheap. Sunrise is a few
+per-frame color lerps, negligible cost.

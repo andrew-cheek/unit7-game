@@ -469,6 +469,30 @@ export class Game {
     }
   }
 
+  /**
+   * Titan ground-pound: a heavy AoE stomp that captures every live target in a
+   * radius around the mech. The Titan's signature power - no aiming, just smash.
+   */
+  private titanStomp() {
+    const v = this.vehicles.current
+    if (!v) return
+    const radius = 10
+    let hits = 0
+    for (const c of this.capturables) {
+      if (!c.alive) continue
+      const dx = c.position.x - v.position.x
+      const dz = c.position.z - v.position.z
+      if (dx * dx + dz * dz > radius * radius) continue
+      const award = c.capture()
+      this.hud.score += Math.round(award * this.scoreMul)
+      this.hud.captured += 1
+      hits++
+    }
+    // A banner sells the impact.
+    this.hud.banner = hits > 0 ? `STOMP x${hits}` : 'STOMP'
+    this.bannerTimer = 1.2
+  }
+
   private updateTransition(dt: number) {
     this.trans.t += dt
     if (this.trans.phase === 'out') {
@@ -587,7 +611,10 @@ export class Game {
       // drop unused edges so they don't fire on exit
       this.input.consumeEdge('morph')
       this.input.consumeEdge('chute')
-      this.input.consumeEdge('net')
+      // In the Titan, CAPTURE becomes a ground-pound stomp shockwave.
+      if (this.input.consumeEdge('net')) {
+        if (this.vehicles.current?.kind === 'titan') this.titanStomp()
+      }
     }
 
     const gravity = config.zones[this.zone].gravity
@@ -644,7 +671,8 @@ export class Game {
       const sp = Math.hypot(v.velocity.x, v.velocity.z)
       const inv = sp > 0.1 ? 1 / sp : 0
       return {
-        distanceScale: 1.8,
+        // The Titan is tall, so pull the camera back further to frame it.
+        distanceScale: v.kind === 'titan' ? 2.8 : 1.8,
         followYaw: v.yaw,
         moveX: v.velocity.x * inv,
         moveZ: v.velocity.z * inv,

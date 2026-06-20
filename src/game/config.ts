@@ -139,6 +139,9 @@ export const config = {
     hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
     speeder: { accel: 56, maxSpeed: 58, reverse: 12, turn: 2.4, hoverHeight: 0.9, bob: 0.1 },
     spaceship: { accel: 30, maxSpeed: 50, turn: 1.5, hoverHeight: 2.2 },
+    // The Blue Titan walker: heavy and powerful. Walks the ground (hoverHeight 0),
+    // higher top speed than on foot, ground-shaking stomp on boost.
+    titan: { accel: 34, maxSpeed: 28, reverse: 12, turn: 1.6, hoverHeight: 0, bob: 0 },
     enterRange: 6,
   },
 

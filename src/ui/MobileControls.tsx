@@ -20,6 +20,7 @@ const CAPTURE: BtnDef = { label: 'CAPTURE', action: 'net', type: 'tap', color: '
 const ENTER: BtnDef = { label: 'ENTER', action: 'enter', type: 'tap', color: '#27e7ff' }
 const EXIT: BtnDef = { label: 'EXIT', action: 'enter', type: 'tap', color: '#ff2bd0' }
 const CHUTE: BtnDef = { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' }
+const STOMP: BtnDef = { label: 'STOMP', action: 'net', type: 'tap', color: '#ff8a1e' }
 
 /**
  * Touch controls: a left thumb-stick for movement, a right-side drag area for
@@ -43,7 +44,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   // Build the relevant button set (most-used nearest the thumb = first/bottom).
   let buttons: BtnDef[]
   if (inVehicle) {
-    buttons = [EXIT, BOOST, JET]
+    buttons = hud.vehicle === 'TITAN' ? [EXIT, STOMP, BOOST] : [EXIT, BOOST, JET]
   } else {
     buttons = [RUN, JET, BOOST, MORPH, CAPTURE]
     if (nearVehicle) buttons.unshift(ENTER)

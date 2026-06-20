@@ -1,11 +1,11 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createHovercar, createSpaceship, createRocket, createSpeederBike, type VehicleModel } from './procedural'
+import { createHovercar, createSpaceship, createRocket, createSpeederBike, createTitan, type VehicleModel } from './procedural'
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
 
-export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'titan'
 type DriveMode = 'hover' | 'fly' | 'rocket'
 
 interface Vehicle {
@@ -56,6 +56,8 @@ export class Vehicles {
     this.spawn('speeder', createSpeederBike(), new THREE.Vector3(-6, 0, 8), config.vehicle.speeder.hoverHeight, 1.1, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
     this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -30), 0, 1.4, 'rocket')
+    // The Blue Titan, parked by the arcade portals (beamwars -6,12 / digduel 10,12).
+    this.spawn('titan', createTitan(), new THREE.Vector3(2, 0, 16), config.vehicle.titan.hoverHeight, 2.5, 'hover')
   }
 
   private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode) {
@@ -65,7 +67,7 @@ export class Vehicles {
     this.scene.add(model.group)
     this.list.push({
       kind,
-      name: kind === 'hovercar' ? 'HOVERCAR' : kind === 'speeder' ? 'SPEEDER' : kind === 'spaceship' ? 'SHUTTLE' : 'ROCKET',
+      name: kind === 'hovercar' ? 'HOVERCAR' : kind === 'speeder' ? 'SPEEDER' : kind === 'spaceship' ? 'SHUTTLE' : kind === 'titan' ? 'TITAN' : 'ROCKET',
       model,
       position,
       velocity: new THREE.Vector3(),
@@ -151,7 +153,7 @@ export class Vehicles {
   }
 
   private driveHover(v: Vehicle, dt: number, input: Input) {
-    const cfg = v.kind === 'speeder' ? config.vehicle.speeder : config.vehicle.hovercar
+    const cfg = v.kind === 'speeder' ? config.vehicle.speeder : v.kind === 'titan' ? config.vehicle.titan : config.vehicle.hovercar
     const boost = input.held.boost ? 1.4 : 1
     const maxSpeed = cfg.maxSpeed * boost
 
