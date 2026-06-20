@@ -10,14 +10,14 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
  * runs; onExit returns to Humanoid City.
  */
 
-const COLS = 120 // a large underground world; the camera shows only a window
-const ROWS = 84
-const VIEW = 42 // tiles across the short side of each near-square panel
-const TUNNELS = 14 // branch tunnels carved at start (lower = more solid dirt)
-const TUNNEL_LEN = 130
+const COLS = 140 // a large underground world; the camera shows only a window
+const ROWS = 100
+const VIEW = 56 // tiles across the short side of each panel (higher = zoomed out)
+const TUNNELS = 18 // branch tunnels carved at start (lower = more solid dirt)
+const TUNNEL_LEN = 150
 const DIG_BRUSH = 0.9
-const MOVE_OPEN = 11
-const MOVE_DIG = 4.5
+const MOVE_OPEN = 6.5 // slower, more deliberate
+const MOVE_DIG = 3
 
 // Retro cave palette (per the agreed rendering spec).
 // Dense fine-grain browns tuned to the reference dirt.
@@ -29,7 +29,7 @@ const hash2D = (x: number, y: number) => {
   h = (h ^ (h >> 13)) * 1274126177
   return Math.abs(h ^ (h >> 16))
 }
-const BULLET_SPEED = 30
+const BULLET_SPEED = 20
 const MAX_HP = 6
 
 type Phase = 'ready' | 'playing' | 'dead' | 'won'
@@ -224,6 +224,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     if (!cv) return
     const ctx = cv.getContext('2d')
     if (!ctx) return
+    ctx.imageSmoothingEnabled = false // crisp pixels, no blur
     const W = cv.width
     const H = cv.height
     const p = player.current
@@ -273,27 +274,17 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
       const x1 = Math.min(COLS - 1, Math.ceil(camX + halfW + 1))
       const y0 = Math.max(0, Math.floor(camY - halfH - 1))
       const y1 = Math.min(ROWS - 1, Math.ceil(camY + halfH + 1))
-      const hq = Math.ceil(half * 0.7)
-
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
           if (dirt.current[di(x, y)] === 0) continue // tunnel: leave it black
-          const px = sx(x)
-          const py = sy(y)
-          // Base rock, then fine low-contrast grain. Each quadrant is usually
-          // base, occasionally a slightly darker/lighter brown - so the dirt
-          // looks uniform-but-textured rather than a high-contrast checkerboard.
-          // Dense fine grain: 2x2 sub-tiles, each a brown chosen by hash, so the
-          // dirt reads as the reference's noisy speckle (mostly base, plenty of
-          // darker grain, occasional darkest/tan).
-          const hh = Math.ceil(cs / 2)
-          for (let sxi = 0; sxi < 2; sxi++) {
-            for (let syi = 0; syi < 2; syi++) {
-              const hv = hash2D(x * 2 + sxi, y * 2 + syi) % 8
-              ctx.fillStyle = hv < 4 ? ROCK.base : hv < 6 ? ROCK.mid : hv === 6 ? ROCK.dark : ROCK.light
-              ctx.fillRect(px + sxi * hh, py + syi * hh, hh, hh)
-            }
-          }
+          // One crisp, integer-snapped fill per tile. The brown band comes from
+          // baked per-cell noise, so it reads as fine dirt speckle when zoomed
+          // out and never blurs or flickers. Cheap enough for a wide view.
+          const px = Math.floor(sx(x))
+          const py = Math.floor(sy(y))
+          const n = noise.current[di(x, y)]
+          ctx.fillStyle = n < 0.5 ? ROCK.base : n < 0.8 ? ROCK.mid : n < 0.92 ? ROCK.dark : ROCK.light
+          ctx.fillRect(px, py, cs, cs)
         }
       }
 
