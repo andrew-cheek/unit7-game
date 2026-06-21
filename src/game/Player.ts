@@ -31,6 +31,8 @@ export class Player {
   fuel = config.jetpack.fuelMax
   speedMul = 1 // speed powerup
   shield = false // shield powerup
+  dancing = false // robot-dance emote (set by Game from the dance floor / key)
+  private danceT = 0
 
   private model: RobotModel
   private moveDir = new THREE.Vector3()
@@ -66,6 +68,15 @@ export class Player {
   }
   setVisible(v: boolean) {
     this.object.visible = v
+  }
+  /** Fling the player upward (trampoline / bounce pad). */
+  launch(strength: number) {
+    this.velocity.y = strength
+    this.grounded = false
+    this.airTime = 0
+  }
+  setDancing(v: boolean) {
+    this.dancing = v
   }
 
   private buildCanopy(): THREE.Group {
@@ -130,7 +141,9 @@ export class Player {
     this.model.setPlanePose(this.morphT)
     if (this.mode !== 'parachute') this.mode = this.planeTarget === 1 ? 'plane' : 'robot'
 
-    if (this.mode === 'parachute') this.updateParachute(dt, input, gravity)
+    const dancing = this.dancing && this.grounded && this.mode === 'robot'
+    if (dancing) this.updateDance(dt, gravity)
+    else if (this.mode === 'parachute') this.updateParachute(dt, input, gravity)
     else if (this.mode === 'plane') this.updatePlane(dt, input, gravity)
     else this.updateRobot(dt, input, gravity)
 
@@ -138,7 +151,9 @@ export class Player {
 
     // Face + animate.
     const moving = this.moveDir.lengthSq() > 1e-4
-    if (this.mode === 'plane') {
+    if (dancing) {
+      this.object.rotation.set(0, this.danceT * 4.5, 0) // spin
+    } else if (this.mode === 'plane') {
       const targetYaw = moving ? Math.atan2(this.moveDir.x, this.moveDir.z) : this.yaw
       this.yaw = dampAngle(this.yaw, targetYaw, 5, dt)
       this.object.rotation.y = this.yaw
@@ -153,8 +168,22 @@ export class Player {
     }
 
     this.speed = Math.hypot(this.velocity.x, this.velocity.z)
-    this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
+    if (dancing) {
+      this.model.group.position.y = Math.abs(Math.sin(this.danceT * 7)) * 0.35 // bob
+      this.model.update(dt, 0.6, true)
+    } else {
+      this.model.group.position.y = 0
+      this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
+    }
     this.updateCanopy(dt)
+  }
+
+  private updateDance(dt: number, gravity: number) {
+    this.moveDir.set(0, 0, 0)
+    this.velocity.x = approach(this.velocity.x, 0, 40 * dt)
+    this.velocity.z = approach(this.velocity.z, 0, 40 * dt)
+    this.velocity.y += gravity * dt // stay planted on the floor
+    this.danceT += dt
   }
 
   private camRelative(input: Input, out: THREE.Vector3) {
@@ -185,23 +214,19 @@ export class Player {
     this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
     this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
 
-    // Jetpack: hold to fly. It NEVER runs out. A charged boost reserve gives a
-    // fast climb; once the reserve is spent the climb just eases down to a
-    // steady cruise ascend that sustains forever, so you can always keep flying.
+    // Jetpack: hold to fly. Unlimited — it never runs out and always gives full
+    // lift; the fuel meter stays topped up.
     const jetting = input.held.jet
     if (jetting) {
       // Coyote time: still allow the launch hop just after stepping off a ledge.
       const canHop = this.grounded || this.airTime < config.player.coyoteTime
       if (!this.prevJet && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
-      const boosted = this.fuel > 0
-      const cap = boosted ? config.jetpack.maxAscend : config.jetpack.cruiseAscend
-      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, cap)
-      if (boosted) this.fuel = Math.max(0, this.fuel - config.jetpack.fuelDrain * dt)
+      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
       this.model.setThrust(1)
     } else {
-      this.fuel = Math.min(config.jetpack.fuelMax, this.fuel + config.jetpack.fuelRegen * dt)
       this.model.setThrust(0)
     }
+    this.fuel = config.jetpack.fuelMax
     this.prevJet = input.held.jet
     this.model.setFlyPose(this.grounded ? 0 : 0.7)
 
