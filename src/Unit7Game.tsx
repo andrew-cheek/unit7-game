@@ -16,6 +16,7 @@ const Invaders = lazy(() => import('./ui/Invaders').then((m) => ({ default: m.In
 const Snake = lazy(() => import('./ui/Snake').then((m) => ({ default: m.Snake })))
 const RaceLoop = lazy(() => import('./ui/RaceLoop').then((m) => ({ default: m.RaceLoop })))
 const MechArena = lazy(() => import('./ui/MechArena').then((m) => ({ default: m.MechArena })))
+const DriveMad = lazy(() => import('./ui/DriveMad').then((m) => ({ default: m.DriveMad })))
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -156,6 +157,11 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {hud?.minigame === 'mecharena' && controlsRef.current && (
         <Suspense fallback={null}>
           <MechArena touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.minigame === 'drivemad' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <DriveMad touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
     </div>

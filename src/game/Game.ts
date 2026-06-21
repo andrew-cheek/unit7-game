@@ -394,6 +394,7 @@ export class Game {
     this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(15, 0, 10)))
     this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
     this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
+    this.arcadePortals.push(this.buildCabinet('drivemad', A.lime, 'DRIVE FRENZY', new THREE.Vector3(-40, 0, 22)))
     // Planet/moon travel stays as its own separate ring-portals (built in Zones),
     // NOT arcade cabinets: the arcade takes you to the mini-games, the portals
     // take you to other worlds.
