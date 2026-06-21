@@ -1636,6 +1636,13 @@ export class World {
     // Day/night cycle on Earth: bright daylight most of the time, brief night.
     const dawn = this.zone === 'earth' ? dayCycle(this.time) : 0
     this.dawn = dawn
+    // Earth runs a day/night cycle; skip the per-frame shadow render at night
+    // (sun is down, shadows are invisible) on shadow-capable tiers. Off-world has
+    // no night so shadows stay on there.
+    if (config.tier.shadows) {
+      const wantShadow = this.zone !== 'earth' || dawn > 0.12
+      if (this.sun.castShadow !== wantShadow) this.sun.castShadow = wantShadow
+    }
     // Sun climbs from the horizon at dawn and sinks again at dusk.
     const sunOffX = lerp(120, 60, dawn)
     const sunOffY = lerp(18, 92, dawn)
