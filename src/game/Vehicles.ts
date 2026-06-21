@@ -20,6 +20,8 @@ interface Vehicle {
   drive: DriveMode
   bob: number
   size: number // model scale (1 for non-mechs); used for camera + muzzle height
+  morph: number // mech transform 0=robot .. 1=jet form (eased)
+  morphTarget: number
 }
 
 export const isMech = (k: VehicleKind) => k === 'mechM' || k === 'mechL' || k === 'mechXL'
@@ -69,8 +71,10 @@ export class Vehicles {
     const ml = config.vehicle.mechL
     const mx = config.vehicle.mechXL
     this.spawn('mechM', createMechSuit({ scale: mm.size, armor: 0x2348c8, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(-16, 0, 18), mm.hoverHeight, 2.0 * mm.size, 'fly', mm.size)
-    this.spawn('mechL', createMechSuit({ scale: ml.size, armor: 0xb01f3a, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(2, 0, 22), ml.hoverHeight, 2.0 * ml.size, 'fly', ml.size)
-    this.spawn('mechXL', createMechSuit({ scale: mx.size, armor: 0x1f6e3a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(26, 0, 30), mx.hoverHeight, 2.0 * mx.size, 'fly', mx.size)
+    this.spawn('mechL', createMechSuit({ scale: ml.size, armor: 0xb01f3a, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(4, 0, 24), ml.hoverHeight, 2.0 * ml.size, 'fly', ml.size)
+    // The colossus stands further out (it's ~50m wide at the feet) but towers
+    // over the skyline so it's unmistakable from the portals.
+    this.spawn('mechXL', createMechSuit({ scale: mx.size, armor: 0x1f6e3a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(60, 0, 60), mx.hoverHeight, 2.0 * mx.size, 'fly', mx.size)
   }
 
   private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode, size = 1) {
@@ -99,7 +103,17 @@ export class Vehicles {
       drive,
       bob: kind === 'spaceship' ? 1.7 : 0,
       size,
+      morph: 0,
+      morphTarget: 0,
     })
+  }
+
+  /** Toggle the piloted mech between robot and jet form. Returns the new state. */
+  toggleTransform(): 'robot' | 'jet' | null {
+    const v = this.current
+    if (!v || !isMech(v.kind)) return null
+    v.morphTarget = v.morphTarget > 0.5 ? 0 : 1
+    return v.morphTarget > 0.5 ? 'jet' : 'robot'
   }
 
   get currentName() {
@@ -109,11 +123,14 @@ export class Vehicles {
   /** Nearest enterable vehicle within range of a point (or null). */
   nearest(pos: THREE.Vector3): Vehicle | null {
     let best: Vehicle | null = null
-    let bestD = config.vehicle.enterRange
+    let bestScore = Infinity
     for (const v of this.list) {
+      // Big mechs get a larger boarding radius (you stand at their feet, far
+      // from the model centre). Compare distance against each vehicle's range.
+      const range = config.vehicle.enterRange + (isMech(v.kind) ? v.size * 1.6 : 0)
       const d = Math.hypot(v.position.x - pos.x, v.position.z - pos.z)
-      if (d < bestD) {
-        bestD = d
+      if (d < range && d < bestScore) {
+        bestScore = d
         best = v
       }
     }
@@ -156,6 +173,12 @@ export class Vehicles {
 
   update(dt: number, input: Input) {
     for (const v of this.list) {
+      // Ease the mech transform and drive the model's morph pose.
+      if (v.morph !== v.morphTarget) {
+        v.morph += (v.morphTarget - v.morph) * Math.min(1, dt * 6)
+        if (Math.abs(v.morph - v.morphTarget) < 0.01) v.morph = v.morphTarget
+      }
+      v.model.setMorph?.(v.morph)
       v.model.update(dt, v === this.current ? this.speed01 : 0)
       if (v === this.current) {
         if (v.drive === 'hover') this.driveHover(v, dt, input)
@@ -218,12 +241,14 @@ export class Vehicles {
       : v.kind === 'mechXL' ? config.vehicle.mechXL
       : config.vehicle.spaceship
     const boost = input.held.boost ? 1.4 : 1
-    const maxSpeed = cfg.maxSpeed * boost
+    // Jet (transformed) form flies a lot faster and turns tighter.
+    const jet = 1 + v.morph * 1.4
+    const maxSpeed = cfg.maxSpeed * boost * jet
 
-    v.yaw -= input.moveX * cfg.turn * dt
+    v.yaw -= input.moveX * cfg.turn * (1 + v.morph * 0.5) * dt
     this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
     let fs = v.velocity.dot(this.fwd)
-    fs = approach(fs, input.moveY * maxSpeed, cfg.accel * boost * dt)
+    fs = approach(fs, input.moveY * maxSpeed, cfg.accel * boost * jet * dt)
 
     // Altitude: jet = up, sprint = down, otherwise hold.
     let vy = v.velocity.y

@@ -145,8 +145,10 @@ export const config = {
     // `hoverHeight` here is just the minimum flight clearance (feet above
     // ground). `size` scales the model + camera framing + missile muzzle.
     mechM: { accel: 34, maxSpeed: 44, turn: 1.7, hoverHeight: 1, size: 1.4 },
-    mechL: { accel: 30, maxSpeed: 52, turn: 1.25, hoverHeight: 1.5, size: 2.6 },
-    mechXL: { accel: 26, maxSpeed: 60, turn: 0.9, hoverHeight: 3, size: 6 },
+    mechL: { accel: 30, maxSpeed: 52, turn: 1.25, hoverHeight: 1.5, size: 3.2 },
+    // Colossal: ~50m tall, taller than the surrounding towers. Slow turn, big
+    // top speed, and it transforms into a fast jet form.
+    mechXL: { accel: 26, maxSpeed: 64, turn: 0.8, hoverHeight: 4, size: 10 },
     enterRange: 6,
   },
 

@@ -29,6 +29,8 @@ export interface VehicleModel {
   group: THREE.Group
   update(dt: number, speed01: number): void
   dispose(): void
+  /** Mech-only: blend between robot (0) and jet/flight form (1). */
+  setMorph?(amount: number): void
 }
 
 const box = (w: number, h: number, d: number, mat: THREE.Material) =>
@@ -1372,21 +1374,32 @@ export function createMechSuit(opts: MechOpts = {}): VehicleModel {
   const reactorMat = reactor.material as THREE.MeshStandardMaterial
   let phase = 0
   let t = 0
+  let morph = 0 // 0 = robot stance, 1 = horizontal jet/flight form
   return {
     group,
+    setMorph: (a: number) => { morph = Math.min(1, Math.max(0, a)) },
     update: (dt, s01) => {
       t += dt
       const s = clamp01(s01)
       phase += dt * (1.6 + s * 3.0)
       // Tuck the legs back as it speeds up (flight pose); idle sway otherwise.
       const tuck = s * 0.5
-      legs.forEach((l, i) => { l.rotation.x = -tuck + Math.sin(phase + (i ? Math.PI : 0)) * (0.06) * (1 - s) })
-      arms.forEach((a, i) => { a.rotation.x = Math.sin(phase + (i ? 0 : Math.PI)) * 0.05 })
-      core.rotation.x = -s * 0.18 // lean into the dive
+      // Jet form: body tips horizontal, legs stream straight back as a tail and
+      // the arms sweep back like wings; blended by `morph`.
+      legs.forEach((l, i) => {
+        const robot = -tuck + Math.sin(phase + (i ? Math.PI : 0)) * 0.06 * (1 - s)
+        l.rotation.x = robot * (1 - morph) + 0.15 * morph
+      })
+      arms.forEach((a, i) => {
+        const robot = Math.sin(phase + (i ? 0 : Math.PI)) * 0.05
+        a.rotation.x = robot * (1 - morph) - 1.35 * morph
+        a.rotation.z = (i ? -1 : 1) * 0.5 * morph
+      })
+      core.rotation.x = -s * 0.18 * (1 - morph) - (Math.PI / 2) * 0.82 * morph
       reactorMat.emissiveIntensity = 3.6 + Math.sin(t * 4) * 0.8
       const flicker = 0.7 + Math.sin(t * 38) * 0.2
-      const fs = (0.35 + s * 0.65) * flicker
-      for (const f of flames) f.scale.set(0.6 + s * 0.4, fs, 0.6 + s * 0.4)
+      const fs = (0.35 + s * 0.65 + morph * 0.6) * flicker
+      for (const f of flames) f.scale.set(0.6 + s * 0.4 + morph * 0.3, fs, 0.6 + s * 0.4 + morph * 0.3)
     },
     dispose: () => disposeGroup(group, mats),
   }

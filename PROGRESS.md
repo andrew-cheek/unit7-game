@@ -479,3 +479,14 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - **Haptics**: navigator.vibrate on net capture, missile kills and getting soaked.
 - **Screen wake lock**: keeps the phone screen awake while playing, re-acquired on
   tab focus. All guarded for unsupported devices.
+
+## Transforming colossus mech
+
+- **MECH-XL is now a ~50m colossus** (size 6 -> 10) that towers over the local
+  skyline, with a wider boarding radius so you can climb in at its feet. Parked
+  further out (60,60) for clearance but visible from the portals.
+- **Transform** (createMechSuit.setMorph): all mechs can morph between robot
+  stance and a horizontal jet/flight form - body tips forward, legs stream back
+  as a tail, arms sweep back like wings, thrusters flare. Jet form flies ~2.4x
+  faster and turns tighter. Toggle with the T key or a new MORPH button on the
+  mech control cluster (mobile). Banner + haptic on transform.

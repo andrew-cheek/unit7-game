@@ -21,6 +21,7 @@ const ENTER: BtnDef = { label: 'ENTER', action: 'enter', type: 'tap', color: '#2
 const EXIT: BtnDef = { label: 'EXIT', action: 'enter', type: 'tap', color: '#ff2bd0' }
 const CHUTE: BtnDef = { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' }
 const FIRE: BtnDef = { label: 'FIRE', action: 'net', type: 'tap', color: '#ff8a1e' }
+const TRANSFORM: BtnDef = { label: 'MORPH', action: 'morph', type: 'tap', color: '#8a5cff' }
 
 /**
  * Touch controls: a left thumb-stick for movement, a right-side drag area for
@@ -45,7 +46,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   let buttons: BtnDef[]
   const inMech = inVehicle && !!hud.vehicle && hud.vehicle.startsWith('MECH')
   if (inVehicle) {
-    buttons = inMech ? [EXIT, FIRE, JET, BOOST] : [EXIT, BOOST, JET]
+    buttons = inMech ? [EXIT, FIRE, TRANSFORM, JET, BOOST] : [EXIT, BOOST, JET]
   } else {
     buttons = [RUN, JET, BOOST, MORPH, CAPTURE]
     if (nearVehicle) buttons.unshift(ENTER)
@@ -54,7 +55,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
 
   // Helper text: the single most relevant hint.
   const helper = inMech
-    ? 'JET TO FLY · FIRE MISSILES'
+    ? 'JET TO FLY · FIRE · MORPH TO JET'
     : inVehicle
     ? 'EXIT VEHICLE'
     : nearVehicle

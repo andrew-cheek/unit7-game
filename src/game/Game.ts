@@ -652,9 +652,16 @@ export class Game {
       if (this.input.consumeEdge('chute')) this.player.deployChute()
       if (this.input.consumeEdge('net')) this.fireNet()
     } else {
-      // drop unused edges so they don't fire on exit
-      this.input.consumeEdge('morph')
       this.input.consumeEdge('chute')
+      // In a mech, MORPH transforms between robot and jet form.
+      if (this.input.consumeEdge('morph')) {
+        const mode = this.vehicles.toggleTransform()
+        if (mode) {
+          this.hud.banner = mode === 'jet' ? 'JET FORM' : 'ROBOT FORM'
+          this.bannerTimer = 1.0
+          vibrate(30)
+        }
+      }
       // In a mech, CAPTURE / FIRE launches missiles.
       if (this.input.consumeEdge('net')) {
         if (this.vehicles.current && isMech(this.vehicles.current.kind)) this.fireMissiles()
@@ -728,7 +735,7 @@ export class Game {
       const inv = sp > 0.1 ? 1 / sp : 0
       return {
         // Mechs are tall; pull the camera back proportionally to frame them.
-        distanceScale: isMech(v.kind) ? Math.min(5, 1.8 + v.size * 0.5) : 1.8,
+        distanceScale: isMech(v.kind) ? Math.min(9, 1.8 + v.size * 0.55) : 1.8,
         followYaw: v.yaw,
         moveX: v.velocity.x * inv,
         moveZ: v.velocity.z * inv,
@@ -800,7 +807,7 @@ export class Game {
     if (piloting) {
       const cur = this.vehicles.current!
       prompt = isMech(cur.kind)
-        ? `${cur.name} - Space/J fly, H fire, G exit`
+        ? `${cur.name} - Space/J fly, H fire, T transform, G exit`
         : `Press G - Exit ${this.vehicles.currentName}`
     } else if (this.player.mode === 'robot') {
       const near = this.vehicles.nearest(this.player.position)
