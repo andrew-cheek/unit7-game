@@ -603,3 +603,10 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   vertical neon seams. Higher-res (128x192).
 - addBuilding: neon roofline trim on most towers (brighter), plus a glowing
   vertical neon spine up tall towers. Window glow raised (1.7 night).
+
+## Animated news-ticker signage
+
+- buildNewsTickers: five big neon billboards around the plaza/avenues that scroll
+  humanoid-robot headlines. Strip rendered to a canvas once; the sign advances the
+  texture offset each frame (cheap, no per-frame redraw). Per-sign color, rotated
+  headline order, glowing frame.
