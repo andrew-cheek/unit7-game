@@ -14,7 +14,7 @@
 
 import * as THREE from 'three'
 import { config } from './config'
-import { createCitizen, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
+import { createCitizen, createSpaceship, createRocket, type CharacterModel, type VehicleModel } from './procedural'
 import { OFFICE_ANCHORS } from './World'
 import type { Physics } from './Physics'
 import type { Zone } from './types'
@@ -38,17 +38,32 @@ interface Walker {
   t: number
 }
 
-const PAD = new THREE.Vector3(26, 0, 26)
-const SEQ = 12
+// Landing pads laid out in front of spawn (player faces +Z) so the morning
+// arrival fleet touches down right where you're looking.
+const PADS = [
+  { p: new THREE.Vector3(-22, 0, 32), kind: 'ship', delay: 0.0 },
+  { p: new THREE.Vector3(22, 0, 32), kind: 'ship', delay: 2.2 },
+  { p: new THREE.Vector3(0, 0, 50), kind: 'rocket', delay: 1.0 },
+] as const
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const smooth = (x: number) => { const t = clamp01(x); return t * t * (3 - 2 * t) }
+
+interface Craft {
+  model: VehicleModel
+  pad: THREE.Vector3
+  landY: number
+  delay: number
+  t: number
+  state: 'wait' | 'descend' | 'hold' | 'ascend' | 'done'
+  dropped: boolean
+}
 
 export class DawnShow {
   private scene: THREE.Scene
   private physics: Physics
   private groups: Record<Zone, THREE.Group>
   private risers: Record<Zone, Riser[]> = { earth: [], mars: [], moon: [] }
-  private shuttle: VehicleModel
+  private craft: Craft[] = []
   private walkers: Walker[] = []
   private vscratch = new THREE.Vector3()
   private mats: THREE.Material[] = []
@@ -57,8 +72,6 @@ export class DawnShow {
   private zone: Zone = 'earth'
   private prevDay = -1
   private mode: 'idle' | 'arrive' | 'depart' = 'idle'
-  private seqT = 0
-  private arriveSpawned = false
 
   constructor(scene: THREE.Scene, physics: Physics) {
     this.scene = scene
@@ -67,9 +80,6 @@ export class DawnShow {
     this.buildZone('earth')
     this.buildZone('mars')
     this.buildZone('moon')
-    this.shuttle = createSpaceship()
-    this.shuttle.group.visible = false
-    this.groups.earth.add(this.shuttle.group)
     for (const z of ['earth', 'mars', 'moon'] as Zone[]) {
       this.groups[z].visible = z === 'earth'
       scene.add(this.groups[z])
@@ -89,11 +99,7 @@ export class DawnShow {
    *  doesn't mistake the jump for a crossing and mis-fire a sequence. */
   resetClock() {
     this.prevDay = -1
-    this.mode = 'idle'
-    this.seqT = 0
-    this.arriveSpawned = false
-    this.clearWalkers()
-    this.shuttle.group.visible = false
+    this.endFleet()
   }
 
   update(dt: number, dayFactor: number) {
@@ -107,7 +113,7 @@ export class DawnShow {
         if (this.prevDay < 0.5 && dayFactor >= 0.5) this.start('arrive')
         else if (this.prevDay >= 0.5 && dayFactor < 0.5) this.start('depart')
       }
-      if (this.mode !== 'idle') this.runSequence(dt)
+      if (this.mode !== 'idle') this.updateFleet(dt)
     }
     this.prevDay = dayFactor
   }
@@ -237,49 +243,66 @@ export class DawnShow {
     this.risers.earth.push({ kind: 'fountain', group, depth: 2, water, waterMat })
   }
 
-  // --- commuter shuttle (Earth) ---------------------------------------------
+  // --- morning/evening arrival fleet (Earth) --------------------------------
 
+  /** Spawn the fleet: a couple of shuttles + a vertically-landing rocket, in
+   *  front of spawn, staggered. Arrival drops workers off; departure has workers
+   *  walk out to the pads to board before the craft lift off. */
   private start(mode: 'arrive' | 'depart') {
-    this.clearWalkers()
+    this.endFleet()
     this.mode = mode
-    this.seqT = 0
-    this.arriveSpawned = false
-    this.shuttle.group.visible = true
-    if (mode === 'depart') this.spawnWalkers(true)
+    for (const def of PADS) {
+      const model = def.kind === 'rocket' ? createRocket() : createSpaceship()
+      model.group.position.set(def.p.x, 130, def.p.z)
+      this.groups.earth.add(model.group)
+      this.craft.push({ model, pad: def.p.clone(), landY: def.kind === 'rocket' ? 0.5 : 2.5, delay: def.delay, t: 0, state: 'wait', dropped: false })
+      // Departure: commuters head out to this pad to board (briefcases in hand).
+      if (mode === 'depart') this.spawnWorkersAt(def.p, true)
+    }
   }
 
-  private runSequence(dt: number) {
-    this.seqT += dt
-    const t = this.seqT
-    const sg = this.shuttle.group
-    if (t < 3) sg.position.set(PAD.x, THREE.MathUtils.lerp(120, 2.5, t / 3), PAD.z)
-    else if (t < 9) sg.position.set(PAD.x, 2.5, PAD.z)
-    else {
-      const k = (t - 9) / 3
-      sg.position.set(PAD.x + k * 60, THREE.MathUtils.lerp(2.5, 130, k), PAD.z + k * 20)
-    }
-    this.shuttle.update(dt, 0.4)
-
-    if (this.mode === 'arrive' && t >= 3 && !this.arriveSpawned) {
-      this.spawnWalkers(false)
-      this.arriveSpawned = true
+  private updateFleet(dt: number) {
+    let allDone = true
+    for (const c of this.craft) {
+      c.t += dt
+      const g = c.model.group
+      if (c.state === 'wait') {
+        g.position.set(c.pad.x, 130, c.pad.z)
+        if (c.t >= c.delay) { c.state = 'descend'; c.t = 0 }
+      } else if (c.state === 'descend') {
+        const k = smooth(Math.min(1, c.t / 2.6))
+        g.position.set(c.pad.x, THREE.MathUtils.lerp(130, c.landY, k), c.pad.z)
+        if (k >= 1) { c.state = 'hold'; c.t = 0 }
+      } else if (c.state === 'hold') {
+        g.position.set(c.pad.x, c.landY, c.pad.z)
+        if (this.mode === 'arrive' && !c.dropped) { this.spawnWorkersAt(c.pad, false); c.dropped = true }
+        if (c.t >= (this.mode === 'depart' ? 5 : 3.5)) { c.state = 'ascend'; c.t = 0 }
+      } else if (c.state === 'ascend') {
+        const k = Math.min(1, c.t / 3)
+        g.position.set(c.pad.x + k * 40, THREE.MathUtils.lerp(c.landY, 150, k), c.pad.z - k * 12)
+        if (k >= 1) c.state = 'done'
+      }
+      if (c.state !== 'done') allDone = false
+      c.model.update(dt, 0.4)
     }
     this.updateWalkers(dt)
-
-    if (t >= SEQ) {
-      this.shuttle.group.visible = false
-      this.clearWalkers()
-      this.mode = 'idle'
-    }
+    if (allDone && this.walkers.length === 0) this.endFleet()
   }
 
-  /** depart=true: offices -> shuttle (with briefcases). false: shuttle -> offices. */
-  private spawnWalkers(depart: boolean) {
-    const n = 7
+  private endFleet() {
+    for (const c of this.craft) { this.groups.earth.remove(c.model.group); c.model.dispose() }
+    this.craft = []
+    this.clearWalkers()
+    this.mode = 'idle'
+  }
+
+  /** Spawn a few commuters at a pad. depart=true: door -> pad (boarding, with
+   *  briefcase). depart=false: pad -> nearest office door (heading to work). */
+  private spawnWorkersAt(pad: THREE.Vector3, depart: boolean) {
+    const n = 3
     for (let i = 0; i < n; i++) {
-      const anchor = OFFICE_ANCHORS[i % OFFICE_ANCHORS.length]
-      const door = anchor.door
-      const padSpot = new THREE.Vector3(PAD.x + (Math.random() * 4 - 2), 0, PAD.z + 3 + (Math.random() * 4 - 2))
+      const door = OFFICE_ANCHORS[Math.floor(Math.random() * OFFICE_ANCHORS.length)].door
+      const padSpot = new THREE.Vector3(pad.x + (Math.random() * 5 - 2.5), 0, pad.z + 4 + (Math.random() * 4 - 2))
       const from = depart ? door.clone() : padSpot
       const to = depart ? padSpot : door.clone()
       const model = createCitizen({ outfit: [0x2b3a6b, 0x6b2b4a, 0x2b6b4a, 0x6b5a2b][i % 4], robot: i % 3 === 0 })
@@ -331,8 +354,7 @@ export class DawnShow {
   }
 
   dispose() {
-    this.clearWalkers()
-    this.shuttle.dispose()
+    this.endFleet()
     for (const z of ['earth', 'mars', 'moon'] as Zone[]) this.scene.remove(this.groups[z])
     this.mats.forEach((m) => m.dispose())
     this.geos.forEach((g) => g.dispose())
