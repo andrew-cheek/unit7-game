@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
     "party:dev": "partykit dev",
     "party:deploy": "partykit deploy"
   },
