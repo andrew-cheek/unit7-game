@@ -277,7 +277,6 @@ export class Game {
       toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
       cycleNeon: () => this.cycleNeon(),
     }
-    this.applyNeon()
 
     this.hud = {
       mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
@@ -293,6 +292,8 @@ export class Game {
       leaderboard: [],
       neon: this.neonLevel,
     }
+    // After hud + world exist: apply the persisted neon level (sets density + bloom).
+    this.applyNeon()
 
     this.engine.onUpdate = this.update
     if (import.meta.env.DEV) (window as unknown as { __unit7?: Game }).__unit7 = this
