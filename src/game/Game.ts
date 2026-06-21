@@ -178,6 +178,11 @@ export class Game {
 
     this.engine = new Engine(container, tier)
     this.world = new World(this.engine.scene, this.zone)
+    // Debug: jump the day/night clock with ?time=<seconds into the 120s cycle>.
+    if (typeof location !== 'undefined') {
+      const t = new URLSearchParams(location.search).get('time')
+      if (t != null && !Number.isNaN(Number(t))) this.world.setDebugTime(Number(t))
+    }
     this.input = new Input(this.engine.renderer.domElement)
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
     this.player = new Player(this.engine.scene)
@@ -1414,7 +1419,7 @@ export class Game {
     this.world.update(dt, this.focus)
     // Neon contrast by time of day: full bloom at night, eased down toward noon
     // so daylight reads warm/calm and night reads as the bright neon city.
-    this.engine.setBloomScale((1 - this.world.dayFactor * 0.5) * this.neonBloomMul)
+    this.engine.setBloomScale((1 - this.world.dayFactor * 0.62) * this.neonBloomMul)
 
     // Multiplayer: advance the other players' avatars and broadcast our own
     // transform a few times a second. No-ops cleanly when playing solo.
