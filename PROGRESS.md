@@ -575,3 +575,12 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - Guided beacon: a tall glowing column drops on the current objective's target
   (plaza / nearest unlocked mech / Mars or Moon portal / nearest arcade portal),
   plus a bright objective blip on the radar, so you always know where to go.
+
+## Moon research base + minigame sound
+
+- Moon research base (Zones.buildMoonBase): glowing habitat domes linked by a
+  tube, a comms dish on a mast, a lit landing pad, blinking perimeter lights, and
+  two rovers patrolling a loop. Domes are solid; animated lights + rovers.
+- Minigame sound (ui/miniSound.ts): a tiny shared WebAudio blip engine the arcade
+  games call for start/score/shoot/hit/lap/gameover. Respects the global mute.
+  Wired into Snake, 2048, Invaders, Mech Arena and Race Loop.

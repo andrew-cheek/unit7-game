@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { loadHighScore, saveHighScore } from '../game/storage'
+import { miniSfx } from './miniSound'
 
 /**
  * 2048 - a clean-room neon build of the classic sliding-tile puzzle. Swipe or
@@ -109,8 +110,10 @@ export function Game2048({ onExit, touch }: { onExit: () => void; touch: boolean
     scoreRef.current += gained
     setScore(scoreRef.current)
     setBoard(b)
+    miniSfx(gained > 0 ? 'score' : 'shoot')
     if (!canMove(b)) {
       setOver(true)
+      miniSfx('gameover')
       saveHighScore(HS_KEY, scoreRef.current)
       setBest(loadHighScore(HS_KEY))
     }

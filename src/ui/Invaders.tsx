@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { loadHighScore, saveHighScore } from '../game/storage'
+import { miniSfx } from './miniSound'
 
 /**
  * Invaders - a neon alien-wave shooter (original implementation of the classic
@@ -66,6 +67,7 @@ export function Invaders({ onExit, touch }: { onExit: () => void; touch: boolean
 
   const die = useCallback(() => {
     phaseRef.current = 'dead'; setPhase('dead')
+    miniSfx('gameover')
     saveHighScore(HS_KEY, scoreRef.current); setBest(loadHighScore(HS_KEY))
   }, [])
 
@@ -119,7 +121,7 @@ export function Invaders({ onExit, touch }: { onExit: () => void; touch: boolean
 
       // auto-fire
       fireCd.current -= dt
-      if (fireCd.current <= 0) { bullets.current.push({ x: shipX.current, y: FH - 44 }); fireCd.current = 0.34 }
+      if (fireCd.current <= 0) { bullets.current.push({ x: shipX.current, y: FH - 44 }); fireCd.current = 0.34; miniSfx('shoot') }
 
       // bullets up
       for (const b of bullets.current) b.y -= 320 * dt
@@ -150,6 +152,7 @@ export function Invaders({ onExit, touch }: { onExit: () => void; touch: boolean
           if (a.alive && Math.abs(a.x - b.x) < 15 && Math.abs(a.y - b.y) < 13) {
             a.alive = false; b.y = -100
             scoreRef.current += (ROWS - a.row) * 10; setScore(scoreRef.current)
+            miniSfx('hit')
             break
           }
         }

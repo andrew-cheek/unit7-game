@@ -421,7 +421,84 @@ export class Zones {
     }
     this.addBoundary(env.colliders)
     this.scatterRocks(group, env, displace, 0x55555c, 22)
+    const base = this.buildMoonBase(group, env, displace, 44, 30)
+    const baseUpdate = env.update
+    env.update = (dt) => { baseUpdate(dt); base(dt) }
     return env
+  }
+
+  /**
+   * Moon research base: a cluster of glowing habitat domes linked by tubes, a
+   * comms dish, a lit landing pad, blinking perimeter lights, and a couple of
+   * rovers trundling a patrol loop. Returns an animate fn for the rovers/lights.
+   */
+  private buildMoonBase(group: THREE.Group, env: PlanetEnv, displace: (x: number, z: number) => number, bx: number, bz: number): (dt: number) => void {
+    const by = displace(bx, bz)
+    const shell = new THREE.MeshStandardMaterial({ color: 0xb8c2d0, metalness: 0.6, roughness: 0.5 })
+    const dark = new THREE.MeshStandardMaterial({ color: 0x2a3340, metalness: 0.6, roughness: 0.5 })
+    const glow = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x7fd7ff, emissiveIntensity: 2.4, roughness: 0.4 })
+    const domeGeo = new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2)
+    const domes: Array<[number, number, number]> = [[0, 0, 6], [10, 4, 4.4], [-8, 6, 3.6]]
+    for (const [dx, dz, r] of domes) {
+      const dome = new THREE.Mesh(domeGeo, shell)
+      dome.scale.set(r, r * 0.8, r); dome.position.set(bx + dx, by, bz + dz); dome.castShadow = true
+      group.add(dome)
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 0.7, 0.18, 8, 24), glow)
+      ring.rotation.x = Math.PI / 2; ring.position.set(bx + dx, by + r * 0.35, bz + dz)
+      group.add(ring)
+      env.colliders.push(new THREE.Box3(new THREE.Vector3(bx + dx - r, by - 1, bz + dz - r), new THREE.Vector3(bx + dx + r, by + r, bz + dz + r)))
+    }
+    // Connecting tube between the two main domes.
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 11, 10), shell)
+    tube.rotation.z = Math.PI / 2; tube.position.set(bx + 5, by + 1.2, bz + 2)
+    group.add(tube)
+    // Comms dish on a mast.
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 10, 8), dark)
+    mast.position.set(bx - 8, by + 5, bz - 4); group.add(mast)
+    const dish = new THREE.Mesh(new THREE.CylinderGeometry(3, 0.4, 1.2, 14, 1, true), shell)
+    dish.rotation.set(Math.PI / 2 + 0.5, 0, 0); dish.position.set(bx - 8, by + 10, bz - 4); group.add(dish)
+    // Lit landing pad.
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(7, 7.4, 0.3, 28), new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x7fd7ff, emissiveIntensity: 1.6, roughness: 0.5 }))
+    pad.position.set(bx + 2, by + 0.2, bz - 14); group.add(pad)
+
+    // Blinking perimeter lights.
+    const lights: THREE.MeshStandardMaterial[] = []
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2
+      const m = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xff8a1e, emissiveIntensity: 2 })
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2, 0.4), m)
+      post.position.set(bx + Math.cos(a) * 16, by + 1, bz + Math.sin(a) * 16)
+      group.add(post); lights.push(m)
+    }
+
+    // Two rovers patrolling a loop around the base.
+    const rovers: { g: THREE.Group; ang: number; spd: number; r: number }[] = []
+    for (let i = 0; i < 2; i++) {
+      const rv = new THREE.Group()
+      const body = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 2), dark)
+      body.position.y = 0.9; rv.add(body)
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 1.6), glow)
+      cab.position.set(-0.4, 1.7, 0); rv.add(cab)
+      for (const wx of [-1, 1]) for (const wz of [-1, 1]) {
+        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.4, 10), shell)
+        w.rotation.x = Math.PI / 2; w.position.set(wx * 1.1, 0.5, wz * 0.9); rv.add(w)
+      }
+      group.add(rv)
+      rovers.push({ g: rv, ang: i * Math.PI, spd: 0.12 + i * 0.03, r: 22 + i * 6 })
+    }
+
+    let t = 0
+    return (dt: number) => {
+      t += dt
+      for (let i = 0; i < lights.length; i++) lights[i].emissiveIntensity = 1.2 + Math.sin(t * 3 + i) * 1.2
+      for (const rv of rovers) {
+        rv.ang += rv.spd * dt
+        const rx = bx + Math.cos(rv.ang) * rv.r
+        const rz = bz + Math.sin(rv.ang) * rv.r
+        rv.g.position.set(rx, displace(rx, rz), rz)
+        rv.g.rotation.y = -rv.ang + Math.PI / 2
+      }
+    }
   }
 
   dispose() {

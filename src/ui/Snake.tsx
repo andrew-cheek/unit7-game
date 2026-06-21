@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { loadHighScore, saveHighScore } from '../game/storage'
+import { miniSfx } from './miniSound'
 
 /**
  * Snake - a self-contained neon take on the classic. Steer a growing data-worm
@@ -60,6 +61,7 @@ export function Snake({ onExit, touch }: { onExit: () => void; touch: boolean })
       phaseRef.current = 'dead'
       setPhase('dead')
       stop()
+      miniSfx('gameover')
       saveHighScore(HS_KEY, scoreRef.current)
       setBest(loadHighScore(HS_KEY))
       return
@@ -68,6 +70,7 @@ export function Snake({ onExit, touch }: { onExit: () => void; touch: boolean })
     if (nx === food.current.x && ny === food.current.y) {
       scoreRef.current += 10
       setScore(scoreRef.current)
+      miniSfx('score')
       placeFood()
       // Speed up gently as the worm grows.
       stepMs.current = Math.max(60, 130 - snake.current.length * 1.5)
@@ -88,6 +91,7 @@ export function Snake({ onExit, touch }: { onExit: () => void; touch: boolean })
     placeFood()
     phaseRef.current = 'playing'
     setPhase('playing')
+    miniSfx('start')
     stop()
     timer.current = window.setInterval(tick, stepMs.current)
   }, [stop, tick])

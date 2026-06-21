@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { loadHighScore, saveHighScore } from '../game/storage'
+import { miniSfx } from './miniSound'
 
 /**
  * Mech Arena - a neon top-down arena where you pilot a mech against waves of
@@ -46,6 +47,7 @@ export function MechArena({ onExit, touch }: { onExit: () => void; touch: boolea
 
   const die = useCallback(() => {
     phaseRef.current = 'dead'; setPhase('dead')
+    miniSfx('gameover')
     saveHighScore(HS_KEY, scoreRef.current); setBest(loadHighScore(HS_KEY))
   }, [])
 
@@ -132,6 +134,7 @@ export function MechArena({ onExit, touch }: { onExit: () => void; touch: boolea
           fireCd.current = 0.22
           const dx = best.x - m.x, dy = best.y - m.y, dd = Math.hypot(dx, dy) || 1
           bolts.current.push({ x: m.x, y: m.y, vx: (dx / dd) * 380, vy: (dy / dd) * 380 })
+          miniSfx('shoot')
         }
       }
       for (const b of bolts.current) { b.x += b.vx * dt; b.y += b.vy * dt }
@@ -142,6 +145,7 @@ export function MechArena({ onExit, touch }: { onExit: () => void; touch: boolea
           if (d.alive && Math.abs(d.x - b.x) < 12 && Math.abs(d.y - b.y) < 12) {
             d.alive = false; b.x = -100
             scoreRef.current += 10; setScore(scoreRef.current)
+            miniSfx('hit')
             break
           }
         }

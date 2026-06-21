@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { loadHighScore, saveHighScore } from '../game/storage'
+import { miniSfx } from './miniSound'
 
 /**
  * Race Loop - a neon top-down lap racer around a glowing oval. Auto-throttle;
@@ -85,6 +86,7 @@ export function RaceLoop({ onExit, touch }: { onExit: () => void; touch: boolean
       if (timeRef.current <= 0) {
         timeRef.current = 0
         phaseRef.current = 'done'; setPhase('done')
+        miniSfx('gameover')
         saveHighScore(HS_KEY, lapsRef.current); setBest(loadHighScore(HS_KEY))
         return
       }
@@ -107,6 +109,7 @@ export function RaceLoop({ onExit, touch }: { onExit: () => void; touch: boolean
       if (c.x < CX - RX * 0.3) leftPassed.current = true
       if (c.x > CX && prevY < CY && c.y >= CY && leftPassed.current) {
         lapsRef.current += 1; setLaps(lapsRef.current); leftPassed.current = false
+        miniSfx('lap')
       }
     }
 
