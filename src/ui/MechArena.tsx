@@ -79,7 +79,7 @@ export function MechArena({ onExit, touch }: { onExit: () => void; touch: boolea
     const ox = (r.width - FW * scale) / 2, oy = (r.height - FH * scale) / 2
     return { x: (cx - r.left - ox) / scale, y: (cy - r.top - oy) / scale }
   }
-  const onDown = (e: React.PointerEvent) => { dragging.current = true; target.current = mapPt(e.clientX, e.clientY) }
+  const onDown = (e: React.PointerEvent) => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); target.current = mapPt(e.clientX, e.clientY) }
   const onMove = (e: React.PointerEvent) => { if (dragging.current) target.current = mapPt(e.clientX, e.clientY) }
   const onUp = () => { dragging.current = false }
 
