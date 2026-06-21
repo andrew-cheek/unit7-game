@@ -25,7 +25,7 @@ const ROOT = process.cwd()
 const DIST = join(ROOT, 'dist')
 const OUTDIR = join(ROOT, '.smoke')
 const PORT = 4173
-const TIME = process.env.TIME || '20'
+const TIME = process.env.TIME || '' // set to jump the day clock; default = real morning start
 
 let puppeteer
 try {
@@ -74,7 +74,7 @@ page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}`))
 
 let ok = true
 try {
-  await page.goto(`http://127.0.0.1:${PORT}/?time=${TIME}`, { waitUntil: 'networkidle2', timeout: 60000 })
+  await page.goto(`http://127.0.0.1:${PORT}/${TIME ? `?time=${TIME}` : ''}`, { waitUntil: 'networkidle2', timeout: 60000 })
   await sleep(2000)
   await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /play solo/i.test(x.textContent || '')); if (b) b.click() })
   await sleep(400)

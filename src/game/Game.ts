@@ -146,6 +146,7 @@ export class Game {
   private dawnShow!: DawnShow
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
+  private timeFromQuery = false // ?time= debug override present (skip morning start)
   // Neon density/quality setting (persisted): scales city neon + bloom.
   private neonLevel: 'low' | 'med' | 'high' = (() => { const v = loadHighScore('neon'); return v === 1 ? 'low' : v === 2 ? 'med' : 'high' })()
   private neonBloomMul = 1
@@ -181,7 +182,7 @@ export class Game {
     // Debug: jump the day/night clock with ?time=<seconds into the 120s cycle>.
     if (typeof location !== 'undefined') {
       const t = new URLSearchParams(location.search).get('time')
-      if (t != null && !Number.isNaN(Number(t))) this.world.setDebugTime(Number(t))
+      if (t != null && !Number.isNaN(Number(t))) { this.world.setDebugTime(Number(t)); this.timeFromQuery = true }
     }
     this.input = new Input(this.engine.renderer.domElement)
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
@@ -321,6 +322,9 @@ export class Game {
       this.sky.setVisible(false)
       for (const p of this.arcadePortals) p.group.visible = false
       if (this.arcadeRobot) this.arcadeRobot.group.visible = false
+    } else {
+      // No cinematic: drop straight into the morning arrival.
+      this.startMorning()
     }
   }
 
@@ -360,6 +364,19 @@ export class Game {
     // Intro mission card: tells the player what to do in the first seconds.
     this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Portal Plaza detected. Follow the neon route to the beam.' }
     this.missionPopupTimer = 5
+    this.startMorning()
+  }
+
+  /**
+   * Begin gameplay in the early morning so the dawn arrival plays as you take
+   * control: the sun is rising, the shuttle descends and drops workers who head
+   * into the offices, and the commuter buses run their stops. The robots already
+   * at the desks / charging stay put (they don't keep the humans' 9-7 hours).
+   */
+  private startMorning() {
+    if (this.timeFromQuery || this.zone !== 'earth') return
+    this.world.setDebugTime(7) // just into the 5s..15s dawn ramp
+    this.dawnShow.resetClock()
   }
 
   // --- Arcade portals ------------------------------------------------------
