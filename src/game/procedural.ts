@@ -543,10 +543,12 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
   ctx.fillStyle = grad
   ctx.fillRect(0, 0, w, h)
 
-  // Each tower gets a dominant neon hue so the skyline reads colourful.
+  // Each tower gets a dominant neon hue, but individual windows vary widely in
+  // colour and brightness - a few are "hot" (near-white) so they bloom hard.
+  // Per-window variety is the single biggest factor in a believable night city.
   const neon = ['#27e7ff', '#ff2bd0', '#8a5cff', '#9bff4d', '#ff8a1e', '#7fd7ff']
   const accent = neon[Math.floor(rnd() * neon.length)]
-  const warm = ['#fff0cf', '#bfe7ff', '#ffd9a8', '#cfffe9']
+  const litHues = [...neon, '#fff0cf', '#bfe7ff', '#ffd9a8', '#cfffe9']
 
   const cols = 6
   const rows = 12
@@ -557,7 +559,7 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
 
   for (let yy = 0; yy < rows; yy++) {
     // Occasional full-width glowing "data band" (sci-fi signage strips).
-    const band = rnd() < 0.16
+    const band = rnd() < 0.14
     for (let xx = 0; xx < cols; xx++) {
       const x = mx + xx * (cw + mx)
       const y = my + yy * (ch + my)
@@ -568,20 +570,27 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
         continue
       }
       const r = rnd()
-      if (r < 0.4) {
+      if (r < 0.44) {
         // dark/unlit window
         ctx.fillStyle = '#0c1018'
         ctx.globalAlpha = 1
-      } else if (r < 0.62) {
-        // accent-lit window (matches the tower's neon hue)
-        ctx.fillStyle = accent
-        ctx.globalAlpha = 0.5 + rnd() * 0.5
+        ctx.fillRect(x, y, cw, ch)
+      } else if (r < 0.52) {
+        // "hot" window: near-white, full brightness -> blooms
+        ctx.fillStyle = '#ffffff'
+        ctx.globalAlpha = 1
+        ctx.fillRect(x, y, cw, ch)
       } else {
-        // warm interior light
-        ctx.fillStyle = warm[Math.floor(rnd() * warm.length)]
-        ctx.globalAlpha = 0.4 + rnd() * 0.55
+        // lit: mostly the tower's accent, sometimes another neon/warm hue
+        ctx.fillStyle = rnd() < 0.55 ? accent : litHues[Math.floor(rnd() * litHues.length)]
+        ctx.globalAlpha = 0.3 + rnd() * 0.6
+        ctx.fillRect(x, y, cw, ch)
+        // half the lit windows get a brighter inner core for depth
+        if (rnd() < 0.5) {
+          ctx.globalAlpha = Math.min(1, ctx.globalAlpha + 0.3)
+          ctx.fillRect(x + cw * 0.25, y + ch * 0.2, cw * 0.5, ch * 0.6)
+        }
       }
-      ctx.fillRect(x, y, cw, ch)
     }
   }
   ctx.globalAlpha = 1
@@ -589,9 +598,9 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
   // Glowing neon mullions: thin vertical + horizontal lines between cells. These
   // tile across the facade and give the classic layered-neon megatower look.
   ctx.fillStyle = accent
-  ctx.globalAlpha = 0.5
+  ctx.globalAlpha = 0.32
   for (let xx = 0; xx <= cols; xx++) ctx.fillRect(mx / 2 + xx * (cw + mx) - 1, 0, 1, h)
-  ctx.globalAlpha = 0.18
+  ctx.globalAlpha = 0.12
   for (let yy = 0; yy <= rows; yy++) ctx.fillRect(0, my / 2 + yy * (ch + my) - 1, w, 1)
   // Bright edge pillars (left/right seams) so tiled facades show vertical neon.
   ctx.globalAlpha = 0.9

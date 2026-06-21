@@ -618,3 +618,13 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   World.pushHeadline - fired on objective complete, mech unlock, and zone arrival.
 - Buildings: stacked horizontal neon light-bands wrapping tall towers (Coruscant
   look), on top of the earlier window-texture/spine/roof-trim facelift.
+
+## Building facade research pass
+
+Researched neon-city techniques (threejs SynthCity, procedural skyscraper
+generators). Key finding applied: per-window hue + brightness variety with a few
+"hot" near-white windows that bloom is the biggest realism factor.
+- createWindowTexture: windows now vary widely in hue (tower accent + other neon +
+  warm), ~8% are hot near-white (bloom), lit windows get a brighter inner core;
+  mullions toned down so windows read.
+- Blinking red rooftop aircraft-warning beacons on antenna towers (animated).

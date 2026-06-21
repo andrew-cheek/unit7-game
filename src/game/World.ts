@@ -125,6 +125,7 @@ export class World {
   private trainT = 0
   private tickers: { tex: THREE.CanvasTexture; speed: number; redraw: (lines: string[]) => void }[] = []
   private breaking: string[] = [] // runtime "BREAKING" headlines, newest first
+  private beacons: { mat: THREE.MeshBasicMaterial; phase: number }[] = []
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
@@ -365,6 +366,13 @@ export class World {
       tip.scale.set(0.5, 0.5, 0.5)
       tip.position.set(cx, h + mh, cz)
       this.group.add(tip)
+      // Blinking aircraft-warning beacon on the mast tip (animated in update).
+      const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3b3b, fog: false, transparent: true }))
+      const beacon = new THREE.Mesh(this.domeGeo, beaconMat)
+      beacon.scale.set(0.6, 0.6, 0.6)
+      beacon.position.set(cx, h + mh + 0.4, cz)
+      this.group.add(beacon)
+      this.beacons.push({ mat: beaconMat, phase: hash01(seed * 12.1) * 6.28 })
     }
   }
 
@@ -1377,6 +1385,8 @@ export class World {
 
     // News tickers scroll their headline strips.
     for (const t of this.tickers) t.tex.offset.x = (t.tex.offset.x + t.speed * dt) % 1
+    // Rooftop beacons blink.
+    for (const b of this.beacons) b.mat.opacity = Math.sin(this.time * 3 + b.phase) > 0.4 ? 1 : 0.12
 
     // Hover-train: cars follow the rail in a tight convoy.
     if (this.trainSamples.length && this.trainCars.length) {
