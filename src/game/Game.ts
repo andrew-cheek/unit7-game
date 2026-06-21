@@ -440,6 +440,7 @@ export class Game {
     this.hud.banner = `ENTERING ${zone.toUpperCase()}`
     this.bannerTimer = 2.6
     this.audio.play('portal')
+    if (zone !== 'earth') this.world.pushHeadline(`UNIT 7 PILOT TOUCHES DOWN ON ${zone.toUpperCase()}`)
   }
 
   private startRocketLaunch() {
@@ -502,6 +503,7 @@ export class Game {
         this.bannerTimer = 1.8
         this.audio.play('objective')
         vibrate(40)
+        this.world.pushHeadline(`PILOT ACQUIRES ${v.name} BATTLE MECH`)
       } else {
         this.hud.banner = `LOCKED · NEED ${cost - this.credits} MORE CR`
         this.bannerTimer = 1.4
@@ -697,6 +699,7 @@ export class Game {
       this.bannerTimer = 1.4
       vibrate(40)
       this.audio.play('objective')
+      this.world.pushHeadline(`UNIT 7 PILOT COMPLETES "${m.title}"`)
       const nextM = list[this.missionIdx]
       if (nextM?.type === 'capture') this.captureBase = this.hud.captured
       this.hud.objective = nextM?.title ?? 'Free roam: explore the world!'

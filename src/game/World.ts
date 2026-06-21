@@ -123,7 +123,8 @@ export class World {
   private trainSamples: THREE.Vector3[] = []
   private trainCars: THREE.Object3D[] = []
   private trainT = 0
-  private tickers: { tex: THREE.CanvasTexture; speed: number }[] = []
+  private tickers: { tex: THREE.CanvasTexture; speed: number; redraw: (lines: string[]) => void }[] = []
+  private breaking: string[] = [] // runtime "BREAKING" headlines, newest first
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
@@ -285,6 +286,17 @@ export class World {
         spine.scale.set(0.5, h * 0.92, 0.3)
         spine.position.set(cx, h * 0.5, cz + sz)
         this.group.add(spine)
+      }
+    }
+    // Stacked horizontal neon light-bands wrapping tall towers (Coruscant look).
+    if (h > 58 && hash01(seed * 9.7) > 0.35) {
+      const bandMat = this.glow(neonCorner, 2.2)
+      const bands = Math.min(3, Math.floor(h / 26))
+      for (let k = 1; k <= bands; k++) {
+        const band = new THREE.Mesh(this.boxGeo, bandMat)
+        band.scale.set(fx + 0.5, 0.5, fz + 0.5)
+        band.position.set(cx, (h * k) / (bands + 1), cz)
+        this.group.add(band)
       }
     }
     // Roof-shape variety so the skyline isn't all flat boxes.
@@ -929,16 +941,6 @@ export class World {
    * advances the texture offset each frame (no per-frame redraw, so it's cheap).
    */
   private buildNewsTickers() {
-    const headlines = [
-      'TESLA OPTIMUS ENTERS PILOT PRODUCTION ON THE FACTORY FLOOR',
-      'FIGURE 03 DEMOS DEXTEROUS TWO-HANDED ASSEMBLY',
-      'BOSTON DYNAMICS ELECTRIC ATLAS PASSES NEW WORK TRIALS',
-      '1X NEO BEGINS LIMITED IN-HOME TRIALS',
-      'UNITREE G1 PRICE DROP SPARKS A HOBBYIST WAVE',
-      'APPTRONIK APOLLO SCALES WAREHOUSE DEPLOYMENTS',
-      'AGILITY DIGIT CLOCKS RECORD CONTINUOUS SHIFT',
-      'UNIT 7 ONLINE: CITIZENS WELCOME THEIR NEON GUARDIAN',
-    ]
     type Place = { x: number; y: number; z: number; ry: number; w: number; color: string }
     const places: Place[] = [
       { x: 0, y: 24, z: 36, ry: Math.PI, w: 22, color: '#27e7ff' },
@@ -948,59 +950,68 @@ export class World {
       { x: 64, y: 16, z: 44, ry: -Math.PI * 0.75, w: 13, color: '#8a5cff' },
     ]
     places.forEach((p, i) => {
-      // Rotate the headline order per sign so they don't all read identically.
-      const order = headlines.slice(i % headlines.length).concat(headlines.slice(0, i % headlines.length))
-      const { tex, aspect } = this.makeTickerTexture(order, p.color)
       const ph = p.w * 0.16 // sign height
+      // A fixed-width canvas; the strip is drawn (and re-drawn on BREAKING news).
+      const H = 72
+      const W = 3200
+      const cv = document.createElement('canvas')
+      cv.width = W; cv.height = H
+      const ctx = cv.getContext('2d')!
+      const tex = new THREE.CanvasTexture(cv)
+      tex.wrapS = THREE.RepeatWrapping
+      tex.wrapT = THREE.ClampToEdgeWrapping
+      tex.colorSpace = THREE.SRGBColorSpace
+      tex.anisotropy = config.tier.anisotropy
+      this.ownedTex.push(tex)
+      const rot = i % 8
+      const redraw = (lines: string[]) => {
+        ctx.fillStyle = '#05060b'; ctx.fillRect(0, 0, W, H)
+        ctx.font = '700 44px ui-monospace, Menlo, monospace'
+        ctx.textBaseline = 'middle'
+        let x = 40
+        for (const line of lines) {
+          const breaking = line.startsWith('★')
+          ctx.fillStyle = breaking ? '#ff3b3b' : p.color
+          ctx.shadowColor = ctx.fillStyle
+          ctx.shadowBlur = 14
+          ctx.fillText(line, x, H / 2)
+          x += ctx.measureText(line).width
+          ctx.fillStyle = '#5f6b82'; ctx.shadowBlur = 0
+          ctx.fillText('   ◆   ', x, H / 2)
+          x += ctx.measureText('   ◆   ').width
+        }
+        tex.needsUpdate = true
+      }
       const mat = this.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, fog: false }))
-      tex.repeat.x = (p.w / ph) / aspect
+      tex.repeat.x = (p.w / ph) / (W / H)
       tex.repeat.y = 1
       const sign = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(p.w, ph)), mat)
       const g = new THREE.Group()
       g.position.set(p.x, p.y, p.z)
       g.rotation.y = p.ry
       g.add(sign)
-      // Glowing frame.
+      // Glowing frame + a fixed "NEWS" tag tab on the left.
       const frameMat = this.glow(parseInt(p.color.slice(1), 16), 2.6)
       const top = new THREE.Mesh(this.boxGeo, frameMat); top.scale.set(p.w + 0.6, 0.4, 0.4); top.position.y = ph / 2 + 0.2; g.add(top)
       const bot = new THREE.Mesh(this.boxGeo, frameMat); bot.scale.set(p.w + 0.6, 0.4, 0.4); bot.position.y = -ph / 2 - 0.2; g.add(bot)
+      const tag = new THREE.Mesh(this.boxGeo, this.glow(parseInt(p.color.slice(1), 16), 3))
+      tag.scale.set(ph * 1.1, ph + 0.6, 0.5); tag.position.set(-p.w / 2 - ph * 0.55, 0, 0.1); g.add(tag)
       this.group.add(g)
-      this.tickers.push({ tex, speed: 0.045 + i * 0.006 })
+      this.tickers.push({ tex, speed: 0.045 + i * 0.006, redraw })
+      // Initial content (rotated per sign).
+      redraw(config.news.slice(rot).concat(config.news.slice(0, rot)))
     })
   }
 
-  /** Render the headline strip to a canvas once; return the looping texture. */
-  private makeTickerTexture(headlines: string[], color: string): { tex: THREE.CanvasTexture; aspect: number } {
-    const H = 72
-    const pad = 60
-    const font = '700 44px ui-monospace, Menlo, monospace'
-    const measure = document.createElement('canvas').getContext('2d')!
-    measure.font = font
-    const sep = '    ◆    ' // spaced diamond between headlines
-    const text = headlines.join(sep) + sep
-    const textW = Math.ceil(measure.measureText(text).width) + pad
-    const W = Math.min(4096, textW)
-    const cv = document.createElement('canvas')
-    cv.width = W; cv.height = H
-    const ctx = cv.getContext('2d')!
-    ctx.fillStyle = '#05060b'; ctx.fillRect(0, 0, W, H)
-    ctx.font = font
-    ctx.textBaseline = 'middle'
-    ctx.fillStyle = color
-    ctx.shadowColor = color
-    ctx.shadowBlur = 14
-    // If the text is longer than the (capped) canvas, scale it to fit.
-    const scale = textW > W ? W / textW : 1
-    ctx.save(); ctx.scale(scale, 1)
-    ctx.fillText(text, pad / 2, H / 2)
-    ctx.restore()
-    const tex = new THREE.CanvasTexture(cv)
-    tex.wrapS = THREE.RepeatWrapping
-    tex.wrapT = THREE.ClampToEdgeWrapping
-    tex.colorSpace = THREE.SRGBColorSpace
-    tex.anisotropy = config.tier.anisotropy
-    this.ownedTex.push(tex)
-    return { tex, aspect: W / H }
+  /** Inject a reactive BREAKING headline that scrolls across every ticker. */
+  pushHeadline(text: string) {
+    this.breaking.unshift('★ BREAKING: ' + text.toUpperCase())
+    if (this.breaking.length > 3) this.breaking.pop()
+    for (let i = 0; i < this.tickers.length; i++) {
+      const rot = i % 8
+      const base = config.news.slice(rot).concat(config.news.slice(0, rot))
+      this.tickers[i].redraw([...this.breaking, ...base])
+    }
   }
 
   /** A small alien market district: canopied stalls, glow signs, crates, pods. */

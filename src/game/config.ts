@@ -184,6 +184,19 @@ export const config = {
     trafficCount: 6,
   },
 
+  // News-ticker headlines (edit here). Reactive "BREAKING" lines are injected at
+  // runtime in front of these.
+  news: [
+    'TESLA OPTIMUS ENTERS PILOT PRODUCTION ON THE FACTORY FLOOR',
+    'FIGURE 03 DEMOS DEXTEROUS TWO-HANDED ASSEMBLY',
+    'BOSTON DYNAMICS ELECTRIC ATLAS PASSES NEW WORK TRIALS',
+    '1X NEO BEGINS LIMITED IN-HOME TRIALS',
+    'UNITREE G1 PRICE DROP SPARKS A HOBBYIST WAVE',
+    'APPTRONIK APOLLO SCALES WAREHOUSE DEPLOYMENTS',
+    'AGILITY DIGIT CLOCKS RECORD CONTINUOUS SHIFT',
+    'UNIT 7 ONLINE: CITIZENS WELCOME THEIR NEON GUARDIAN',
+  ] as string[],
+
   // Lightweight objective chain (one active at a time). Drives the HUD objective
   // line + completion banners. Config-driven so the flow is tunable in one place.
   missions: [

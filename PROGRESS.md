@@ -610,3 +610,11 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   humanoid-robot headlines. Strip rendered to a canvas once; the sign advances the
   texture offset each frame (cheap, no per-frame redraw). Per-sign color, rotated
   headline order, glowing frame.
+
+## Ticker upgrades + more building detail
+
+- News tickers: headlines moved to config.news; a fixed "NEWS" tag tab on each
+  sign; reactive BREAKING headlines (red) injected at runtime via
+  World.pushHeadline - fired on objective complete, mech unlock, and zone arrival.
+- Buildings: stacked horizontal neon light-bands wrapping tall towers (Coruscant
+  look), on top of the earlier window-texture/spine/roof-trim facelift.
