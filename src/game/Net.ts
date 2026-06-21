@@ -69,7 +69,7 @@ export function resolveHost(explicit?: string): string {
 // TODO: set this to your deployed PartyKit host after `npx partykit deploy`.
 // Until then, multiplayer only connects on localhost dev or with a `?mp=host`
 // override, and the game runs fine single-player.
-export const PROD_HOST = 'unit7-world.PARTYKIT_ACCOUNT.partykit.dev'
+export const PROD_HOST = 'play.humanoidrobots.com'
 
 export class Net {
   private ws: WebSocket | null = null
