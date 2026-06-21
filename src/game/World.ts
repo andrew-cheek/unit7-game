@@ -124,6 +124,9 @@ export class World {
   private elevatorClimbers: { mesh: THREE.Mesh; t: number; speed: number }[] = []
   private elevatorRing?: THREE.Object3D
   private hangarBots: { mesh: THREE.Mesh; baseY: number; phase: number }[] = []
+  // Hangar ambience: a pulsing energy ring on the pad + rising steam vents.
+  private hangarRingMat: THREE.MeshStandardMaterial | null = null
+  private hangarSteam: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number; baseY: number }[] = []
   private spaceportBeacon?: THREE.Object3D
   private spaceportWarn: THREE.MeshStandardMaterial[] = []
   private launchShip?: { mesh: THREE.Mesh; state: 'parked' | 'rising'; timer: number; vy: number; baseY: number }
@@ -923,6 +926,23 @@ export class World {
     const back = new THREE.Mesh(this.boxGeo, steel)
     back.scale.set(W, 16, 2); back.position.set(0, 8, -D + 3); back.castShadow = config.tier.buildingShadows
     g.add(back)
+
+    // Energy ring inset in the launch pad (pulses in update).
+    this.hangarRingMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 2.4, roughness: 0.4 }))
+    const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(9, 0.5, 10, 36)), this.hangarRingMat)
+    ring.rotation.x = Math.PI / 2; ring.position.set(0, 0.5, -D / 2 + 4)
+    g.add(ring)
+    // Steam/energy vents rising off the pad (additive, fog-immune; animated).
+    const ventGeo = this.ownG(new THREE.CylinderGeometry(0.6, 1.6, 8, 10, 1, true))
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2
+      const mat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const vent = new THREE.Mesh(ventGeo, mat)
+      const baseY = 3
+      vent.position.set(Math.cos(a) * 7, baseY, -D / 2 + 4 + Math.sin(a) * 6)
+      g.add(vent)
+      this.hangarSteam.push({ mesh: vent, mat, phase: a, baseY })
+    }
     this.group.add(g)
 
     // Bobbing repair bots near the pad (world space, animated in update).
@@ -1571,6 +1591,14 @@ export class World {
     for (const b of this.hangarBots) {
       b.mesh.position.y = b.baseY + Math.sin(this.time * 1.6 + b.phase) * 0.5
       b.mesh.rotation.y += dt * 0.8
+    }
+    // Hangar energy ring pulse + steam vents rising and fading on a loop.
+    if (this.hangarRingMat) this.hangarRingMat.emissiveIntensity = 1.8 + Math.sin(this.time * 2.5) * 1.2
+    for (const s of this.hangarSteam) {
+      const cyc = (this.time * 0.5 + s.phase) % 1
+      s.mesh.position.y = s.baseY + cyc * 6
+      s.mesh.scale.setScalar(0.6 + cyc * 1.4)
+      s.mat.opacity = 0.16 * (1 - cyc)
     }
 
     // Spaceport: sweeping beacon, pulsing warning lights, periodic ship launch.
