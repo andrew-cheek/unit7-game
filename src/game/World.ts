@@ -30,6 +30,7 @@ export const OFFICE_ANCHORS: OfficeAnchor[] = [
 
 const ROT_NONE = new THREE.Quaternion() // identity rotation for instanced transforms
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const smooth01 = (x: number) => {
   const t = Math.min(1, Math.max(0, x))
   return t * t * (3 - 2 * t)
@@ -136,6 +137,11 @@ export class World {
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
+  // Visible sun in the sky (glow + bright core sprites) that rises/sets with the
+  // day cycle. Separate from the directional `sun` light, which you can't see.
+  private sunGroup = new THREE.Group()
+  private sunCoreMat!: THREE.SpriteMaterial
+  private sunGlowMat!: THREE.SpriteMaterial
   private time = 0
   private dawn = 0 // current day factor (0 night .. 1 full day)
 
@@ -1342,6 +1348,7 @@ export class World {
     this.sun.shadow.normalBias = 0.02
     this.scene.add(this.sun, this.sunTarget)
     this.sun.target = this.sunTarget
+    this.buildSun()
 
     // A few colored accent fills near neon hotspots (no shadows - cheap).
     // Desktop only; mobile leans on the emissive + IBL alone to save draw cost.
@@ -1419,6 +1426,39 @@ export class World {
     for (const m of this.facadeMats) m.emissiveIntensity = winI
   }
 
+  /**
+   * Builds the visible sun: a soft glow sprite + a bright core sprite sharing a
+   * radial-gradient texture. Additive and fog-immune so it reads as a bright
+   * disc in the sky and gets caught by bloom. Positioned each frame in `update`.
+   */
+  private buildSun() {
+    const size = 128
+    const cv = document.createElement('canvas')
+    cv.width = cv.height = size
+    const ctx = cv.getContext('2d')!
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+    g.addColorStop(0, 'rgba(255,255,255,1)')
+    g.addColorStop(0.28, 'rgba(255,255,255,0.95)')
+    g.addColorStop(0.5, 'rgba(255,235,200,0.45)')
+    g.addColorStop(1, 'rgba(255,220,180,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, size, size)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    this.ownedTex.push(tex)
+
+    this.sunGlowMat = new THREE.SpriteMaterial({ map: tex, color: 0xffd9a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    this.sunCoreMat = new THREE.SpriteMaterial({ map: tex, color: 0xfff4e0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    this.ownedMats.push(this.sunGlowMat, this.sunCoreMat)
+    const glow = new THREE.Sprite(this.sunGlowMat)
+    glow.scale.setScalar(190)
+    const core = new THREE.Sprite(this.sunCoreMat)
+    core.scale.setScalar(70)
+    this.sunGroup.add(glow, core)
+    this.sunGroup.visible = false
+    this.scene.add(this.sunGroup)
+  }
+
   /** Update the sky/sun/billboards. Always runs so the sky animates everywhere. */
   update(dt: number, focus: THREE.Vector3) {
     this.time += dt
@@ -1435,6 +1475,19 @@ export class World {
     if (this.zone === 'earth') this.applyDawn(dawn)
     this.sunTarget.position.copy(focus)
     this.sunTarget.updateMatrixWorld()
+
+    // Visible sun disc: below the horizon at night, rising fast at dawn to high
+    // in the sky at noon. Warm orange low down, pale bright when high. Earth only.
+    this.sunGroup.visible = this.zone === 'earth' && dawn > 0.01
+    if (this.sunGroup.visible) {
+      this.sunGroup.position.set(focus.x + lerp(440, 200, dawn), lerp(-120, 380, dawn), focus.z + 240)
+      const warm = clamp01(dawn * 1.6)
+      this.sunGlowMat.color.setHex(0xff7a3a).lerp(new THREE.Color(0xfff0cf), warm)
+      this.sunCoreMat.color.setHex(0xffb070).lerp(new THREE.Color(0xfffbf0), warm)
+      const a = clamp01((dawn - 0.02) / 0.18) // fade in as it clears the horizon
+      this.sunGlowMat.opacity = a * 0.9
+      this.sunCoreMat.opacity = a
+    }
     for (const b of this.billboards) {
       b.mat.opacity = b.base + Math.sin(this.time * b.rate + b.phase) * 0.25
     }

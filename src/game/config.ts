@@ -78,7 +78,8 @@ export const config = {
 
   jetpack: {
     thrust: 26,
-    maxAscend: 13,
+    maxAscend: 13, // fast climb while the boost reserve has charge
+    cruiseAscend: 4, // steady climb once the reserve is spent (never runs out)
     fuelMax: 100,
     fuelDrain: 34,
     fuelRegen: 18,

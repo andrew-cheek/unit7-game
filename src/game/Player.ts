@@ -185,14 +185,18 @@ export class Player {
     this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
     this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
 
-    // Jetpack: hold to fly, with an initial hop and a regenerating fuel meter.
-    const jetting = input.held.jet && this.fuel > config.jetpack.fuelMinToFly
+    // Jetpack: hold to fly. It NEVER runs out. A charged boost reserve gives a
+    // fast climb; once the reserve is spent the climb just eases down to a
+    // steady cruise ascend that sustains forever, so you can always keep flying.
+    const jetting = input.held.jet
     if (jetting) {
       // Coyote time: still allow the launch hop just after stepping off a ledge.
       const canHop = this.grounded || this.airTime < config.player.coyoteTime
       if (!this.prevJet && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
-      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
-      this.fuel = Math.max(0, this.fuel - config.jetpack.fuelDrain * dt)
+      const boosted = this.fuel > 0
+      const cap = boosted ? config.jetpack.maxAscend : config.jetpack.cruiseAscend
+      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, cap)
+      if (boosted) this.fuel = Math.max(0, this.fuel - config.jetpack.fuelDrain * dt)
       this.model.setThrust(1)
     } else {
       this.fuel = Math.min(config.jetpack.fuelMax, this.fuel + config.jetpack.fuelRegen * dt)
