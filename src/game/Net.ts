@@ -45,6 +45,7 @@ export interface NetProfile {
   level: number
   rating: number // duel rank points
   badges: number // achievements unlocked
+  accent: number // equipped accent cosmetic color (hex int) - tints the remote avatar
   games: WireGames
 }
 
@@ -253,9 +254,9 @@ export class Net {
     this.send({ t: 'claim', id })
   }
 
-  /** Publish our profile (captures, level, duel rating, badges, per-game W/L) to the room. */
-  sendProfile(aliens: number, games: WireGames, level: number, rating: number, badges: number) {
-    this.send({ t: 'profile', aliens, games, level, rating, badges })
+  /** Publish our profile (captures, level, duel rating, badges, accent, per-game W/L) to the room. */
+  sendProfile(aliens: number, games: WireGames, level: number, rating: number, badges: number, accent: number) {
+    this.send({ t: 'profile', aliens, games, level, rating, badges, accent })
   }
 
   /** Challenge another pilot (by connection id) to a live Beam Wars duel. */

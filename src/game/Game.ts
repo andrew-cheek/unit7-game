@@ -1266,6 +1266,10 @@ export class Game {
         onProfiles: (list) => {
           this.remoteProfiles = list
           this.profilesDirty = true
+          // Dress the remote avatars: accent colour + a nametag showing level + rank.
+          this.remotePlayers.applyProfiles(
+            list.map((p) => ({ id: p.id, name: p.name, accent: p.accent ?? 0x27e7ff, level: p.level ?? 1, tier: tierForRating(p.rating ?? 1000).name })),
+          )
         },
         onChallenged: (fromId, name) => {
           // Ignore a new offer if one is already pending or we're mid-duel.
@@ -1442,7 +1446,14 @@ export class Game {
     for (const [game, r] of Object.entries(stats.games)) {
       games[game] = [r.played, r.won, r.lost, r.best]
     }
-    this.net.sendProfile(this.profile.lifetimeCaptured + this.hud.captured, games, levelForXp(this.progression.xp), this.progression.duelRating, this.progression.achievements.length)
+    this.net.sendProfile(
+      this.profile.lifetimeCaptured + this.hud.captured,
+      games,
+      levelForXp(this.progression.xp),
+      this.progression.duelRating,
+      this.progression.achievements.length,
+      cosmeticById(this.progression.cosmetics.accent).color,
+    )
   }
 
   /** Snapshot the gamification state for the HUD (level/streak/daily/rank/cosmetics). */

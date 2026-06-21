@@ -51,6 +51,7 @@ interface Profile {
   level: number
   rating: number
   badges: number
+  accent: number
   games: WireGames
 }
 
@@ -75,7 +76,7 @@ type ClientMsg =
   | ({ t: 'state' } & Omit<PlayerSnapshot, 'id' | 'name'>)
   | { t: 'capture'; p: Vec3; award: number }
   | { t: 'claim'; id: number }
-  | { t: 'profile'; aliens: number; games: WireGames; level?: number; rating?: number; badges?: number }
+  | { t: 'profile'; aliens: number; games: WireGames; level?: number; rating?: number; badges?: number; accent?: number }
   | { t: 'challenge'; to: string; trail?: number }
   | { t: 'accept'; from: string; trail?: number }
   | { t: 'decline'; from: string }
@@ -143,7 +144,7 @@ export default class WorldServer implements Party.Server {
         id: sender.id, name, p: [0, 0, 0], y: 0, m: 'robot', v: null, z: 'earth', s: 0, g: true,
       })
       this.scores.set(sender.id, { name, score: 0 })
-      this.profiles.set(sender.id, { aliens: 0, level: 1, rating: 1000, badges: 0, games: {} })
+      this.profiles.set(sender.id, { aliens: 0, level: 1, rating: 1000, badges: 0, accent: 0x27e7ff, games: {} })
       // Newcomer gets the roster, the live scoreboard, the current swarm and
       // the profiles of everyone already here.
       sender.send(
@@ -170,6 +171,7 @@ export default class WorldServer implements Party.Server {
         level: Math.max(1, Math.min(9999, (msg.level as number) | 0 || 1)),
         rating: Math.max(0, Math.min(99999, (msg.rating as number) | 0 || 1000)),
         badges: Math.max(0, Math.min(999, (msg.badges as number) | 0)),
+        accent: colorOf(msg.accent),
         games: sanitizeGames(msg.games),
       })
       this.broadcastProfiles()
@@ -403,12 +405,12 @@ export default class WorldServer implements Party.Server {
     this.room.getConnection(m.b)?.send(payload)
   }
 
-  private profileArray(): { id: string; name: string; aliens: number; level: number; rating: number; badges: number; games: WireGames }[] {
-    const out: { id: string; name: string; aliens: number; level: number; rating: number; badges: number; games: WireGames }[] = []
+  private profileArray(): { id: string; name: string; aliens: number; level: number; rating: number; badges: number; accent: number; games: WireGames }[] {
+    const out: { id: string; name: string; aliens: number; level: number; rating: number; badges: number; accent: number; games: WireGames }[] = []
     for (const [id, prof] of this.profiles) {
       const player = this.players.get(id)
       if (!player) continue
-      out.push({ id, name: player.name, aliens: prof.aliens, level: prof.level, rating: prof.rating, badges: prof.badges, games: prof.games })
+      out.push({ id, name: player.name, aliens: prof.aliens, level: prof.level, rating: prof.rating, badges: prof.badges, accent: prof.accent, games: prof.games })
     }
     return out
   }

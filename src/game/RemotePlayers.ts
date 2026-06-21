@@ -16,8 +16,11 @@ interface Remote {
   name: string
   model: RobotModel
   group: THREE.Group
+  tag: THREE.Sprite
   tagMat: THREE.SpriteMaterial
   tagTex: THREE.CanvasTexture
+  tagLabel: string // last-rendered tag text (so we only rebuild on change)
+  accent: number // applied accent colour (so we only re-tint on change)
   pos: THREE.Vector3 // rendered (smoothed) position
   targetPos: THREE.Vector3 // latest from the network
   yaw: number
@@ -60,8 +63,11 @@ export class RemotePlayers {
       name,
       model,
       group,
+      tag: sprite,
       tagMat: mat,
       tagTex: tex,
+      tagLabel: name,
+      accent: -1,
       pos: new THREE.Vector3(),
       targetPos: new THREE.Vector3(),
       yaw: 0,
@@ -104,6 +110,27 @@ export class RemotePlayers {
     r.zone = s.z
   }
 
+  /**
+   * Dress remote avatars from the room's profiles: tint each robot to its
+   * owner's accent cosmetic and show "name · LVn · TIER" on the nametag. Only
+   * re-tints / rebuilds the tag when something actually changed (canvas work).
+   */
+  applyProfiles(list: { id: string; name: string; accent: number; level: number; tier: string }[]) {
+    for (const p of list) {
+      const r = this.players.get(p.id)
+      if (!r) continue
+      if (p.accent !== r.accent) {
+        r.model.setAccent(p.accent)
+        r.accent = p.accent
+      }
+      const label = `${p.name}  LV${p.level}  ${p.tier.replace('CLASS ', '')}`
+      if (label !== r.tagLabel) {
+        drawNameTag(r.tagTex, label, p.accent)
+        r.tagLabel = label
+      }
+    }
+  }
+
   update(dt: number) {
     const k = 1 - Math.exp(-dt * 12) // ease rendered transform toward the target
     for (const r of this.players.values()) {
@@ -134,32 +161,42 @@ function hashId(id: string): number {
   return Math.abs(h)
 }
 
-/** A camera-facing name label rendered to a canvas sprite, sits above the head. */
+/** A camera-facing label rendered to a canvas sprite, sits above the head. */
 function makeNameTag(name: string): { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture } {
-  const w = 256
-  const h = 64
   const cv = document.createElement('canvas')
-  cv.width = w
-  cv.height = h
-  const ctx = cv.getContext('2d')!
-  ctx.clearRect(0, 0, w, h)
-  // Pill background for legibility against the bright city.
-  ctx.fillStyle = 'rgba(6,10,20,0.66)'
-  roundRect(ctx, 6, 14, w - 12, 36, 14)
-  ctx.fill()
-  ctx.font = '700 28px ui-monospace, Menlo, monospace'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#dff0ff'
-  ctx.fillText(name, w / 2, 33, w - 24)
+  cv.width = 256
+  cv.height = 64
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
+  drawNameTag(tex, name, 0x27e7ff)
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, fog: false })
   const sprite = new THREE.Sprite(mat)
   sprite.position.set(0, 3.0, 0)
-  sprite.scale.set(3.2, 0.8, 1)
+  sprite.scale.set(3.6, 0.9, 1)
   sprite.renderOrder = 10
   return { sprite, mat, tex }
+}
+
+/** (Re)draw a nametag onto its canvas texture: a dark pill with an accent-coloured
+ *  border and the label (name + level + rank) in legible mono. */
+function drawNameTag(tex: THREE.CanvasTexture, label: string, accent: number) {
+  const cv = tex.image as HTMLCanvasElement
+  const ctx = cv.getContext('2d')!
+  const w = cv.width
+  const h = cv.height
+  ctx.clearRect(0, 0, w, h)
+  ctx.fillStyle = 'rgba(6,10,20,0.7)'
+  roundRect(ctx, 5, 12, w - 10, 40, 14)
+  ctx.fill()
+  ctx.strokeStyle = '#' + (accent & 0xffffff).toString(16).padStart(6, '0')
+  ctx.lineWidth = 2.5
+  ctx.stroke()
+  ctx.font = '700 22px ui-monospace, Menlo, monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#eaf4ff'
+  ctx.fillText(label, w / 2, 33, w - 20)
+  tex.needsUpdate = true
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
