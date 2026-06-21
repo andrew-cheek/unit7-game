@@ -6,7 +6,7 @@ export default function App() {
   return (
     <Unit7Game
       config={{
-        startInIntro: false, // dev harness skips the cinematic for faster iteration; the component default is true
+        startInIntro: true, // public build plays the factory cinematic on load
         initialZone: 'earth',
       }}
     />
