@@ -4,6 +4,7 @@ import { createHovercar, createSpaceship, createRocket, createSpeederBike, creat
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
+import type { Zone } from './types'
 
 export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL'
 type DriveMode = 'hover' | 'fly' | 'rocket'
@@ -22,6 +23,14 @@ interface Vehicle {
   size: number // model scale (1 for non-mechs); used for camera + muzzle height
   morph: number // mech transform 0=robot .. 1=jet form (eased)
   morphTarget: number
+  home: THREE.Vector3 // Earth parking spot (restored on return)
+}
+
+// Where the mechs line up relative to spawn when taken to another world.
+const OFFWORLD_MECH_OFFSET: Record<string, THREE.Vector3> = {
+  mechM: new THREE.Vector3(-14, 0, 8),
+  mechL: new THREE.Vector3(8, 0, 16),
+  mechXL: new THREE.Vector3(48, 0, 48),
 }
 
 export const isMech = (k: VehicleKind) => k === 'mechM' || k === 'mechL' || k === 'mechXL'
@@ -105,7 +114,37 @@ export class Vehicles {
       size,
       morph: 0,
       morphTarget: 0,
+      home: position.clone(),
     })
+  }
+
+  /**
+   * Move vehicles for a zone change. On Earth everything returns to its parking
+   * spot; off-world the cars/shuttle/rocket are hidden and the three mechs are
+   * lined up near the spawn so you can pilot your giant robot on Mars/the Moon.
+   */
+  setZone(zone: Zone, spawn: THREE.Vector3) {
+    const earth = zone === 'earth'
+    this.current = null
+    for (const v of this.list) {
+      const visible = earth || isMech(v.kind)
+      v.model.group.visible = visible
+      if (!visible) continue
+      if (earth) {
+        v.position.copy(v.home)
+      } else {
+        const off = OFFWORLD_MECH_OFFSET[v.kind] ?? new THREE.Vector3()
+        v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
+      }
+      const gy = this.physics.sampleGround(v.position.x, v.position.z, 200)?.y ?? 0
+      v.position.y = gy + (isMech(v.kind) ? 0 : v.hoverHeight)
+      v.yaw = 0
+      v.morph = 0
+      v.morphTarget = 0
+      v.velocity.set(0, 0, 0)
+      v.model.group.position.copy(v.position)
+      v.model.group.rotation.set(0, 0, 0)
+    }
   }
 
   /** Toggle the piloted mech between robot and jet form. Returns the new state. */
@@ -125,6 +164,7 @@ export class Vehicles {
     let best: Vehicle | null = null
     let bestScore = Infinity
     for (const v of this.list) {
+      if (!v.model.group.visible) continue // hidden off-world (cars stay on Earth)
       // Big mechs get a larger boarding radius (you stand at their feet, far
       // from the model centre). Compare distance against each vehicle's range.
       const range = config.vehicle.enterRange + (isMech(v.kind) ? v.size * 1.6 : 0)

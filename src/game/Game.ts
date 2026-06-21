@@ -372,8 +372,10 @@ export class Game {
     const solids = zone === 'earth' ? this.world.solidMeshes : env!.solidMeshes
     this.physics.setSurfaces(ground, colliders)
     this.camera.setSolids(solids)
-    this.vehicles.setVisible(zone === 'earth')
-    this.missiles.setVisible(zone === 'earth')
+    // Mechs follow you off-world (pilot your giant robot on Mars/Moon); the cars
+    // stay parked on Earth. Missiles can fire in any zone.
+    this.vehicles.setZone(zone, spawn)
+    this.missiles.setVisible(true)
     this.npcs.setVisible(zone === 'earth')
     this.events.setVisible(zone === 'earth')
     this.patrols.setVisible(zone === 'earth')
@@ -670,7 +672,8 @@ export class Game {
 
     this.missileCooldown = Math.max(0, this.missileCooldown - dt)
     const gravity = config.zones[this.zone].gravity
-    if (onEarth) this.vehicles.update(dt, this.input)
+    // Vehicles update in every zone now (mechs are pilotable off-world).
+    this.vehicles.update(dt, this.input)
 
     if (this.vehicles.current) {
       this.player.object.position.copy(this.vehicles.current.position)

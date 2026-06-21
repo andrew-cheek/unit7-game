@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createMech } from './procedural'
+import { createMech, createDrone } from './procedural'
 import { randRange } from './utils'
 import type { Zone } from './types'
 
@@ -147,6 +147,74 @@ export class Zones {
     }
   }
 
+  /**
+   * Mars life: drifting bioluminescent spore-jellies that bob and circle slowly
+   * over the dunes. Cheap (sphere + tendrils), additive glow. Returns an animate
+   * function the env calls each frame.
+   */
+  private buildSpores(group: THREE.Group, displace: (x: number, z: number) => number): (dt: number) => void {
+    const bodyMat = new THREE.MeshBasicMaterial({ color: 0x2bff8a, transparent: true, opacity: 0.85, fog: false })
+    const tendrilMat = new THREE.MeshBasicMaterial({ color: 0x6fffc0, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const items: { g: THREE.Group; cx: number; cz: number; r: number; ang: number; spd: number; baseY: number; phase: number }[] = []
+    const n = config.tier.name === 'high' ? 10 : 5
+    for (let i = 0; i < n; i++) {
+      const cx = randRange(-130, 130)
+      const cz = randRange(-130, 130)
+      if (Math.hypot(cx, cz) < 24) continue
+      const jelly = new THREE.Group()
+      const bell = new THREE.Mesh(new THREE.SphereGeometry(randRange(1.2, 2.2), 12, 10, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat)
+      jelly.add(bell)
+      for (let k = 0; k < 5; k++) {
+        const tendril = new THREE.Mesh(new THREE.ConeGeometry(0.12, 3.2, 6), tendrilMat)
+        tendril.rotation.x = Math.PI
+        tendril.position.set(Math.cos((k / 5) * 6.28) * 0.7, -1.6, Math.sin((k / 5) * 6.28) * 0.7)
+        jelly.add(tendril)
+      }
+      const baseY = displace(cx, cz) + randRange(12, 26)
+      jelly.position.set(cx, baseY, cz)
+      group.add(jelly)
+      items.push({ g: jelly, cx, cz, r: randRange(6, 16), ang: randRange(0, 6.28), spd: randRange(0.08, 0.2) * (i % 2 ? 1 : -1), baseY, phase: randRange(0, 6.28) })
+    }
+    let t = 0
+    return (dt: number) => {
+      t += dt
+      for (const it of items) {
+        it.ang += it.spd * dt
+        it.g.position.set(it.cx + Math.cos(it.ang) * it.r, it.baseY + Math.sin(t * 0.8 + it.phase) * 1.6, it.cz + Math.sin(it.ang) * it.r)
+        it.g.rotation.y += dt * 0.3
+      }
+    }
+  }
+
+  /**
+   * Moon life: hovering mining drones circling slowly above the regolith with a
+   * downward survey beam. Returns an animate function.
+   */
+  private buildMiningDrones(group: THREE.Group, displace: (x: number, z: number) => number): (dt: number) => void {
+    const items: { model: ReturnType<typeof createDrone>; cx: number; cz: number; r: number; ang: number; spd: number; h: number }[] = []
+    const beamMat = new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const n = config.tier.name === 'high' ? 6 : 3
+    for (let i = 0; i < n; i++) {
+      const cx = randRange(-120, 120)
+      const cz = randRange(-120, 120)
+      if (Math.hypot(cx, cz) < 22) continue
+      const model = createDrone()
+      const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 10, 12, 1, true), beamMat)
+      beam.position.y = -5
+      model.group.add(beam)
+      group.add(model.group)
+      items.push({ model, cx, cz, r: randRange(10, 26), ang: randRange(0, 6.28), spd: randRange(0.1, 0.25) * (i % 2 ? 1 : -1), h: displace(cx, cz) + randRange(8, 18) })
+    }
+    return (dt: number) => {
+      for (const it of items) {
+        it.ang += it.spd * dt
+        it.model.group.position.set(it.cx + Math.cos(it.ang) * it.r, it.h, it.cz + Math.sin(it.ang) * it.r)
+        it.model.group.rotation.y = -it.ang
+        it.model.update(dt, 0)
+      }
+    }
+  }
+
   private addBoundary(colliders: THREE.Box3[]) {
     const t = 6
     const tall = 80
@@ -177,6 +245,7 @@ export class Zones {
       group.add(p.group)
     }
 
+    const spores = this.buildSpores(group, displace)
     const env: PlanetEnv = {
       group,
       groundMeshes: [terrain],
@@ -184,7 +253,7 @@ export class Zones {
       solidMeshes: [terrain],
       spawn: new THREE.Vector3(0, displace(0, 0) + 1, -10),
       portals,
-      update: (dt) => portals.forEach((p) => p.update(dt)),
+      update: (dt) => { portals.forEach((p) => p.update(dt)); spores(dt) },
       dispose: () => disposePlanet(group),
     }
     this.addBoundary(env.colliders)
@@ -313,6 +382,7 @@ export class Zones {
       group.add(p.group)
     }
 
+    const drones = this.buildMiningDrones(group, displace)
     const env: PlanetEnv = {
       group,
       groundMeshes: [terrain],
@@ -320,7 +390,7 @@ export class Zones {
       solidMeshes: [terrain],
       spawn: new THREE.Vector3(0, displace(0, 0) + 1, -10),
       portals,
-      update: (dt) => portals.forEach((p) => p.update(dt)),
+      update: (dt) => { portals.forEach((p) => p.update(dt)); drones(dt) },
       dispose: () => disposePlanet(group),
     }
     this.addBoundary(env.colliders)

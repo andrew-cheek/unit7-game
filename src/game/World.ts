@@ -35,12 +35,21 @@ const smooth01 = (x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// Earth day cycle: a slow sunrise then sunset. The sun rises starting at
-// SUN_RISE_AT (climbing to full day at SUN_PEAK_AT), then sets from SUN_PEAK_AT
-// fading back to night over SUN_SET_DUR. Day factor 0 = night, 1 = full day.
-const SUN_RISE_AT = 5
-const SUN_PEAK_AT = 10
-const SUN_SET_DUR = 12
+// Earth day/night cycle. Mostly daylight so the city is bright and readable,
+// with a dawn (which triggers the invasion) and a brief night for mood. Loops.
+const CYCLE = 210
+const DAWN_START = 5
+const DAWN_END = 13
+const DUSK_START = 150
+const DUSK_END = 165
+function dayCycle(time: number): number {
+  const u = time % CYCLE
+  if (u < DAWN_START) return 0
+  if (u < DAWN_END) return smooth01((u - DAWN_START) / (DAWN_END - DAWN_START))
+  if (u < DUSK_START) return 1
+  if (u < DUSK_END) return 1 - smooth01((u - DUSK_START) / (DUSK_END - DUSK_START))
+  return 0
+}
 const NIGHT = {
   skyTop: new THREE.Color(0x05070f),
   skyBot: new THREE.Color(0x180a2c),
@@ -52,17 +61,22 @@ const NIGHT = {
   sun: new THREE.Color(0xbfd2ff),
   sunI: 1.0,
 }
+// "DAY" target (the cycle holds here): a bright blue sky, light haze and strong
+// fills so the streets read clearly instead of looking like night-with-a-glow.
 const DAWN = {
-  skyTop: new THREE.Color(0x2a4f9c),
-  skyBot: new THREE.Color(0xff8a4d),
-  fog: new THREE.Color(0x3a5180),
-  ambient: new THREE.Color(0x7186b0),
-  ambientI: 1.25,
-  hemiSky: new THREE.Color(0xa7bdec),
-  hemiI: 0.95,
-  sun: new THREE.Color(0xfff0d8),
-  sunI: 2.2,
+  skyTop: new THREE.Color(0x4f86e0),
+  skyBot: new THREE.Color(0xbcd2f0),
+  fog: new THREE.Color(0x6f8fc0),
+  ambient: new THREE.Color(0x90a6cc),
+  ambientI: 1.95,
+  hemiSky: new THREE.Color(0xbcd4ff),
+  hemiI: 1.5,
+  sun: new THREE.Color(0xffffff),
+  sunI: 3.0,
 }
+// Building window glow is dimmed toward daytime so lit windows don't read at noon.
+const WINDOW_NIGHT_I = 1.25
+const WINDOW_DAY_I = 0.3
 
 /**
  * The futuristic district + its atmosphere. Stage 5 art pass turns the gray test
@@ -98,7 +112,11 @@ export class World {
   private ownedTex: THREE.Texture[] = []
   private ownedGeos: THREE.BufferGeometry[] = []
   private billboards: Billboard[] = []
+  private facadeMats: THREE.MeshStandardMaterial[] = [] // window-lit tower facades (dimmed by day)
   private accentLights: THREE.PointLight[] = []
+  private elevatorClimbers: { mesh: THREE.Mesh; t: number; speed: number }[] = []
+  private elevatorRing?: THREE.Object3D
+  private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
   private time = 0
@@ -140,6 +158,7 @@ export class World {
     this.buildExtras()
     this.buildSkyline()
     this.buildLandmark()
+    this.buildSpaceElevator()
     this.buildMarket()
     this.buildSetPieces()
     this.buildAdPanels()
@@ -222,10 +241,11 @@ export class World {
         roughness: 0.55,
         emissive: 0xffffff,
         emissiveMap: tex,
-        emissiveIntensity: 1.25,
+        emissiveIntensity: WINDOW_NIGHT_I,
         envMapIntensity: config.tier.envMapIntensity,
       }),
     )
+    this.facadeMats.push(mat)
     const mesh = new THREE.Mesh(this.boxGeo, mat)
     mesh.scale.set(fx, h, fz)
     mesh.position.set(cx, h / 2, cz)
@@ -597,6 +617,84 @@ export class World {
     this.group.add(tether)
   }
 
+  /**
+   * The centerpiece: a colossal space elevator near the middle of the map. A
+   * tapering megastructure base rises to a thick tether climbing far into the
+   * sky, capped by a slowly rotating orbital ring + station. Climber cars ride
+   * the tether (animated in update). Upper parts are fog-immune so it reads as a
+   * landmark from anywhere. The base is solid (collider + on radar).
+   */
+  private buildSpaceElevator() {
+    const { x, z, baseTop, tetherTop } = World.ELEV
+    const dark = this.own(new THREE.MeshStandardMaterial({ color: 0x141a26, metalness: 0.7, roughness: 0.45 }))
+    const farMetal = this.own(new THREE.MeshBasicMaterial({ color: 0x1a2740, fog: false }))
+    const glowCyan = this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+    const glowMag = this.own(new THREE.MeshBasicMaterial({ color: config.palette.magenta, fog: false }))
+
+    // Tapering base tower (3 stacked segments) with neon trim rings.
+    const segs: Array<[number, number]> = [[26, 50], [18, 42], [12, 30]] // [width, height]
+    let y = 0
+    for (let i = 0; i < segs.length; i++) {
+      const [w, h] = segs[i]
+      const seg = new THREE.Mesh(this.boxGeo, dark)
+      seg.scale.set(w, h, w)
+      seg.position.set(x, y + h / 2, z)
+      seg.castShadow = config.tier.buildingShadows
+      seg.receiveShadow = true
+      this.group.add(seg)
+      this.solidMeshes.push(seg)
+      const ring = new THREE.Mesh(this.boxGeo, i % 2 ? glowMag : glowCyan)
+      ring.scale.set(w + 1.5, 1.6, w + 1.5)
+      ring.position.set(x, y + h, z)
+      this.group.add(ring)
+      y += h
+    }
+    // Base collider (so you can't walk through it) + radar landmark.
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(x - 13, 0, z - 13), new THREE.Vector3(x + 13, baseTop, z + 13)))
+    this.landmarks.push({ x, z })
+
+    // The tether: a tall glowing cylinder + four guide cables.
+    const tetherH = tetherTop - baseTop
+    const tether = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2.2, 2.8, tetherH, 12)), farMetal)
+    tether.position.set(x, baseTop + tetherH / 2, z)
+    this.group.add(tether)
+    const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.5, 0.5, tetherH, 8)), glowCyan)
+    beam.position.copy(tether.position)
+    this.group.add(beam)
+
+    // Climber cars riding the tether (animated). Bright so they read at distance.
+    const carGeo = this.ownG(new THREE.BoxGeometry(7, 3.5, 7))
+    for (let i = 0; i < 3; i++) {
+      const car = new THREE.Mesh(carGeo, i === 1 ? glowMag : farMetal)
+      car.position.set(x, baseTop, z)
+      this.group.add(car)
+      this.elevatorClimbers.push({ mesh: car, t: i / 3, speed: 0.04 + i * 0.012 })
+    }
+
+    // Orbital station: a hub + a big slowly rotating ring at the top.
+    const station = new THREE.Group()
+    station.position.set(x, tetherTop, z)
+    const hub = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(10, 14, 10, 16)), farMetal)
+    station.add(hub)
+    const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(58, 3.4, 10, 40)), glowCyan)
+    ring.rotation.x = Math.PI / 2
+    station.add(ring)
+    const ring2 = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(40, 1.6, 8, 36)), glowMag)
+    ring2.rotation.x = Math.PI / 2
+    station.add(ring2)
+    // Spokes connecting hub to ring.
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2
+      const spoke = new THREE.Mesh(this.boxGeo, farMetal)
+      spoke.scale.set(58, 1.4, 1.4)
+      spoke.position.set(Math.cos(a) * 29, 0, Math.sin(a) * 29)
+      spoke.rotation.y = -a
+      station.add(spoke)
+    }
+    this.group.add(station)
+    this.elevatorRing = station
+  }
+
   /** A small alien market district: canopied stalls, glow signs, crates, pods. */
   private buildMarket() {
     const ox = -80
@@ -884,6 +982,9 @@ export class World {
     this.hemi.intensity = lerp(NIGHT.hemiI, DAWN.hemiI, t)
     this.sun.color.copy(NIGHT.sun).lerp(DAWN.sun, t)
     this.sun.intensity = lerp(NIGHT.sunI, DAWN.sunI, t)
+    // Dim the lit windows toward daytime so towers don't glow at noon.
+    const winI = lerp(WINDOW_NIGHT_I, WINDOW_DAY_I, t)
+    for (const m of this.facadeMats) m.emissiveIntensity = winI
   }
 
   /** Update the sky/sun/billboards. Always runs so the sky animates everywhere. */
@@ -892,13 +993,8 @@ export class World {
     this.sky.update(dt)
     this.sky.group.position.set(focus.x, 0, focus.z)
 
-    // Day cycle on Earth: slow rise (5s -> 10s) then a slow set back to night.
-    let dawn = 0
-    if (this.zone === 'earth') {
-      if (this.time < SUN_RISE_AT) dawn = 0
-      else if (this.time < SUN_PEAK_AT) dawn = smooth01((this.time - SUN_RISE_AT) / (SUN_PEAK_AT - SUN_RISE_AT))
-      else dawn = 1 - smooth01((this.time - SUN_PEAK_AT) / SUN_SET_DUR)
-    }
+    // Day/night cycle on Earth: bright daylight most of the time, brief night.
+    const dawn = this.zone === 'earth' ? dayCycle(this.time) : 0
     this.dawn = dawn
     // Sun climbs from the horizon at dawn and sinks again at dusk.
     const sunOffX = lerp(120, 60, dawn)
@@ -936,6 +1032,16 @@ export class World {
       ;(this.shafts[i].material as THREE.MeshBasicMaterial).opacity = 0.06 + Math.sin(this.time * 1.5 + i) * 0.03
     }
     for (const d of this.dishes) d.rotation.y += dt * 0.5
+
+    // Space elevator: climbers ride the tether, the orbital ring slowly turns.
+    if (this.elevatorRing) this.elevatorRing.rotation.y += dt * 0.12
+    if (this.elevatorClimbers.length) {
+      const { x, z, baseTop, tetherTop } = World.ELEV
+      for (const c of this.elevatorClimbers) {
+        c.t = (c.t + c.speed * dt) % 1
+        c.mesh.position.set(x, baseTop + c.t * (tetherTop - baseTop), z)
+      }
+    }
     for (let i = 0; i < this.adPanels.length; i++) {
       this.adPanels[i].emissiveIntensity = 1.6 + Math.sin(this.time * (2 + i * 0.4) + i) * 0.8
     }

@@ -490,3 +490,23 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   as a tail, arms sweep back like wings, thrusters flare. Jet form flies ~2.4x
   faster and turns tighter. Toggle with the T key or a new MORPH button on the
   mech control cluster (mobile). Banner + haptic on transform.
+
+## Brighter day cycle, central space elevator, mechs + life off-world
+
+- **Daylight by default** (World): replaced the quick rise/set with a long
+  day/night loop - dark for 5s, sunrise to full day by ~13s, holds bright for
+  ~2min, brief dusk + night, repeat. Daytime palette is a bright blue sky, light
+  haze and strong ambient/hemi/sun, and lit building windows dim toward noon so
+  the city reads as actual daytime instead of "night with a glow". Invasion still
+  fires at the first sunrise.
+- **Central space elevator** (World.buildSpaceElevator): a colossal centerpiece
+  near the middle of the map - tapering megastructure base, a tether climbing to
+  ~640m, riding climber cars, and a slowly rotating orbital ring/station. Upper
+  parts are fog-immune so it anchors the skyline from anywhere; base is solid +
+  on radar.
+- **Pilot your mech off-world** (Vehicles.setZone): traveling to Mars/Moon now
+  lines the three mechs up at the spawn (cars stay parked on Earth) so you can
+  stomp/fly/transform your giant robot on other planets. Vehicles update in every
+  zone; boarding ignores hidden vehicles.
+- **Alien-world life** (Zones): drifting bioluminescent spore-jellies bobbing
+  over Mars, and hovering mining drones with survey beams circling the Moon.
