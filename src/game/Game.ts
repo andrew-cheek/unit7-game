@@ -26,7 +26,7 @@ import { DawnShow } from './DawnShow'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
-import { loadProfile, saveProfile, type Profile } from './storage'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, type Profile } from './storage'
 import type { HudState, MinigameKind, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
@@ -146,6 +146,9 @@ export class Game {
   private dawnShow!: DawnShow
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
+  // Neon density/quality setting (persisted): scales city neon + bloom.
+  private neonLevel: 'low' | 'med' | 'high' = (() => { const v = loadHighScore('neon'); return v === 1 ? 'low' : v === 2 ? 'med' : 'high' })()
+  private neonBloomMul = 1
   // Transient steam puffs for the mech boot-up burst.
   private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
   private bootGeo = new THREE.SphereGeometry(1, 10, 8)
@@ -272,7 +275,9 @@ export class Game {
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
+      cycleNeon: () => this.cycleNeon(),
     }
+    this.applyNeon()
 
     this.hud = {
       mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
@@ -286,6 +291,7 @@ export class Game {
       minigame: null,
       online: 1,
       leaderboard: [],
+      neon: this.neonLevel,
     }
 
     this.engine.onUpdate = this.update
@@ -1198,6 +1204,24 @@ export class Game {
     }
   }
 
+  /** Apply the current neon level to city neon density + the bloom multiplier. */
+  private applyNeon() {
+    const d = this.neonLevel === 'low' ? 0.35 : this.neonLevel === 'med' ? 0.7 : 1
+    this.neonBloomMul = this.neonLevel === 'low' ? 0.6 : this.neonLevel === 'med' ? 0.85 : 1
+    this.world.neon.setDensity(d)
+    this.hud.neon = this.neonLevel
+  }
+
+  private cycleNeon() {
+    const order = ['low', 'med', 'high'] as const
+    const i = (order.indexOf(this.neonLevel) + 1) % 3
+    this.neonLevel = order[i]
+    saveHighScore('neon', i + 1) // low=1, med=2, high=3 (0/unset -> high default)
+    this.applyNeon()
+    this.hud.banner = `NEON: ${this.neonLevel.toUpperCase()}`
+    this.bannerTimer = 1.2
+  }
+
   /** A known-good spawn for the active zone (used by stuck/fall recovery). */
   private safeSpawn(): THREE.Vector3 {
     if (this.zone === 'earth') return this.world.spawn.clone()
@@ -1389,7 +1413,7 @@ export class Game {
     this.world.update(dt, this.focus)
     // Neon contrast by time of day: full bloom at night, eased down toward noon
     // so daylight reads warm/calm and night reads as the bright neon city.
-    this.engine.setBloomScale(1 - this.world.dayFactor * 0.5)
+    this.engine.setBloomScale((1 - this.world.dayFactor * 0.5) * this.neonBloomMul)
 
     // Multiplayer: advance the other players' avatars and broadcast our own
     // transform a few times a second. No-ops cleanly when playing solo.

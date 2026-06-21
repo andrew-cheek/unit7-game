@@ -15,7 +15,7 @@ const CONTROLS: Array<[string, string]> = [
 ]
 
 /** In-game pause menu. ESC opens it without ever leaving the page. */
-export function PauseMenu({ onResume, touch, hud, onToggleMute }: { onResume: () => void; touch: boolean; hud: HudState; onToggleMute: () => void }) {
+export function PauseMenu({ onResume, touch, hud, onToggleMute, onCycleNeon }: { onResume: () => void; touch: boolean; hud: HudState; onToggleMute: () => void; onCycleNeon: () => void }) {
   return (
     <div style={wrap}>
       <div style={panel}>
@@ -40,8 +40,9 @@ export function PauseMenu({ onResume, touch, hud, onToggleMute }: { onResume: ()
             ))}
           </div>
         )}
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <button style={muteBtn} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+          <button style={muteBtn} onClick={onCycleNeon}>NEON: {hud.neon.toUpperCase()}</button>
           <button style={resumeBtn} onClick={onResume}>RESUME</button>
         </div>
       </div>

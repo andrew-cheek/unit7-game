@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { config, type ZoneCfg } from './config'
 import { hash01 } from './utils'
 import { createSky, createWindowTexture, type SkyModel } from './procedural'
+import { NeonManager } from './NeonManager'
 import type { Zone } from './types'
 
 interface Billboard {
@@ -117,6 +118,8 @@ export class World {
   readonly landmarks: { x: number; z: number }[] = []
   readonly bounds: THREE.Box3
   readonly spawn = new THREE.Vector3(0, 0, 0)
+  // Controls decorative-neon density + distance LOD across the city.
+  readonly neon = new NeonManager()
 
   sun!: THREE.DirectionalLight
   hemi!: THREE.HemisphereLight
@@ -232,6 +235,12 @@ export class World {
   }
   private glow(color: number, intensity = 3) {
     return this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: intensity, roughness: 0.4 }))
+  }
+  /** Add a decorative neon mesh to the scene + register it with the NeonManager
+   *  (so the density dial + distance LOD can thin it). */
+  private addNeon(mesh: THREE.Object3D, keep: number) {
+    this.group.add(mesh)
+    this.neon.add(mesh, keep)
   }
 
   private buildMaterials() {
@@ -401,7 +410,7 @@ export class World {
       const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.5))
       trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
       trim.position.set(cx, h + 0.1, cz)
-      this.group.add(trim)
+      this.addNeon(trim, hash01(seed * 5.7))
     }
     // Desktop-only decorative neon (extra draw calls). On mobile the window
     // texture carries the sci-fi look, so these are skipped to hold frame rate.
@@ -415,7 +424,7 @@ export class World {
         const spine = new THREE.Mesh(this.boxGeo, spineMat)
         spine.scale.set(0.5, h * 0.92, 0.3)
         spine.position.set(cx, h * 0.5, cz + sz)
-        this.group.add(spine)
+        this.addNeon(spine, hash01(seed * 6.3))
       }
     }
     // Stacked horizontal neon light-bands wrapping tall towers (Coruscant look).
@@ -426,7 +435,7 @@ export class World {
         const band = new THREE.Mesh(this.boxGeo, bandMat)
         band.scale.set(fx + 0.5, 0.5, fz + 0.5)
         band.position.set(cx, (h * k) / (bands + 1), cz)
-        this.group.add(band)
+        this.addNeon(band, hash01(seed * 9.1 + k))
       }
     }
     // Roof-shape variety so the skyline isn't all flat boxes.
@@ -1616,6 +1625,7 @@ export class World {
   /** Update the sky/sun/billboards. Always runs so the sky animates everywhere. */
   update(dt: number, focus: THREE.Vector3) {
     this.time += dt
+    this.neon.update(dt, focus.x, focus.z) // density + distance LOD on city neon
     this.sky.update(dt)
     this.sky.group.position.set(focus.x, 0, focus.z)
 
