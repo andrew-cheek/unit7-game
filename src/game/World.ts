@@ -182,6 +182,7 @@ export class World {
     this.buildExtras()
     this.buildSkyline()
     this.buildLandmark()
+    this.buildColossusStatue()
     this.buildSpaceElevator()
     this.buildMarket()
     this.buildSetPieces()
@@ -750,6 +751,54 @@ export class World {
     const tether = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.6, 1.6, 950, 8)), neon)
     tether.position.set(x + 150, 470, z + 70)
     this.group.add(tether)
+  }
+
+  /**
+   * A colossal Unit-7 robot statue towering over the city — the game's mascot as
+   * a giant landmark you can see from across the map. Built from cheap blocky
+   * parts with fog-immune materials (so it reads from a distance) and a glowing
+   * visor + chest reactor. Static (no per-frame cost); base is solid + on radar.
+   */
+  private buildColossusStatue() {
+    const x = 210
+    const z = -150
+    const armor = this.own(new THREE.MeshStandardMaterial({ color: 0x2c3b4a, metalness: 0.85, roughness: 0.35, fog: false }))
+    const dark = this.own(new THREE.MeshStandardMaterial({ color: 0x141a26, metalness: 0.7, roughness: 0.5, fog: false }))
+    const visor = this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+    const core = this.own(new THREE.MeshBasicMaterial({ color: config.palette.magenta, fog: false }))
+    const g = new THREE.Group()
+    g.position.set(x, 0, z)
+    const part = (mat: THREE.Material, sx: number, sy: number, sz: number, px: number, py: number, pz: number) => {
+      const m = new THREE.Mesh(this.boxGeo, mat)
+      m.scale.set(sx, sy, sz)
+      m.position.set(px, py, pz)
+      g.add(m)
+      return m
+    }
+    // Legs (feet at y=0), torso, shoulders, arms, head — total ~64m tall.
+    for (const lx of [-5, 5]) {
+      part(dark, 6, 26, 7, lx, 13, 0) // thigh+shin
+      part(armor, 8, 4, 10, lx, 1.5, 1) // foot
+      part(armor, 7, 6, 8, lx, 27, 0) // hip pad
+    }
+    part(dark, 16, 4, 11, 0, 30, 0) // pelvis
+    part(armor, 20, 20, 13, 0, 42, 0) // torso
+    const reactor = part(core, 6, 6, 1.5, 0, 44, 6.6) // chest reactor
+    reactor.scale.z = 2
+    for (const sx of [-13, 13]) {
+      part(armor, 7, 7, 9, sx, 50, 0) // shoulder
+      part(dark, 5, 22, 5, sx, 38, 0) // arm
+      part(armor, 5.5, 5, 5.5, sx, 26, 0) // fist
+    }
+    part(dark, 9, 3, 9, 0, 53.5, 0) // neck base
+    part(armor, 11, 9, 10, 0, 59, 0) // head
+    const eye = part(visor, 8, 1.6, 1, 0, 60, 5.2) // glowing visor
+    void eye
+    // A beacon spike on the crown so it pings on the skyline.
+    part(visor, 1.2, 7, 1.2, 0, 67, 0)
+    this.group.add(g)
+    this.landmarks.push({ x, z })
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(x - 12, 0, z - 8), new THREE.Vector3(x + 12, 30, z + 8)))
   }
 
   /**

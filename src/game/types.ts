@@ -1,13 +1,14 @@
 // Shared types used across the engine and the React HUD layer.
 
 export type Zone = 'earth' | 'mars' | 'moon'
-export type AssetQuality = 'low' | 'high'
+export type AssetQuality = 'low' | 'medium' | 'high'
 
 /** Props consumers (Lovable) can pass to <Unit7Game />. All optional with sane defaults. */
 export interface Unit7Config {
   /** Play the factory assembly cinematic before gameplay. Default true. */
   startInIntro?: boolean
-  /** 'high' = 2K/4K textures + LODs + MSAA; 'low' = lighter. Default 'high'. */
+  /** Render quality: 'high' (full post), 'medium' (lighter post + density),
+   *  'low' (mobile). Auto-detected if omitted; '?tier=low|medium|high' overrides. */
   quality?: AssetQuality
   /** Which zone to spawn into. Default 'earth'. */
   initialZone?: Zone

@@ -19,6 +19,8 @@ import { CameraController } from './Camera'
 import { Net, type NetState, type ScoreRow } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
+import { WorldEvents } from './WorldEvents'
+import { ExplorationPoints } from './ExplorationPoints'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -136,6 +138,8 @@ export class Game {
   private net: Net | null = null
   private remotePlayers!: RemotePlayers
   private sharedAliens!: SharedAliens
+  private worldEvents!: WorldEvents
+  private exploration!: ExplorationPoints
   private netAccum = 0
   private online = 1 // players in the world incl. self (1 = solo)
   private leaderboard: ScoreRow[] = []
@@ -180,6 +184,19 @@ export class Game {
     this.zones.setActive('earth')
     this.remotePlayers = new RemotePlayers(this.engine.scene)
     this.sharedAliens = new SharedAliens(this.engine.scene)
+    // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
+    // and off-path exploration rewards (discoveries + collectible energy cores).
+    this.worldEvents = new WorldEvents(this.engine.scene)
+    this.worldEvents.onEvent = (label) => {
+      if (this.bannerTimer <= 0) { this.hud.banner = label; this.bannerTimer = 1.8 }
+    }
+    this.exploration = new ExplorationPoints(this.engine.scene, (credits, label) => {
+      this.addCredits(credits)
+      this.hud.banner = `${label} +${credits}`
+      this.bannerTimer = 1.8
+      this.audio.play('capture')
+      vibrate(20)
+    })
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -614,6 +631,8 @@ export class Game {
     this.zones.setActive(zone)
     this.world.cityVisible(zone === 'earth')
     this.world.applyZone(zone)
+    this.worldEvents.setZone(zone)
+    this.exploration.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -1250,6 +1269,9 @@ export class Game {
     this.remotePlayers.update(dt)
     this.sharedAliens.setVisible(this.zone === 'earth')
     this.sharedAliens.update(dt)
+    // Ambient events + exploration rewards run in every zone.
+    this.worldEvents.update(dt, this.focus)
+    this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
     if (this.net) {
       this.netAccum += dt
       if (this.netAccum >= 1 / 12) {
@@ -1443,6 +1465,8 @@ export class Game {
     this.net?.close()
     this.remotePlayers.dispose()
     this.sharedAliens.dispose()
+    this.worldEvents.dispose()
+    this.exploration.dispose()
     this.objBeaconMats.forEach((m) => m.dispose())
     this.input.dispose()
     this.player.dispose()
