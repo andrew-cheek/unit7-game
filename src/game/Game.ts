@@ -650,7 +650,7 @@ export class Game {
     this.worldEvents.setZone(zone)
     this.exploration.setActive(zone)
     this.playground.setActive(zone)
-    this.dawnShow.setActive(zone === 'earth')
+    this.dawnShow.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
