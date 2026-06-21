@@ -48,9 +48,11 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   if (inVehicle) {
     buttons = inMech ? [EXIT, FIRE, TRANSFORM, JET, BOOST] : [EXIT, BOOST, JET]
   } else {
-    buttons = [RUN, JET, BOOST, MORPH, CAPTURE]
+    // On foot: core buttons, plus contextual ones only when useful.
+    buttons = [RUN, JET, MORPH]
     if (nearVehicle) buttons.unshift(ENTER)
-    if (airborne) buttons.push(CHUTE)
+    if (hud.canCapture) buttons.push(CAPTURE) // only when a target is in range
+    if (airborne) buttons.push(BOOST, CHUTE) // boost/chute matter when flying
   }
 
   // Helper text: the single most relevant hint.

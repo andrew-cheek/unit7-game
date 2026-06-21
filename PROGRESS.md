@@ -639,3 +639,20 @@ generators). Key finding applied: per-window hue + brightness variety with a few
   neighbouring towers don't share the same lit pattern.
 - (Held back the full custom GLSL facade shader: can't visually verify a shader in
   this environment and a compile error would black out the city.)
+
+## Upgrade-prompt pass (camera, HUD, plaza, minimap, perf)
+
+- Camera: lowered start pitch (0.38->0.16) so it looks toward the horizon/city
+  instead of down at blank ground; closer distance (8.5) + bigger look-ahead so
+  the robot reads big and you see where you're going.
+- HUD readability: dark translucent panel backings behind the meter + stat groups
+  so text reads over the brighter daytime sky.
+- Portal Plaza hero hub: big spinning central rings + a 220m sky beam + neon
+  ground-ring marking at the plaza centre.
+- Minimap declutter: capped NPC (8) / alien (6) / landmark (14) markers; objective
+  + portals always shown.
+- Mobile buttons contextual: CAPTURE only when a target is in net range; BOOST/CHUTE
+  only when airborne.
+- Performance: gated decorative per-building neon (spines, light-bands, blinking
+  beacons) to the high tier so mobile keeps the window-texture look at far fewer
+  draw calls.

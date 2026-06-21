@@ -280,9 +280,11 @@ export class World {
       trim.position.set(cx, h + 0.1, cz)
       this.group.add(trim)
     }
-    // A glowing vertical spine on taller towers (front + back faces) - cheap, 2
-    // thin emissive strips, and a strong sci-fi read on the skyline.
-    if (h > 46 && hash01(seed * 8.9) > 0.4) {
+    // Desktop-only decorative neon (extra draw calls). On mobile the window
+    // texture carries the sci-fi look, so these are skipped to hold frame rate.
+    const richFacade = config.tier.name === 'high'
+    // A glowing vertical spine on taller towers (front + back faces).
+    if (richFacade && h > 46 && hash01(seed * 8.9) > 0.4) {
       const spineMat = this.glow(neonCorner, 2.8)
       for (const sz of [fz / 2 + 0.05, -fz / 2 - 0.05]) {
         const spine = new THREE.Mesh(this.boxGeo, spineMat)
@@ -292,7 +294,7 @@ export class World {
       }
     }
     // Stacked horizontal neon light-bands wrapping tall towers (Coruscant look).
-    if (h > 58 && hash01(seed * 9.7) > 0.35) {
+    if (richFacade && h > 58 && hash01(seed * 9.7) > 0.35) {
       const bandMat = this.glow(neonCorner, 2.2)
       const bands = Math.min(3, Math.floor(h / 26))
       for (let k = 1; k <= bands; k++) {
@@ -368,13 +370,15 @@ export class World {
       tip.scale.set(0.5, 0.5, 0.5)
       tip.position.set(cx, h + mh, cz)
       this.group.add(tip)
-      // Blinking aircraft-warning beacon on the mast tip (animated in update).
-      const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3b3b, fog: false, transparent: true }))
-      const beacon = new THREE.Mesh(this.domeGeo, beaconMat)
-      beacon.scale.set(0.6, 0.6, 0.6)
-      beacon.position.set(cx, h + mh + 0.4, cz)
-      this.group.add(beacon)
-      this.beacons.push({ mat: beaconMat, phase: hash01(seed * 12.1) * 6.28 })
+      // Blinking aircraft-warning beacon on the mast tip (desktop only - animated).
+      if (config.tier.name === 'high') {
+        const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3b3b, fog: false, transparent: true }))
+        const beacon = new THREE.Mesh(this.domeGeo, beaconMat)
+        beacon.scale.set(0.6, 0.6, 0.6)
+        beacon.position.set(cx, h + mh + 0.4, cz)
+        this.group.add(beacon)
+        this.beacons.push({ mat: beaconMat, phase: hash01(seed * 12.1) * 6.28 })
+      }
     }
   }
 

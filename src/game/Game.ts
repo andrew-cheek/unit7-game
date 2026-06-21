@@ -116,6 +116,7 @@ export class Game {
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
+  private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial } | null = null
   private inMinigame = false
   private activePortal = new THREE.Vector3()
   private arcadeCooldown = 0
@@ -225,6 +226,7 @@ export class Game {
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
       objective: config.missions[0]?.title ?? null,
       muted: this.audio.isMuted,
+      canCapture: false,
       minigame: null,
     }
 
@@ -299,6 +301,39 @@ export class Game {
     // Two new attractions flank the row (outside the Mars/Moon portals).
     this.arcadePortals.push(this.buildPortal('raceloop', 0xff2bd0, 0x27e7ff, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
     this.arcadePortals.push(this.buildPortal('mecharena', 0xff8a1e, 0x27e7ff, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
+    this.buildPlazaHub()
+  }
+
+  /**
+   * The Portal Plaza hero landmark: a big glowing central ring, a tall sky beam
+   * visible from far away, and a neon ground ring marking the plaza. Sits at the
+   * centre of the arcade row so "Find Portal Plaza" has an obvious destination.
+   */
+  private buildPlazaHub() {
+    const cx = 0, cz = 13
+    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
+    const ownG = <T extends THREE.BufferGeometry>(g: T) => { this.arcadeGeos.push(g); return g }
+    const g = new THREE.Group()
+    const gy = this.physics.sampleGround(cx, cz, 40)?.y ?? 0
+    g.position.set(cx, gy, cz)
+    // Big vertical hero ring.
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, fog: false })))
+    ring.position.y = 7
+    g.add(ring)
+    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, fog: false })))
+    ring2.position.y = 7
+    g.add(ring2)
+    // Tall sky beam, visible from across the map.
+    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.6, 3.4, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    beam.position.y = 110
+    g.add(beam)
+    // Neon ground ring marking the plaza floor.
+    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    decal.rotation.x = -Math.PI / 2
+    decal.position.y = 0.15
+    g.add(decal)
+    this.engine.scene.add(g)
+    this.plazaHub = { group: g, ring, ring2, beamMat: beam.material as THREE.MeshBasicMaterial }
   }
 
   private buildPortal(kind: MinigameKind, ringColor: number, discColor: number, label: string, pos: THREE.Vector3) {
@@ -962,6 +997,15 @@ export class Game {
       ;(p.disc.material as THREE.MeshBasicMaterial).opacity = 0.4 + Math.sin(_elapsed * 3) * 0.15
       ;(p.beam.material as THREE.MeshBasicMaterial).opacity = 0.32 + Math.sin(_elapsed * 2) * 0.08
     }
+    // Plaza hero hub: spin the rings, pulse the sky beam.
+    if (this.plazaHub) {
+      this.plazaHub.group.visible = onEarth
+      if (onEarth) {
+        this.plazaHub.ring.rotation.z += dt * 0.5
+        this.plazaHub.ring2.rotation.z -= dt * 0.8
+        this.plazaHub.beamMat.opacity = 0.24 + Math.sin(_elapsed * 1.5) * 0.08
+      }
+    }
 
     if (this.netTimer > 0) {
       this.netTimer -= dt
@@ -1022,15 +1066,20 @@ export class Game {
       blips.push({ x: (dx * rightX + dz * rightZ) / range, y: (dx * fwdX + dz * fwdZ) / range, kind })
     }
     if (this.zone === 'earth') {
+      // Only a few nearby landmarks so the map reads as navigation, not noise.
+      let lmCount = 0
       for (const lm of this.world.landmarks) {
-        add(lm.x, lm.z, 'building')
-        if (blips.length >= 36) break
+        if (lmCount >= 14) break
+        add(lm.x, lm.z, 'building'); lmCount++
       }
       for (const v of this.vehicles.list) add(v.position.x, v.position.z, 'vehicle')
       const pp = this.events.policePos
       if (pp) add(pp.x, pp.z, 'vehicle')
-      this.npcs.forEachAlive((x, z) => add(x, z, 'npc'))
-      this.events.forEachAlien((x, z) => add(x, z, 'alien'))
+      // Cap NPC + alien markers so the minimap stays meaningful.
+      let npcCount = 0
+      this.npcs.forEachAlive((x, z) => { if (npcCount < 8) { add(x, z, 'npc'); npcCount++ } })
+      let alienCount = 0
+      this.events.forEachAlien((x, z) => { if (alienCount < 6) { add(x, z, 'alien'); alienCount++ } })
       this.patrols.forEach((x, z, big) => add(x, z, big ? 'alien' : 'vehicle'))
     }
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
@@ -1068,6 +1117,19 @@ export class Game {
         }
       }
     }
+
+    // CAPTURE button only shows when a live target is within net range.
+    let canCapture = false
+    if (!piloting && this.player.mode === 'robot') {
+      const rr = config.net.range * config.net.range
+      for (const c of this.capturables) {
+        if (!c.alive) continue
+        const dx = c.position.x - this.player.position.x
+        const dz = c.position.z - this.player.position.z
+        if (dx * dx + dz * dz <= rr) { canCapture = true; break }
+      }
+    }
+    this.hud.canCapture = canCapture
 
     // Track + persist the best score (only writes storage when it improves).
     if (this.hud.score > this.profile.best) {

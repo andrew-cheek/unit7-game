@@ -106,12 +106,13 @@ export const config = {
 
   camera: {
     fov: 62,
-    distance: 9.5, // pulled back a touch for a more establishing view
+    distance: 8.5, // close enough that the robot reads big, not tiny
     minDistance: 2.2,
-    height: 2.6,
-    targetHeight: 1.5,
-    // Higher, looking-down GTA-style default so the city reads as you spawn.
-    startPitch: 0.38,
+    height: 3.0,
+    targetHeight: 1.7,
+    // Behind-and-slightly-above chase angle that shows the horizon/city ahead
+    // instead of staring down at blank ground (the old 0.38 looked downward).
+    startPitch: 0.16,
     followLambda: 9,
     rotateLambda: 16,
     pitchMin: -0.85,
@@ -125,10 +126,10 @@ export const config = {
     autoFollowLambda: 3.0,
     autoFollowDelay: 0.5,
     // Push the look target ahead along movement so you see more of where you go.
-    lookAhead: 2.2,
+    lookAhead: 3.6,
     lookAheadLambda: 6,
     // Pull the camera back when moving fast (sprint / boost).
-    speedPullback: 1.22,
+    speedPullback: 1.28,
     // Collision pull-in eases back out at this rate; snaps in instantly.
     returnLambda: 7,
     // Keep the camera at least this far above whatever ground is below it.

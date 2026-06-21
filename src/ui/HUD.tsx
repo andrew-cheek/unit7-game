@@ -165,7 +165,20 @@ const wrap: CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   color: NEON.text,
 }
-const panel: CSSProperties = { position: 'absolute', display: 'flex', flexDirection: 'column', gap: 2 }
+const panel: CSSProperties = {
+  position: 'absolute',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '8px 12px',
+  background: 'rgba(5,10,25,0.62)',
+  border: '1px solid rgba(90,255,255,0.28)',
+  borderRadius: 12,
+  boxShadow: '0 0 16px rgba(0,255,255,0.12)',
+  backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
+  textShadow: '0 0 6px rgba(0,0,0,0.85)',
+}
 const microLabel: CSSProperties = { font: '600 9px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.14em' }
 const barTrack: CSSProperties = {
   width: '100%',

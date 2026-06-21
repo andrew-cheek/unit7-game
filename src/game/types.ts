@@ -55,6 +55,7 @@ export interface HudState {
   banner: string | null // transient center banner (e.g. "ENTERING MARS")
   objective: string | null // current active objective text (top-center)
   muted: boolean // game audio muted
+  canCapture: boolean // a capturable target is within net range (shows CAPTURE)
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
 }
 
