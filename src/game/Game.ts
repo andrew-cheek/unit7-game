@@ -16,6 +16,8 @@ import { Zones } from './Zones'
 import { Events } from './Events'
 import { Intro } from './Intro'
 import { CameraController } from './Camera'
+import { Net, type NetState } from './Net'
+import { RemotePlayers } from './RemotePlayers'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -92,7 +94,7 @@ export class Game {
   /** Net-catchable entities; populated by NPC/alien systems in later stages. */
   readonly capturables: Capturable[] = []
 
-  private cfg: Required<Unit7Config>
+  private cfg: Required<Pick<Unit7Config, 'startInIntro' | 'quality' | 'initialZone'>>
   private hudListener: (s: HudState) => void
   private hud: HudState
   private hudAccum = 0
@@ -128,6 +130,12 @@ export class Game {
   private inMinigame = false
   private activePortal = new THREE.Vector3()
   private arcadeCooldown = 0
+
+  // Shared-world multiplayer. `net` is null until the player joins with a name.
+  private net: Net | null = null
+  private remotePlayers!: RemotePlayers
+  private netAccum = 0
+  private online = 1 // players in the world incl. self (1 = solo)
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -167,6 +175,7 @@ export class Game {
     this.npcs = new NPCManager(this.engine.scene, this.physics, this.capturables, npcCount)
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
+    this.remotePlayers = new RemotePlayers(this.engine.scene)
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -237,6 +246,7 @@ export class Game {
       canCapture: false,
       missionPopup: null,
       minigame: null,
+      online: 1,
     }
 
     this.engine.onUpdate = this.update
@@ -761,6 +771,8 @@ export class Game {
       this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
       vibrate(25)
       this.audio.play('capture')
+      // Let everyone else see the capture happen.
+      this.net?.sendCapture([best.position.x, best.position.y, best.position.z], award)
     }
   }
 
@@ -1036,6 +1048,63 @@ export class Game {
     }
   }
 
+  /**
+   * Join the shared world under a username. Safe to call once after start();
+   * the game keeps running single-player until/if the connection succeeds, and
+   * silently reconnects if the server drops. Remote players appear as tinted
+   * robots with name tags.
+   */
+  connectMultiplayer(username: string, host?: string) {
+    if (this.net) return // already connected/connecting
+    this.net = new Net(
+      username,
+      {
+        onWelcome: (players) => {
+          for (const p of players) this.remotePlayers.applySnapshot(p)
+          this.online = this.remotePlayers.count + 1
+        },
+        onJoin: (id, name) => {
+          // A bare join with no transform yet; seed at the origin until first state.
+          this.remotePlayers.applySnapshot({ id, name, p: [this.player.position.x, 0, this.player.position.z], y: 0, m: 'robot', v: null, z: this.zone, s: 0, g: true })
+          this.online = this.remotePlayers.count + 1
+        },
+        onLeave: (id) => {
+          this.remotePlayers.remove(id)
+          this.online = this.remotePlayers.count + 1
+        },
+        onState: (id, s) => this.remotePlayers.onState(id, s),
+        onCapture: (_id, p) => {
+          // See other players' captures: pop the same cyan ring where they netted.
+          this.missiles.shockwave({ x: p[0], y: p[1], z: p[2] }, 0x27e7ff, 3, 0.4)
+        },
+        onStatus: (connected) => {
+          if (!connected) this.online = this.remotePlayers.count + 1
+        },
+        onFull: () => {
+          this.hud.banner = 'WORLD FULL — TRY AGAIN'
+          this.bannerTimer = 3
+        },
+      },
+      { host },
+    )
+  }
+
+  /** Push the local player's transform to the server (throttled by the caller). */
+  private sendNetState() {
+    if (!this.net) return
+    const v = this.vehicles.current
+    const s: NetState = {
+      p: [this.player.position.x, this.player.position.y, this.player.position.z],
+      y: this.input.yaw,
+      m: this.player.mode,
+      v: v ? v.kind : null,
+      z: this.zone,
+      s: clamp(this.hud.speed / 30, 0, 1),
+      g: this.hud.altitude < 1.2,
+    }
+    this.net.sendState(s)
+  }
+
   private update = (dt: number, _elapsed: number) => {
     this.input.update()
 
@@ -1137,6 +1206,18 @@ export class Game {
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
     this.world.update(dt, this.focus)
+
+    // Multiplayer: advance the other players' avatars and broadcast our own
+    // transform a few times a second. No-ops cleanly when playing solo.
+    this.remotePlayers.setLocalZone(this.zone)
+    this.remotePlayers.update(dt)
+    if (this.net) {
+      this.netAccum += dt
+      if (this.netAccum >= 1 / 12) {
+        this.netAccum = 0
+        this.sendNetState()
+      }
+    }
 
     // Animate the arcade cabinets: pulse their screens (Earth only). Zone
     // cabinets glow even off-world so you can find your way back.
@@ -1309,6 +1390,7 @@ export class Game {
     this.hud.shield = this.fx.shield > 0
     this.hud.powerup =
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
+    this.hud.online = this.online
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }
@@ -1318,6 +1400,8 @@ export class Game {
     this.profile.lifetimeCaptured += this.hud.captured
     this.profile.credits = this.credits
     saveProfile(this.profile)
+    this.net?.close()
+    this.remotePlayers.dispose()
     this.objBeaconMats.forEach((m) => m.dispose())
     this.input.dispose()
     this.player.dispose()

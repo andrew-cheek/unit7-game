@@ -11,6 +11,10 @@ export interface Unit7Config {
   quality?: AssetQuality
   /** Which zone to spawn into. Default 'earth'. */
   initialZone?: Zone
+  /** Show the username / join-world prompt for shared-world multiplayer. Default true. */
+  multiplayer?: boolean
+  /** Override the realtime server host (else auto: localhost in dev, the deployed PartyKit host in prod). */
+  multiplayerHost?: string
 }
 
 export type PlayerMode = 'robot' | 'plane' | 'parachute' | 'vehicle'
@@ -58,6 +62,7 @@ export interface HudState {
   canCapture: boolean // a capturable target is within net range (shows CAPTURE)
   missionPopup: { title: string; body: string } | null // transient intro/mission card
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
+  online: number // players in the shared world incl. self (1 = solo / not connected)
 }
 
 export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena'

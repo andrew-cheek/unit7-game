@@ -35,6 +35,9 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   const controlsRef = useRef<GameControls | null>(null)
   const [hud, setHud] = useState<HudState | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Shared-world multiplayer: show the join/username prompt once, unless disabled.
+  const [mpJoined, setMpJoined] = useState(false)
+  const multiplayer = config?.multiplayer !== false
   // Touch UI shows on touch-capable devices; `?touch` forces it for testing on desktop.
   const touch = useMemo(
     () => isTouchDevice() || (typeof location !== 'undefined' && location.search.includes('touch')),
@@ -107,6 +110,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}
+      {multiplayer && !mpJoined && hud && !hud.intro && (
+        <JoinWorld
+          onJoin={(name) => {
+            gameRef.current?.connectMultiplayer(name, config?.multiplayerHost)
+            setMpJoined(true)
+          }}
+          onSolo={() => setMpJoined(true)}
+        />
+      )}
+      {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
       {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
@@ -144,6 +157,49 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           <MechArena touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
+    </div>
+  )
+}
+
+function JoinWorld({ onJoin, onSolo }: { onJoin: (name: string) => void; onSolo: () => void }) {
+  const [name, setName] = useState('')
+  const submit = () => {
+    const n = name.trim()
+    if (n) onJoin(n)
+  }
+  return (
+    <div style={joinBackdrop}>
+      <div style={joinCard}>
+        <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff', font: '800 26px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.16em' }}>
+          UNIT 7
+        </div>
+        <div style={{ fontSize: 12, letterSpacing: '0.28em', color: 'rgba(223,238,255,0.6)', margin: '10px 0 22px' }}>ENTER THE SHARED WORLD</div>
+        <input
+          autoFocus
+          value={name}
+          maxLength={16}
+          placeholder="CALLSIGN"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+          style={joinInput}
+        />
+        <button style={joinBtn} onClick={submit} disabled={!name.trim()}>
+          JOIN WORLD ▸
+        </button>
+        <button style={joinSolo} onClick={onSolo}>
+          play solo
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function OnlinePill({ n }: { n: number }) {
+  return (
+    <div style={onlinePill}>
+      <span style={{ color: '#4affc1' }}>●</span> {n} ONLINE
     </div>
   )
 }
@@ -196,6 +252,74 @@ const skipBtn: CSSProperties = {
   background: 'rgba(8,12,24,0.7)',
   border: '1px solid rgba(39,231,255,0.5)',
   borderRadius: 999,
+}
+const joinBackdrop: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  zIndex: 30,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(4,6,12,0.72)',
+  backdropFilter: 'blur(4px)',
+}
+const joinCard: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  padding: '34px 40px',
+  borderRadius: 16,
+  background: 'rgba(8,12,24,0.92)',
+  border: '1px solid rgba(39,231,255,0.4)',
+  boxShadow: '0 0 40px rgba(39,231,255,0.18)',
+}
+const joinInput: CSSProperties = {
+  width: 220,
+  padding: '12px 16px',
+  textAlign: 'center',
+  font: '700 18px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.18em',
+  color: '#dff0ff',
+  background: 'rgba(5,8,16,0.9)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  borderRadius: 10,
+  outline: 'none',
+}
+const joinBtn: CSSProperties = {
+  marginTop: 16,
+  width: 252,
+  padding: '12px 0',
+  cursor: 'pointer',
+  font: '800 14px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.2em',
+  color: '#04121a',
+  background: 'linear-gradient(180deg,#5cf0ff,#27e7ff)',
+  border: 'none',
+  borderRadius: 10,
+}
+const joinSolo: CSSProperties = {
+  marginTop: 12,
+  cursor: 'pointer',
+  font: '600 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+  color: 'rgba(223,238,255,0.55)',
+  background: 'transparent',
+  border: 'none',
+  textDecoration: 'underline',
+}
+const onlinePill: CSSProperties = {
+  position: 'absolute',
+  top: 14,
+  right: 16,
+  zIndex: 14,
+  padding: '6px 12px',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: 'rgba(223,238,255,0.92)',
+  background: 'rgba(8,12,24,0.7)',
+  border: '1px solid rgba(74,255,193,0.4)',
+  borderRadius: 999,
+  pointerEvents: 'none',
 }
 const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}`
 const errStyle: CSSProperties = {
