@@ -66,8 +66,12 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     pixelRatioCap: 2,
     msaaSamples: 4,
     bloom: true,
-    ssao: true,
-    dof: true,
+    // SAO + DoF sample the scene depth buffer, which is now logarithmic (to fix
+    // distance z-fighting) — they misread it and would reintroduce artifacts, so
+    // they're off. Dropping them also removes the soft/"blurry" look and lifts
+    // frame rate; bloom + colour grade + MSAA carry the desktop look.
+    ssao: false,
+    dof: false,
     smaa: false, // MSAA already handles edges on this path
     shadows: true,
     shadowMapSize: 2048,
