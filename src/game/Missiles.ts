@@ -13,6 +13,16 @@ interface Blast {
   life: number
   radius: number
 }
+// Pooled flat ground ring (mech footstep dust / landing shockwave). Reused, no
+// per-event allocation.
+interface Ring {
+  mesh: THREE.Mesh
+  mat: THREE.MeshBasicMaterial
+  active: boolean
+  t: number
+  life: number
+  maxR: number
+}
 
 /**
  * Mech ordnance: glowing missiles that fly straight, leave a bright additive
@@ -31,10 +41,35 @@ export class Missiles {
   private blastGeo = new THREE.SphereGeometry(1, 16, 12)
   private bodyMat = new THREE.MeshStandardMaterial({ color: 0x20242f, metalness: 0.6, roughness: 0.5 })
   private glowMat = new THREE.MeshBasicMaterial({ color: config.palette.orange, fog: false })
+  private ringGeo = new THREE.RingGeometry(0.72, 1, 28)
+  private rings: Ring[] = []
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
     scene.add(this.group)
+    // Pre-build a small ring pool (footsteps + shockwaves reuse these).
+    for (let i = 0; i < 14; i++) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+      const mesh = new THREE.Mesh(this.ringGeo, mat)
+      mesh.rotation.x = -Math.PI / 2 // lie flat on the ground
+      mesh.visible = false
+      this.group.add(mesh)
+      this.rings.push({ mesh, mat, active: false, t: 0, life: 0.5, maxR: 4 })
+    }
+  }
+
+  /** Spawn an expanding ground ring (mech footstep / landing shockwave). */
+  shockwave(pos: { x: number; y: number; z: number }, color: number, maxR: number, life = 0.5) {
+    const r = this.rings.find((x) => !x.active)
+    if (!r) return
+    r.active = true
+    r.t = 0
+    r.life = life
+    r.maxR = maxR
+    r.mat.color.setHex(color)
+    r.mesh.visible = true
+    r.mesh.position.set(pos.x, pos.y + 0.2, pos.z)
+    r.mesh.scale.setScalar(0.1)
   }
 
   /** Launch one missile from `origin` heading along `dir` (will be normalized). */
@@ -83,6 +118,14 @@ export class Missiles {
         this.blasts.splice(i, 1)
       }
     }
+    for (const r of this.rings) {
+      if (!r.active) continue
+      r.t += dt
+      const k = r.t / r.life
+      r.mesh.scale.setScalar(r.maxR * (0.1 + k * 0.9))
+      r.mat.opacity = Math.max(0, 0.7 * (1 - k))
+      if (r.t >= r.life) { r.active = false; r.mesh.visible = false }
+    }
   }
 
   private detonate(pos: THREE.Vector3, radius: number) {
@@ -103,6 +146,8 @@ export class Missiles {
     this.blastGeo.dispose()
     this.bodyMat.dispose()
     this.glowMat.dispose()
+    this.ringGeo.dispose()
+    for (const r of this.rings) r.mat.dispose()
     for (const b of this.blasts) b.mat.dispose()
     this.scene.remove(this.group)
   }

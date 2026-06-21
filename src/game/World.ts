@@ -117,6 +117,9 @@ export class World {
   private elevatorClimbers: { mesh: THREE.Mesh; t: number; speed: number }[] = []
   private elevatorRing?: THREE.Object3D
   private hangarBots: { mesh: THREE.Mesh; baseY: number; phase: number }[] = []
+  private spaceportBeacon?: THREE.Object3D
+  private spaceportWarn: THREE.MeshStandardMaterial[] = []
+  private launchShip?: { mesh: THREE.Mesh; state: 'parked' | 'rising'; timer: number; vy: number; baseY: number }
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
@@ -165,6 +168,7 @@ export class World {
     this.buildAdPanels()
     this.buildOffices()
     this.buildMechHangar(60, 60)
+    this.buildSpaceport(118, 96)
     this.buildAtmosphere()
     this.buildLights()
     this.addBoundaryColliders()
@@ -760,6 +764,111 @@ export class World {
     }
   }
 
+  /**
+   * Spaceport: a launch-pad complex landmark - a tall control tower with a
+   * rotating beacon, lit landing pads, parked freighters, stacked cargo, pulsing
+   * warning lights, and one ship that periodically lifts off. Tower top is
+   * fog-immune so it reads as a far landmark. Animated in update().
+   */
+  private buildSpaceport(cx: number, cz: number) {
+    const g = new THREE.Group()
+    g.position.set(cx, 0, cz)
+    const steel = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2230, metalness: 0.8, roughness: 0.4 }))
+    const hull = this.own(new THREE.MeshStandardMaterial({ color: 0x3a4456, metalness: 0.8, roughness: 0.4 }))
+
+    // Apron.
+    const apron = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshStandardMaterial({ color: 0x12151f, metalness: 0.55, roughness: 0.6 })))
+    apron.scale.set(60, 0.3, 48); apron.position.set(0, 0.15, 0); apron.receiveShadow = true
+    g.add(apron)
+
+    // Control tower (tall, fog-immune cap + rotating beacon).
+    const tower = new THREE.Mesh(this.boxGeo, steel)
+    tower.scale.set(6, 64, 6); tower.position.set(-22, 32, -16); tower.castShadow = config.tier.buildingShadows
+    g.add(tower)
+    const pod = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshBasicMaterial({ color: 0x223247, fog: false })))
+    pod.scale.set(10, 5, 10); pod.position.set(-22, 64, -16)
+    g.add(pod)
+    const beacon = new THREE.Group()
+    beacon.position.set(-22, 68, -16)
+    const beam = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(2.4, 16, 12, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.32, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    beam.rotation.z = Math.PI / 2; beam.position.x = 6
+    beacon.add(beam)
+    g.add(beacon)
+    this.spaceportBeacon = beacon
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - 25, 0, cz - 19), new THREE.Vector3(cx - 19, 64, cz - 13)))
+
+    // Lit landing pads.
+    const padGeo = this.ownG(new THREE.CylinderGeometry(8, 8.5, 0.3, 28))
+    const padSpots: Array<[number, number, number]> = [[12, 8, config.palette.cyan], [22, -14, config.palette.orange], [-2, -16, config.palette.lime]]
+    for (const [px, pz, c] of padSpots) {
+      const pad = new THREE.Mesh(padGeo, this.glow(c, 2.2))
+      pad.position.set(px, 0.32, pz)
+      g.add(pad)
+    }
+
+    // Parked freighters (primitive hulls with fins + engine glow).
+    const mkFreighter = (px: number, pz: number, ry: number) => {
+      const f = new THREE.Group()
+      f.position.set(px, 3.2, pz); f.rotation.y = ry
+      const body = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2.4, 2.8, 16, 12)), hull)
+      body.rotation.z = Math.PI / 2; body.castShadow = config.tier.buildingShadows
+      f.add(body)
+      const nose = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(2.4, 5, 12)), hull)
+      nose.rotation.z = -Math.PI / 2; nose.position.x = 10.5
+      f.add(nose)
+      for (const sx of [-1, 1]) {
+        const fin = new THREE.Mesh(this.boxGeo, steel)
+        fin.scale.set(3, 0.4, 3); fin.position.set(-6, 0, sx * 2.5); fin.rotation.x = sx * 0.5
+        f.add(fin)
+      }
+      const eng = new THREE.Mesh(this.boxGeo, this.glow(config.palette.magenta, 3))
+      eng.scale.set(0.6, 2.6, 2.6); eng.position.set(-8.2, 0, 0)
+      f.add(eng)
+      g.add(f)
+    }
+    mkFreighter(12, 8, 0.3)
+    mkFreighter(-2, -16, -0.6)
+
+    // Stacked cargo containers (glow-edged).
+    const conMat = this.own(new THREE.MeshStandardMaterial({ color: 0x223040, metalness: 0.5, roughness: 0.6 }))
+    for (let i = 0; i < 8; i++) {
+      const cxx = 24 + (i % 2) * 4.4
+      const cy = 1.2 + Math.floor(i / 2) * 2.4
+      const con = new THREE.Mesh(this.boxGeo, i % 3 === 0 ? this.glow([config.palette.cyan, config.palette.orange, config.palette.lime][i % 3], 1.6) : conMat)
+      con.scale.set(4, 2.2, 6); con.position.set(cxx, cy, 16); con.castShadow = config.tier.buildingShadows
+      g.add(con)
+    }
+
+    // Pulsing warning lights around the pads.
+    for (const [wx, wz] of [[2, 18], [-14, 10], [30, 2], [-12, -18]] as Array<[number, number]>) {
+      const mat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 2 }))
+      const post = new THREE.Mesh(this.boxGeo, mat)
+      post.scale.set(0.5, 3, 0.5); post.position.set(wx, 1.5, wz)
+      g.add(post)
+      this.spaceportWarn.push(mat)
+    }
+
+    // One ship that periodically lifts off from the first pad.
+    const ship = new THREE.Group()
+    ship.position.set(12, 3.2, 8)
+    const sbody = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2, 2.4, 12, 12)), hull)
+    sbody.rotation.x = Math.PI / 2
+    ship.add(sbody)
+    const scone = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(2, 4, 12)), hull)
+    scone.position.y = 8
+    ship.add(scone)
+    const sthr = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    sthr.scale.set(2.4, 3, 2.4); sthr.position.y = -7
+    ship.add(sthr)
+    // Treat the group as a "mesh" handle for the animation record.
+    const shipMesh = ship as unknown as THREE.Mesh
+    g.add(ship)
+    this.launchShip = { mesh: shipMesh, state: 'parked', timer: 8, vy: 0, baseY: 3.2 }
+
+    this.group.add(g)
+    this.landmarks.push({ x: cx, z: cz })
+  }
+
   /** A small alien market district: canopied stalls, glow signs, crates, pods. */
   private buildMarket() {
     const ox = -80
@@ -1102,6 +1211,23 @@ export class World {
     for (const b of this.hangarBots) {
       b.mesh.position.y = b.baseY + Math.sin(this.time * 1.6 + b.phase) * 0.5
       b.mesh.rotation.y += dt * 0.8
+    }
+
+    // Spaceport: sweeping beacon, pulsing warning lights, periodic ship launch.
+    if (this.spaceportBeacon) this.spaceportBeacon.rotation.y += dt * 1.6
+    for (let i = 0; i < this.spaceportWarn.length; i++) {
+      this.spaceportWarn[i].emissiveIntensity = 1.4 + Math.sin(this.time * 4 + i * 1.7) * 1.2
+    }
+    if (this.launchShip) {
+      const s = this.launchShip
+      if (s.state === 'parked') {
+        s.timer -= dt
+        if (s.timer <= 0) { s.state = 'rising'; s.vy = 6 }
+      } else {
+        s.vy += 22 * dt // accelerate upward
+        s.mesh.position.y += s.vy * dt
+        if (s.mesh.position.y > s.baseY + 520) { s.state = 'parked'; s.timer = 18; s.mesh.position.y = s.baseY }
+      }
     }
 
     // Space elevator: climbers ride the tether, the orbital ring slowly turns.

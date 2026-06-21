@@ -84,6 +84,7 @@ interface Commuter {
 const POWERUP_COLOR: Record<PowerupKind, number> = { speed: 0x27e7ff, shield: 0x8a5cff, fuel: 0x9bff4d, score: 0xff8a1e }
 const POWERUP_KINDS: PowerupKind[] = ['speed', 'shield', 'fuel', 'score']
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
+const ACTOR_CULL2 = 150 * 150 // squared distance beyond which ambient actors are culled
 
 /**
  * Ambient + scripted city life (Earth only): collectible powerups, a periodic
@@ -442,7 +443,9 @@ export class Events {
         c.model.group.rotation.y = c.yaw
       }
       c.model.group.position.copy(c.pos)
-      c.model.update(dt, sp / speed, true)
+      const farC = this.farFromPlayer(c.pos.x, c.pos.z)
+      c.model.group.visible = !farC
+      if (!farC) c.model.update(dt, sp / speed, true)
     }
   }
 
@@ -495,16 +498,23 @@ export class Events {
     }
   }
 
+  /** Squared distance test for distance-culling ambient actors (mobile perf). */
+  private farFromPlayer(x: number, z: number) {
+    const dx = x - this.playerPos.x
+    const dz = z - this.playerPos.z
+    return dx * dx + dz * dz > ACTOR_CULL2
+  }
+
   private updateDrones(dt: number) {
     for (const d of this.drones) {
       d.angle += d.speed * dt
-      d.model.group.position.set(
-        d.center.x + Math.cos(d.angle) * d.radius,
-        d.height + Math.sin(this.t * 1.5 + d.center.x) * 0.6,
-        d.center.z + Math.sin(d.angle) * d.radius,
-      )
+      const x = d.center.x + Math.cos(d.angle) * d.radius
+      const z = d.center.z + Math.sin(d.angle) * d.radius
+      d.model.group.position.set(x, d.height + Math.sin(this.t * 1.5 + d.center.x) * 0.6, z)
       d.model.group.rotation.y = -d.angle
-      d.model.update(dt, 0)
+      const far = this.farFromPlayer(x, z)
+      d.model.group.visible = !far
+      if (!far) d.model.update(dt, 0)
     }
   }
 
@@ -518,7 +528,9 @@ export class Events {
       if (c.pos.z < -lim) c.pos.z = lim
       c.model.group.position.copy(c.pos)
       c.model.group.rotation.y = Math.atan2(c.dir.x, c.dir.z)
-      c.model.update(dt, 1)
+      const far = this.farFromPlayer(c.pos.x, c.pos.z)
+      c.model.group.visible = !far
+      if (!far) c.model.update(dt, 1)
     }
   }
 

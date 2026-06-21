@@ -7,6 +7,8 @@ import type { Capturable } from './Game'
 
 type AgentKind = 'citizen' | 'robot' | 'alien'
 
+const NPC_CULL2 = 135 * 135 // squared distance beyond which NPCs are culled
+
 interface Agent {
   pos: THREE.Vector3
   vel: THREE.Vector3
@@ -193,7 +195,10 @@ export class NPCManager {
         a.model.group.rotation.y = a.yaw
       }
       a.model.group.position.copy(a.pos)
-      a.model.update(dt, sp / speed, true)
+      // Distance culling: skip rendering + animating far NPCs (mobile perf).
+      const far = playerPos ? (a.pos.x - playerPos.x) ** 2 + (a.pos.z - playerPos.z) ** 2 > NPC_CULL2 : false
+      a.model.group.visible = !far
+      if (!far) a.model.update(dt, sp / speed, true)
     }
   }
 

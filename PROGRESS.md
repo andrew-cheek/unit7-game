@@ -540,3 +540,15 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   (JET->JETPACK, RUN->SPRINT, MORPH->TRANSFORM).
 - Comedy balance: invasion + water-balloon spam cut hard (few invaders, ~24m
   stand-off, 12-24s throw cooldown, max 2 balloons aloft, brief SPLASH banner).
+
+## Spaceport, mech weight FX, perf pass (pooling + culling)
+
+- Spaceport landmark (World.buildSpaceport): control tower with a sweeping
+  beacon, lit landing pads, parked freighters, stacked cargo, pulsing warning
+  lights, and a ship that periodically lifts off. On radar.
+- Mech weight: pooled ground-ring shockwaves - dust rings + a tiny shake under
+  each foot while striding low, and a big shockwave + shake when landing from
+  height (Missiles.shockwave ring pool; Game.updateMechFx).
+- Performance: object pooling for the ring/shockwave effects (no per-event
+  alloc), and distance culling for NPCs (135m) + ambient drones/traffic/commuters
+  (150m) - far actors skip both render and animation.

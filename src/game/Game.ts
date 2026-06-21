@@ -77,6 +77,9 @@ export class Game {
   private captureBase = 0
   private minigamePlayed = false
   private heroLight!: THREE.PointLight
+  private mechAirborne = false
+  private footTimer = 0
+  private footLeft = false
 
   /** Net-catchable entities; populated by NPC/alien systems in later stages. */
   readonly capturables: Capturable[] = []
@@ -583,6 +586,40 @@ export class Game {
     }
   }
 
+  /**
+   * Weight FX for a piloted mech: dust rings + a tiny shake under each foot
+   * while striding low over the ground, and a big shockwave + shake when it
+   * lands from height. Sells the scale; rings are pooled so it's cheap.
+   */
+  private updateMechFx(dt: number) {
+    const v = this.vehicles.current
+    if (!v) return
+    const gy = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 8)?.y ?? 0
+    const alt = v.position.y - gy
+    const grounded = alt < 2.5 + v.size * 0.6
+    // Landing: was in the air, now grounded with downward speed.
+    if (this.mechAirborne && grounded && v.velocity.y < -3) {
+      this.missiles.shockwave({ x: v.position.x, y: gy, z: v.position.z }, 0xbfe6ff, 7 + v.size * 1.6, 0.6)
+      this.camera.shake(0.6)
+      vibrate(50)
+    }
+    this.mechAirborne = !grounded
+    // Footsteps while striding low and moving.
+    const hsp = Math.hypot(v.velocity.x, v.velocity.z)
+    if (grounded && hsp > 3 && v.morph < 0.5) {
+      this.footTimer -= dt
+      if (this.footTimer <= 0) {
+        this.footTimer = Math.max(0.3, 0.62 - hsp * 0.008) * (0.85 + v.size * 0.04)
+        this.footLeft = !this.footLeft
+        const s = (this.footLeft ? -1 : 1) * v.size * 0.6
+        const fx = v.position.x + Math.cos(v.yaw) * s
+        const fz = v.position.z - Math.sin(v.yaw) * s
+        this.missiles.shockwave({ x: fx, y: gy, z: fz }, 0x9fb4d8, 1.6 + v.size * 0.4, 0.4)
+        this.camera.shake(0.05 + v.size * 0.01)
+      }
+    }
+  }
+
   /** Apply a missile blast: capture every live target inside the radius. */
   private detonate(pos: THREE.Vector3, radius: number) {
     const r2 = radius * radius
@@ -740,8 +777,12 @@ export class Game {
       this.player.object.position.copy(this.vehicles.current.position)
       this.focus.copy(this.vehicles.current.position)
       // Frame the mech around its torso rather than its feet.
-      if (isMech(this.vehicles.current.kind)) this.focus.y += this.vehicles.current.size * 3.2
+      if (isMech(this.vehicles.current.kind)) {
+        this.focus.y += this.vehicles.current.size * 3.2
+        this.updateMechFx(dt)
+      }
     } else {
+      this.mechAirborne = false
       this.player.update(dt, this.input, this.physics, gravity)
       const lim = config.world.half - 1
       this.player.position.x = clamp(this.player.position.x, -lim, lim)
