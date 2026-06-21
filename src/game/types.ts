@@ -17,7 +17,7 @@ export type PlayerMode = 'robot' | 'plane' | 'parachute' | 'vehicle'
 
 export type PowerupKind = 'speed' | 'shield' | 'fuel' | 'score'
 
-export type BlipKind = 'building' | 'npc' | 'vehicle' | 'portal' | 'powerup' | 'alien' | 'ship'
+export type BlipKind = 'building' | 'npc' | 'vehicle' | 'portal' | 'powerup' | 'alien' | 'ship' | 'objective'
 
 /** A radar dot, already transformed into heading-up, normalized [-1,1] space. */
 export interface RadarBlip {
@@ -34,6 +34,7 @@ export interface HudState {
   fuel: number // 0..1
   score: number
   best: number // best score this device (persisted)
+  credits: number // spendable currency (persisted)
   captured: number
   speed: number // m/s
   altitude: number // m above ground

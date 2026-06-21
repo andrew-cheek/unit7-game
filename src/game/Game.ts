@@ -30,6 +30,10 @@ export interface Capturable {
 
 const NET_SEGMENTS = 22
 
+// Mech unlock costs (credits). mechM is free so the "pilot a mech" objective is
+// always reachable; the bigger mechs are earned by capturing aliens.
+const MECH_COST: Record<string, number> = { mechM: 0, mechL: 400, mechXL: 1200 }
+
 /** Short haptic pulse on capable devices (mobile). No-op where unsupported. */
 function vibrate(pattern: number | number[]) {
   try {
@@ -100,6 +104,11 @@ export class Game {
   private missileCooldown = 0
   private invasionTriggered = false
   private profile: Profile = loadProfile()
+  private credits = 0
+  private unlocked = new Set<string>()
+  private objTarget: THREE.Vector3 | null = null
+  private objBeacon!: THREE.Group
+  private objBeaconMats: THREE.Material[] = []
   private scratchFwd = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
@@ -137,6 +146,12 @@ export class Game {
     // dark backgrounds (rim/hero lighting). Cheap: one point light.
     this.heroLight = new THREE.PointLight(0x9fd8ff, 22, 16, 2)
     this.engine.scene.add(this.heroLight)
+    // Credits balance + unlocked vehicles from the saved profile.
+    this.credits = this.profile.credits
+    this.unlocked = new Set(this.profile.unlocks)
+    // Guided objective beacon: a tall glowing column placed at the current goal.
+    this.objBeacon = this.buildObjectiveBeacon()
+    this.engine.scene.add(this.objBeacon)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
     this.missiles = new Missiles(this.engine.scene)
     const npcCount = Math.round(config.npc.count * tier.densityScale)
@@ -204,7 +219,7 @@ export class Game {
     }
 
     this.hud = {
-      mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, captured: 0,
+      mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
@@ -475,6 +490,25 @@ export class Game {
     if (this.player.mode !== 'robot' && this.player.mode !== 'plane') return
     const v = this.vehicles.nearest(this.player.position)
     if (!v) return
+    // Locked mech: spend credits to unlock it (this press), enter on the next.
+    if (isMech(v.kind) && !this.isUnlocked(v.kind)) {
+      const cost = MECH_COST[v.kind] ?? 0
+      if (this.credits >= cost) {
+        this.addCredits(-cost)
+        this.unlocked.add(v.kind)
+        this.profile.unlocks = [...this.unlocked]
+        saveProfile(this.profile)
+        this.hud.banner = `${v.name} UNLOCKED  -${cost} CR`
+        this.bannerTimer = 1.8
+        this.audio.play('objective')
+        vibrate(40)
+      } else {
+        this.hud.banner = `LOCKED · NEED ${cost - this.credits} MORE CR`
+        this.bannerTimer = 1.4
+        this.audio.play('ui')
+      }
+      return
+    }
     if (v.kind === 'rocket') {
       this.vehicles.onEnterRocket?.()
     } else {
@@ -535,6 +569,7 @@ export class Game {
     if (best) {
       const award = best.capture()
       this.hud.score += Math.round(award * this.scoreMul)
+      this.addCredits(Math.round(award * 0.5))
       this.hud.captured += 1
       vibrate(25)
       this.audio.play('capture')
@@ -570,6 +605,63 @@ export class Game {
     this.audio.play('fire')
   }
 
+  private buildObjectiveBeacon(): THREE.Group {
+    const g = new THREE.Group()
+    const own = <T extends THREE.Material>(m: T) => { this.objBeaconMats.push(m); return m }
+    const colMat = own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 60, 12, 1, true), colMat)
+    col.position.y = 30
+    g.add(col)
+    const ringMat = own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.8, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.4, 3.2, 28), ringMat)
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.4
+    g.add(ring)
+    g.visible = false
+    return g
+  }
+
+  private addCredits(n: number) {
+    this.credits += n
+    this.profile.credits = this.credits
+    this.hud.credits = this.credits
+  }
+
+  private isUnlocked(kind: string): boolean {
+    return !MECH_COST[kind] || this.unlocked.has(kind)
+  }
+
+  /** World position the current objective points at (for the beacon + radar). */
+  private computeObjectiveTarget(): THREE.Vector3 | null {
+    const m = config.missions[this.missionIdx]
+    if (!m) return null
+    if (m.type === 'reach') return new THREE.Vector3(m.x ?? 0, 0, m.z ?? 0)
+    if (this.zone !== 'earth') return null // beacons only guide within the city
+    if (m.type === 'mech') {
+      // Guide to the nearest mech you can actually board (free/unlocked first).
+      let best: THREE.Vector3 | null = null, bd = Infinity
+      for (const v of this.vehicles.list) {
+        if (!isMech(v.kind) || !this.isUnlocked(v.kind)) continue
+        const d = (v.position.x - this.player.position.x) ** 2 + (v.position.z - this.player.position.z) ** 2
+        if (d < bd) { bd = d; best = v.position }
+      }
+      return best ? best.clone() : null
+    }
+    if (m.type === 'zone') {
+      for (const p of this.zones.portalsFor('earth')) if (p.target === m.zone) return p.position.clone()
+      return null
+    }
+    if (m.type === 'minigame') {
+      let best: THREE.Vector3 | null = null, bd = Infinity
+      for (const p of this.arcadePortals) {
+        const d = (p.pos.x - this.player.position.x) ** 2 + (p.pos.z - this.player.position.z) ** 2
+        if (d < bd) { bd = d; best = p.pos }
+      }
+      return best ? best.clone() : null
+    }
+    return null // capture: no fixed beacon (aliens roam)
+  }
+
   /**
    * Drive the one-active-at-a-time objective chain (config.missions). Detects
    * completion by type, advances with a short banner, and keeps hud.objective in
@@ -577,7 +669,7 @@ export class Game {
    */
   private updateObjectives() {
     const list = config.missions
-    if (this.missionIdx >= list.length) { this.hud.objective = null; return }
+    if (this.missionIdx >= list.length) { this.hud.objective = null; this.objTarget = null; this.objBeacon.visible = false; return }
     const m = list[this.missionIdx]
     let done = false
     switch (m.type) {
@@ -608,6 +700,16 @@ export class Game {
       this.hud.objective = nextM?.title ?? 'Free roam: explore the world!'
     } else {
       this.hud.objective = m.title
+    }
+    // Guided beacon: drop a glowing column on the current goal.
+    this.objTarget = this.computeObjectiveTarget()
+    if (this.objTarget && this.zone === 'earth') {
+      const gy = this.physics.sampleGround(this.objTarget.x, this.objTarget.z, 80)?.y ?? 0
+      this.objBeacon.position.set(this.objTarget.x, gy, this.objTarget.z)
+      this.objBeacon.visible = true
+      this.objBeacon.rotation.y += 0.4 * (1 / 60)
+    } else {
+      this.objBeacon.visible = false
     }
   }
 
@@ -658,6 +760,7 @@ export class Game {
       if (dx * dx + dz * dz > r2) continue
       const award = c.capture()
       this.hud.score += Math.round(award * this.scoreMul)
+      this.addCredits(Math.round(award * 0.5))
       this.hud.captured += 1
       hits++
     }
@@ -926,6 +1029,7 @@ export class Game {
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') for (const p of this.arcadePortals) add(p.pos.x, p.pos.z, 'portal')
+    if (this.objTarget) add(this.objTarget.x, this.objTarget.z, 'objective') // guide blip
     return blips
   }
 
@@ -948,7 +1052,14 @@ export class Game {
         : `Press G - Exit ${this.vehicles.currentName}`
     } else if (this.player.mode === 'robot') {
       const near = this.vehicles.nearest(this.player.position)
-      if (near) prompt = `Press G - ${near.name}`
+      if (near) {
+        if (isMech(near.kind) && !this.isUnlocked(near.kind)) {
+          const cost = MECH_COST[near.kind] ?? 0
+          prompt = this.credits >= cost ? `G - Unlock ${near.name} (${cost} CR)` : `${near.name} LOCKED - need ${cost} CR`
+        } else {
+          prompt = `Press G - ${near.name}`
+        }
+      }
     }
 
     // Track + persist the best score (only writes storage when it improves).
@@ -977,10 +1088,11 @@ export class Game {
   }
 
   dispose() {
-    // Persist session takings into the lifetime profile (best is saved live).
+    // Persist session takings (credits + best are already saved live).
     this.profile.lifetimeCaptured += this.hud.captured
-    this.profile.credits += this.hud.score
+    this.profile.credits = this.credits
     saveProfile(this.profile)
+    this.objBeaconMats.forEach((m) => m.dispose())
     this.input.dispose()
     this.player.dispose()
     this.vehicles.dispose()

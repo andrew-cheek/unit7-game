@@ -564,3 +564,14 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - Mech Arena minigame (MechArena.tsx): top-down arena, drag/WASD move, auto-fire
   at nearest drone, escalating waves, 3 lives, score persisted.
 - Two new labeled portals flank the plaza row; both lazy-loaded chunks.
+
+## Reward/unlock loop + guided objective beacon
+
+- Credits are now a live spendable currency (earned ~half the score value per
+  capture, persisted). HUD shows CREDITS.
+- Mech unlocks: MECH-M is free; MECH-L (400) and MECH-XL (1200) are bought with
+  credits at the mech. Locked-mech prompt shows the cost; first G unlocks
+  (deducts + persists), next G boards. Unlocks persist per device.
+- Guided beacon: a tall glowing column drops on the current objective's target
+  (plaza / nearest unlocked mech / Mars or Moon portal / nearest arcade portal),
+  plus a bright objective blip on the radar, so you always know where to go.

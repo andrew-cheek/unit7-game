@@ -19,6 +19,7 @@ const BLIP_COLOR: Record<BlipKind, string> = {
   powerup: NEON.cyan,
   alien: NEON.magenta,
   ship: '#ffffff',
+  objective: NEON.lime,
 }
 
 export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; touch: boolean; onRestart: () => void; onToggleMute: () => void }) {
@@ -47,10 +48,11 @@ export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; to
         <div style={statRow}>
           <Stat label="ZONE" value={hud.zone.toUpperCase()} color={NEON.magenta} />
           <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
-          <Stat label="BEST" value={String(hud.best)} color={NEON.orange} />
+          <Stat label="CREDITS" value={String(hud.credits)} color={NEON.orange} />
           <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
         </div>
         <div style={statRow}>
+          <Stat label="BEST" value={String(hud.best)} color={NEON.purple} />
           <Stat label="SPEED" value={`${hud.speed.toFixed(0)} m/s`} color={NEON.text} />
           {hud.altitude > 1 && <Stat label="ALT" value={`${hud.altitude.toFixed(0)} m`} color={NEON.text} />}
           <Stat label="FPS" value={String(hud.fps)} color={hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta} />
@@ -146,7 +148,8 @@ function Radar({ hud }: { hud: HudState }) {
       {hud.radar.map((b, i) => {
         const x = R + b.x * (R - 4)
         const y = R - b.y * (R - 4)
-        return <circle key={i} cx={x} cy={y} r={b.kind === 'building' ? 1.6 : 2.6} fill={BLIP_COLOR[b.kind]} />
+        const r = b.kind === 'objective' ? 4 : b.kind === 'building' ? 1.6 : 2.6
+        return <circle key={i} cx={x} cy={y} r={r} fill={BLIP_COLOR[b.kind]} />
       })}
       {/* player + forward indicator */}
       <polygon points={`${R},${R - 6} ${R - 4},${R + 4} ${R + 4},${R + 4}`} fill={NEON.cyan} />

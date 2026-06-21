@@ -7,23 +7,27 @@ export interface Profile {
   best: number
   lifetimeCaptured: number
   credits: number
+  unlocks: string[] // unlocked vehicle kinds (mechM is free by default)
 }
 
 const KEY = 'unit7.profile.v1'
-const DEFAULT: Profile = { best: 0, lifetimeCaptured: 0, credits: 0 }
+const DEFAULT: Profile = { best: 0, lifetimeCaptured: 0, credits: 0, unlocks: ['mechM'] }
 
 export function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(KEY)
-    if (!raw) return { ...DEFAULT }
+    if (!raw) return { ...DEFAULT, unlocks: [...DEFAULT.unlocks] }
     const p = JSON.parse(raw) as Partial<Profile>
+    const unlocks = Array.isArray(p.unlocks) ? p.unlocks.map(String) : []
+    if (!unlocks.includes('mechM')) unlocks.push('mechM')
     return {
       best: Number(p.best) || 0,
       lifetimeCaptured: Number(p.lifetimeCaptured) || 0,
       credits: Number(p.credits) || 0,
+      unlocks,
     }
   } catch {
-    return { ...DEFAULT }
+    return { ...DEFAULT, unlocks: [...DEFAULT.unlocks] }
   }
 }
 
