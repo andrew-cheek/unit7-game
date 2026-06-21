@@ -171,6 +171,7 @@ export class Game {
   private incomingChallenge: { fromId: string; name: string } | null = null
   private matchView: MatchView | null = null // live Beam Wars duel state (null when not dueling)
   private progression: Progression = loadProgression()
+  private morningSunrise = false // true while the scripted opening sunrise is slowing the clock
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -415,8 +416,27 @@ export class Game {
    */
   private startMorning() {
     if (this.timeFromQuery || this.zone !== 'earth') return
-    this.world.setDebugTime(7) // just into the 5s..15s dawn ramp
+    // Begin in pre-dawn dark, then run the sunrise at ~0.4x so the whole thing -
+    // night lifting to gold, the visible sun cresting, the shift fleet descending
+    // and workers filing into the offices - plays out over ~30s instead of being
+    // over in a blink. Normal clock speed resumes once it's full day.
+    this.world.setDebugTime(4) // just before the 5s..15s dawn ramp
+    this.world.setTimeScale(0.4)
+    this.morningSunrise = true
     this.dawnShow.resetClock()
+    this.hud.banner = 'DAWN OVER THE CITY'
+    this.bannerTimer = 3
+    this.hud.missionPopup = { title: 'SHIFT CHANGE', body: 'Dawn breaks. Watch the shuttles land and the crew head to work, then follow the neon route to the beam.' }
+    this.missionPopupTimer = 7
+  }
+
+  /** End the scripted slow sunrise once it's full day, restoring normal clock speed. */
+  private updateMorningSunrise() {
+    if (!this.morningSunrise) return
+    if (this.world.dayFactor >= 0.98) {
+      this.world.setTimeScale(1)
+      this.morningSunrise = false
+    }
   }
 
   // --- Arcade portals ------------------------------------------------------
@@ -1652,6 +1672,7 @@ export class Game {
 
     this.travelCooldown = Math.max(0, this.travelCooldown - dt)
     this.arcadeCooldown = Math.max(0, this.arcadeCooldown - dt)
+    this.updateMorningSunrise()
 
     if (this.launch.active) {
       this.updateLaunch(dt)

@@ -168,11 +168,20 @@ export class World {
   private sunCoreMat!: THREE.SpriteMaterial
   private sunGlowMat!: THREE.SpriteMaterial
   private time = 0
+  private timeScale = 1 // clock speed multiplier (slowed during the scripted morning sunrise)
   private dawn = 0 // current day factor (0 night .. 1 full day)
 
   /** Day-cycle factor, 0 = night, 1 = full day. Used to time the invasion. */
   get dayFactor() {
     return this.dawn
+  }
+  /** Current clock position in seconds within the cycle. */
+  get clock() {
+    return this.time
+  }
+  /** Slow or speed the day/night clock (1 = normal). Used for the opening sunrise. */
+  setTimeScale(s: number) {
+    this.timeScale = s
   }
   /** Jump the day/night clock (debug: `?time=` seconds into the 120s cycle). */
   setDebugTime(t: number) {
@@ -1628,7 +1637,7 @@ export class World {
 
   /** Update the sky/sun/billboards. Always runs so the sky animates everywhere. */
   update(dt: number, focus: THREE.Vector3) {
-    this.time += dt
+    this.time += dt * this.timeScale
     this.neon.update(dt, focus.x, focus.z) // density + distance LOD on city neon
     this.sky.update(dt)
     this.sky.group.position.set(focus.x, 0, focus.z)

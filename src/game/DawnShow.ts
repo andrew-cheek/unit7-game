@@ -47,6 +47,7 @@ const PADS = [
   // view (towering to the left), not hidden behind the beam.
   { p: new THREE.Vector3(-24, 0, 60), kind: 'rocket', delay: 1.0 },
 ] as const
+const SPAWN_Y = 80 // craft spawn altitude (lower than before so the descent is clearly seen)
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const smooth = (x: number) => { const t = clamp01(x); return t * t * (3 - 2 * t) }
 
@@ -255,7 +256,7 @@ export class DawnShow {
     this.mode = mode
     for (const def of PADS) {
       const model = def.kind === 'rocket' ? createRocket() : createSpaceship()
-      model.group.position.set(def.p.x, 130, def.p.z)
+      model.group.position.set(def.p.x, SPAWN_Y, def.p.z)
       this.groups.earth.add(model.group)
       this.craft.push({ model, pad: def.p.clone(), landY: def.kind === 'rocket' ? 0.5 : 2.5, delay: def.delay, t: 0, state: 'wait', dropped: false })
       // Departure: commuters head out to this pad to board (briefcases in hand).
@@ -269,16 +270,17 @@ export class DawnShow {
       c.t += dt
       const g = c.model.group
       if (c.state === 'wait') {
-        g.position.set(c.pad.x, 130, c.pad.z)
+        g.position.set(c.pad.x, SPAWN_Y, c.pad.z)
         if (c.t >= c.delay) { c.state = 'descend'; c.t = 0 }
       } else if (c.state === 'descend') {
-        const k = smooth(Math.min(1, c.t / 2.6))
-        g.position.set(c.pad.x, THREE.MathUtils.lerp(130, c.landY, k), c.pad.z)
+        // Slow, clearly-visible descent (was a 2.6s plunge from way up high).
+        const k = smooth(Math.min(1, c.t / 5.5))
+        g.position.set(c.pad.x, THREE.MathUtils.lerp(SPAWN_Y, c.landY, k), c.pad.z)
         if (k >= 1) { c.state = 'hold'; c.t = 0 }
       } else if (c.state === 'hold') {
         g.position.set(c.pad.x, c.landY, c.pad.z)
         if (this.mode === 'arrive' && !c.dropped) { this.spawnWorkersAt(c.pad, false); c.dropped = true }
-        if (c.t >= (this.mode === 'depart' ? 5 : 3.5)) { c.state = 'ascend'; c.t = 0 }
+        if (c.t >= (this.mode === 'depart' ? 5 : 4.5)) { c.state = 'ascend'; c.t = 0 }
       } else if (c.state === 'ascend') {
         const k = Math.min(1, c.t / 3)
         g.position.set(c.pad.x + k * 40, THREE.MathUtils.lerp(c.landY, 150, k), c.pad.z - k * 12)
