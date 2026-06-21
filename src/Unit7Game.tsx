@@ -3,6 +3,7 @@ import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
 import type { GameControls, HudState, Unit7Config } from './game/types'
 import { loadCallsign, saveCallsign } from './game/storage'
+import { WARP_FORMS } from './game/WarpForms'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
@@ -116,6 +117,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onChallenge={(id) => controlsRef.current?.challengePilot(id)}
           onBuy={(id) => controlsRef.current?.buyCosmetic(id)}
           onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
+          onWarp={() => controlsRef.current?.toggleWarp()}
         />
       )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
@@ -193,6 +195,66 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onDecline={() => controlsRef.current?.declineChallenge()}
         />
       )}
+      {hud?.warp.menu && !hud.match && !hud.minigame && controlsRef.current && (
+        <WarpMenu
+          warp={hud.warp}
+          onPick={(id) => controlsRef.current?.warpInto(id)}
+          onRevert={() => controlsRef.current?.warpRevert()}
+          onClose={() => controlsRef.current?.toggleWarp()}
+        />
+      )}
+    </div>
+  )
+}
+
+function WarpMenu({
+  warp,
+  onPick,
+  onRevert,
+  onClose,
+}: {
+  warp: { ready: boolean; active: string | null }
+  onPick: (id: string) => void
+  onRevert: () => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'r' || e.key === 'R') { onClose(); e.preventDefault(); return }
+      const n = parseInt(e.key, 10)
+      if (n >= 1 && n <= WARP_FORMS.length && warp.ready) { onPick(WARP_FORMS[n - 1].id); e.preventDefault() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onPick, onClose, warp.ready])
+  const hex = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0')
+  return (
+    <div style={warpWrap} onClick={onClose}>
+      <div style={warpCard} onClick={(e) => e.stopPropagation()}>
+        <div style={{ color: '#27e7ff', font: '800 16px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.2em', marginBottom: 4 }}>WARP GATE</div>
+        <div style={{ color: 'rgba(223,238,255,0.6)', font: '600 11px/1.4 ui-monospace, Menlo, monospace', marginBottom: 14 }}>
+          {warp.ready ? 'Pick a form to teleport into (1-7 or tap).' : 'Charge not ready - keep playing to recharge.'}
+        </div>
+        <div style={warpGrid}>
+          {WARP_FORMS.map((f, i) => (
+            <button
+              key={f.id}
+              style={{ ...warpItem, borderColor: warp.active === f.id ? hex(f.color) : 'rgba(255,255,255,0.14)', opacity: warp.ready ? 1 : 0.4, cursor: warp.ready ? 'pointer' : 'not-allowed' }}
+              onClick={() => warp.ready && onPick(f.id)}
+            >
+              <span style={{ width: 26, height: 26, borderRadius: 7, background: hex(f.color), boxShadow: `0 0 12px ${hex(f.color)}`, flexShrink: 0 }} />
+              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ color: '#eaf4ff', fontWeight: 800, fontSize: 11 }}>{i + 1}. {f.name}</span>
+                <span style={{ color: 'rgba(223,238,255,0.55)', fontSize: 9 }}>{f.desc}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, justifyContent: 'center' }}>
+          {warp.active && <button style={warpRevertBtn} onClick={onRevert}>RETURN TO ROBOT</button>}
+          <button style={warpCloseBtn} onClick={onClose}>CLOSE</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -456,6 +518,66 @@ const challengeDecline: CSSProperties = {
   background: 'rgba(6,10,22,0.8)',
   border: '1px solid rgba(255,255,255,0.18)',
   borderRadius: 10,
+}
+const warpWrap: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  zIndex: 43,
+  pointerEvents: 'auto',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(2,4,10,0.5)',
+}
+const warpCard: CSSProperties = {
+  width: 'min(440px, 92vw)',
+  padding: '20px 22px',
+  textAlign: 'center',
+  borderRadius: 16,
+  background: 'rgba(6,10,22,0.95)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  boxShadow: '0 0 34px rgba(39,231,255,0.25)',
+  backdropFilter: 'blur(10px)',
+  WebkitBackdropFilter: 'blur(10px)',
+}
+const warpGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+}
+const warpItem: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  textAlign: 'left',
+  pointerEvents: 'auto',
+  padding: '9px 11px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 10,
+  font: 'inherit',
+}
+const warpRevertBtn: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '9px 16px',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(155,255,77,0.6)',
+  borderRadius: 999,
+  color: '#9bff4d',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+}
+const warpCloseBtn: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '9px 16px',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.8)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
 }
 const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}`
 const errStyle: CSSProperties = {

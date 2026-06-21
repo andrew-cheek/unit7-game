@@ -70,6 +70,7 @@ export interface HudState {
   challenge: { fromId: string; name: string } | null // incoming duel offer awaiting accept/decline
   match: MatchView | null // non-null while a live Beam Wars duel is on screen
   progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
+  warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */
@@ -150,6 +151,9 @@ export interface GameControls {
   rematch(): void // re-challenge the same opponent after a duel ends
   buyCosmetic(id: string): void // unlock a cosmetic with credits (then auto-equips)
   equipCosmetic(slot: 'trail' | 'accent', id: string): void // equip an owned cosmetic
+  toggleWarp(): void // open/close the warp form picker (when charged)
+  warpInto(id: string): void // teleport into a chosen sci-fi form
+  warpRevert(): void // return to the robot form
 }
 
 export type GameAction =
@@ -163,3 +167,4 @@ export type GameAction =
   | 'dance'
   | 'bubble'
   | 'board'
+  | 'warp'

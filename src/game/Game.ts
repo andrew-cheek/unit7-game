@@ -6,6 +6,7 @@ import { Player } from './Player'
 import { Physics } from './Physics'
 import { Vehicles, isMech } from './Vehicles'
 import { type VehicleModel } from './procedural'
+import { WARP_FORMS, createWarpForm, isWarpForm, hoverOffset, type WarpFormModel } from './WarpForms'
 import { Missiles } from './Missiles'
 import { AudioManager } from './Audio'
 import { NPCManager } from './NPC'
@@ -172,6 +173,13 @@ export class Game {
   private matchView: MatchView | null = null // live Beam Wars duel state (null when not dueling)
   private progression: Progression = loadProgression()
   private morningSunrise = false // true while the scripted opening sunrise is slowing the clock
+  // Warp ability: a charge fills over 30s of play; press R to open the picker and
+  // teleport into one of seven sci-fi forms.
+  private static readonly WARP_TIME = 30
+  private warpCharge = 0
+  private warpMenuOpen = false
+  private warpActive: string | null = null
+  private warpModel: WarpFormModel | null = null
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -314,6 +322,9 @@ export class Game {
       },
       buyCosmetic: (id: string) => this.buyCosmetic(id),
       equipCosmetic: (slot: 'trail' | 'accent', id: string) => this.equipCosmetic(slot, id),
+      toggleWarp: () => this.toggleWarp(),
+      warpInto: (id: string) => this.warpInto(id),
+      warpRevert: () => this.warpRevert(),
     }
 
     this.hud = {
@@ -333,6 +344,7 @@ export class Game {
       challenge: null,
       match: null,
       progress: this.buildProgressHud(),
+      warp: { charge01: 0, ready: false, active: null, menu: false },
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -688,6 +700,7 @@ export class Game {
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
     this.minigamePlayed = true
+    this.warpRevert() // can't carry a warp form into a cabinet game
     this.audio.play('portal')
     this.hud.minigame = kind
     this.activePortal.copy(pos)
@@ -723,6 +736,79 @@ export class Game {
     this.publishProfile()
   }
 
+  // --- warp ability -----------------------------------------------------------
+
+  /** Open/close the warp picker. Opens when charged or already warped (to switch
+   *  / revert); otherwise nudges that it's still charging. */
+  private toggleWarp() {
+    if (this.warpMenuOpen) { this.warpMenuOpen = false; return }
+    if (this.warpCharge >= Game.WARP_TIME || this.warpActive) {
+      this.warpMenuOpen = true
+      this.audio.play('ui')
+    } else {
+      this.hud.banner = `WARP CHARGING ${Math.floor((this.warpCharge / Game.WARP_TIME) * 100)}%`
+      this.bannerTimer = 1.1
+    }
+  }
+
+  /** Teleport into a chosen sci-fi form: hide the robot, show the form, apply its
+   *  speed, and pop a warp flash. Consumes the charge. */
+  private warpInto(id: string) {
+    const meta = WARP_FORMS.find((f) => f.id === id)
+    if (!meta || !isWarpForm(id)) return
+    if (this.warpCharge < Game.WARP_TIME) { this.warpMenuOpen = false; return } // not ready
+    this.warpCharge = 0
+    this.warpMenuOpen = false
+    this.clearWarpModel()
+    const m = createWarpForm(id)
+    this.warpModel = m
+    const p = this.player.position
+    m.group.position.set(p.x, p.y + hoverOffset(id), p.z)
+    this.engine.scene.add(m.group)
+    this.warpActive = id
+    this.player.setModelVisible(false)
+    this.player.warpSpeedMul = meta.speedMul
+    this.missiles.shockwave({ x: p.x, y: p.y + 1, z: p.z }, meta.color, 7, 0.8)
+    this.camera.shake(0.8)
+    this.audio.play('portal')
+    vibrate(45)
+    this.hud.banner = `WARPED · ${meta.name}`
+    this.bannerTimer = 2
+  }
+
+  /** Return to the robot form. */
+  private warpRevert() {
+    this.warpMenuOpen = false
+    if (!this.warpActive) return
+    this.clearWarpModel()
+    this.warpActive = null
+    this.player.warpSpeedMul = 1
+    this.player.setModelVisible(true)
+    const p = this.player.position
+    this.missiles.shockwave({ x: p.x, y: p.y + 1, z: p.z }, 0x27e7ff, 5, 0.6)
+    this.audio.play('portal')
+  }
+
+  private clearWarpModel() {
+    if (this.warpModel) {
+      this.engine.scene.remove(this.warpModel.group)
+      this.warpModel.dispose()
+      this.warpModel = null
+    }
+  }
+
+  /** Fill the warp charge and keep the active form glued to the player. */
+  private updateWarp(dt: number) {
+    this.warpCharge = Math.min(Game.WARP_TIME, this.warpCharge + dt)
+    if (this.warpActive && this.warpModel) {
+      const p = this.player.position
+      const grp = this.warpModel.group
+      grp.position.set(p.x, p.y + hoverOffset(this.warpActive), p.z)
+      grp.rotation.y = this.input.yaw
+      this.warpModel.update(dt)
+    }
+  }
+
   /** Leave the live duel view: forfeit if still running, then return to the city. */
   private leaveMatch() {
     if (!this.matchView) return
@@ -742,6 +828,7 @@ export class Game {
 
   /** Hard swap of surfaces, atmosphere, visible terrain and spawn for a zone. */
   private doTravel(zone: Zone) {
+    this.warpRevert() // drop any warp form on zone change
     if (this.vehicles.current) {
       this.player.exitVehicle(this.player.position)
     }
@@ -851,6 +938,7 @@ export class Game {
     if (v.kind === 'rocket') {
       this.vehicles.onEnterRocket?.()
     } else {
+      this.warpRevert() // step out of the warp form to pilot
       this.player.enterVehicle()
       this.vehicles.enter(v)
       // Mech / titan boot-up moment: name banner, camera shake + an energy/steam
@@ -1287,6 +1375,7 @@ export class Game {
           this.bannerTimer = 2
         },
         onMatchStart: (info) => {
+          this.warpRevert() // duels are robot-only
           this.incomingChallenge = null
           this.matchView = {
             side: info.side, opp: info.opp, oppId: info.oppId, cols: info.cols, rows: info.rows,
@@ -1680,6 +1769,8 @@ export class Game {
     this.travelCooldown = Math.max(0, this.travelCooldown - dt)
     this.arcadeCooldown = Math.max(0, this.arcadeCooldown - dt)
     this.updateMorningSunrise()
+    this.updateWarp(dt)
+    if (this.input.consumeEdge('warp')) this.toggleWarp()
 
     if (this.launch.active) {
       this.updateLaunch(dt)
@@ -1982,6 +2073,12 @@ export class Game {
     this.hud.challenge = this.incomingChallenge
     this.hud.match = this.matchView ? { ...this.matchView } : null
     this.hud.progress = this.buildProgressHud()
+    this.hud.warp = {
+      charge01: Math.min(1, this.warpCharge / Game.WARP_TIME),
+      ready: this.warpCharge >= Game.WARP_TIME,
+      active: this.warpActive,
+      menu: this.warpMenuOpen,
+    }
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }
@@ -1991,6 +2088,7 @@ export class Game {
     this.profile.lifetimeCaptured += this.hud.captured
     this.profile.credits = this.credits
     saveProfile(this.profile)
+    this.clearWarpModel()
     this.net?.close()
     this.remotePlayers.dispose()
     this.sharedAliens.dispose()

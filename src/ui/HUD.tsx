@@ -43,6 +43,7 @@ export function HUD({
   onChallenge,
   onBuy,
   onEquip,
+  onWarp,
 }: {
   hud: HudState
   touch: boolean
@@ -51,6 +52,7 @@ export function HUD({
   onChallenge?: (id: string) => void
   onBuy?: (id: string) => void
   onEquip?: (slot: 'trail' | 'accent', id: string) => void
+  onWarp?: () => void
 }) {
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
@@ -76,6 +78,7 @@ export function HUD({
           </div>
         )}
         {hud.shield && <div style={{ ...chip, color: NEON.purple, borderColor: NEON.purple }}>SHIELD</div>}
+        <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />
       </div>
 
       {/* top-right stats + radar */}
@@ -276,6 +279,23 @@ const DAILY_LABEL: Record<string, (t: number) => string> = {
   capture: (t) => `Capture ${t} aliens`,
   play: (t) => `Play ${t} arcade games`,
   duelWins: (t) => `Win ${t} duels`,
+}
+
+function WarpChip({ w, touch, onTap }: { w: HudState['warp']; touch: boolean; onTap?: () => void }) {
+  const pct = Math.round(w.charge01 * 100)
+  const label = w.active ? `WARPED${touch ? '' : ' · R'}` : w.ready ? `WARP READY${touch ? '' : ' · R'}` : `WARP ${pct}%`
+  const color = w.active ? NEON.magenta : w.ready ? NEON.lime : NEON.dim
+  return (
+    <button
+      style={{ ...chip, marginTop: 4, color, borderColor: color, pointerEvents: 'auto', cursor: 'pointer', background: 'transparent', letterSpacing: '0.08em', position: 'relative', overflow: 'hidden', minWidth: 96, textAlign: 'left' }}
+      onClick={() => onTap?.()}
+    >
+      {!w.ready && !w.active && (
+        <span style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: 'rgba(155,255,77,0.16)' }} />
+      )}
+      <span style={{ position: 'relative' }}>⚡ {label}</span>
+    </button>
+  )
 }
 
 function PilotProgress({ p }: { p: HudState['progress'] }) {

@@ -30,6 +30,7 @@ export class Player {
   stamina = config.player.staminaMax
   fuel = config.jetpack.fuelMax
   speedMul = 1 // speed powerup
+  warpSpeedMul = 1 // movement multiplier from the current warp form (1 = robot)
   shield = false // shield powerup
   dancing = false // robot-dance emote (set by Game from the dance floor / key)
   private danceT = 0
@@ -113,6 +114,11 @@ export class Player {
   }
   setVisible(v: boolean) {
     this.object.visible = v
+  }
+  /** Hide just the robot mesh (used while warped into another form), keeping the
+   *  controller + collision active. */
+  setModelVisible(v: boolean) {
+    this.model.group.visible = v
   }
   /** Recolor the robot's accent/trim to an equipped cosmetic color. */
   setAccent(color: number) {
@@ -270,7 +276,7 @@ export class Player {
       config.player.staminaMax,
     )
     const board = this.boarding
-    const maxSpeed = (board ? config.player.runSpeed * config.hoverboard.speedMul : wantSprint ? config.player.runSpeed : config.player.walkSpeed) * this.speedMul
+    const maxSpeed = (board ? config.player.runSpeed * config.hoverboard.speedMul : wantSprint ? config.player.runSpeed : config.player.walkSpeed) * this.speedMul * this.warpSpeedMul
     const accelV = board ? config.hoverboard.accel : config.player.accel
     const decelV = board ? config.hoverboard.decel : config.player.decel
     const rate = (intent > 0.1 ? accelV : decelV) * (this.grounded ? 1 : config.player.airControl)
