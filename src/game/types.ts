@@ -52,6 +52,7 @@ export interface HudState {
   radar: RadarBlip[]
   fade: number // 0..1 black overlay for zone transitions / launch
   banner: string | null // transient center banner (e.g. "ENTERING MARS")
+  objective: string | null // current active objective text (top-center)
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
 }
 

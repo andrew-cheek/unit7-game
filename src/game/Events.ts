@@ -317,10 +317,11 @@ export class Events {
   startInvasion(playerPos: THREE.Vector3) {
     if (this.invasionActive) return
     this.invasionActive = true
-    const n = config.tier.name === 'high' ? 4 : 2
+    // Kept deliberately small: the invasion is a flavour beat, not constant spam.
+    const n = config.tier.name === 'high' ? 2 : 1
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + 0.4
-      const r = 26 + Math.random() * 18
+      const r = 30 + Math.random() * 16
       const x = playerPos.x + Math.cos(a) * r
       const z = playerPos.z + Math.sin(a) * r
       const model = createSpaceship()
@@ -344,7 +345,7 @@ export class Events {
           s.dropped = true
           s.state = 'hover'
           s.timer = 6
-          const k = config.tier.name === 'high' ? 4 : 2
+          const k = config.tier.name === 'high' ? 2 : 1
           for (let j = 0; j < k; j++) {
             const a = (j / k) * Math.PI * 2
             this.spawnAlien(s.pos.x + Math.cos(a) * 4, s.pos.z + Math.sin(a) * 4, true)
@@ -592,7 +593,7 @@ export class Events {
       alive: true,
       boarding: false,
       invader,
-      throwTimer: randRange(0.8, 2.2),
+      throwTimer: randRange(6, 14),
       cap: {
         position: pos,
         alive: true,
@@ -620,20 +621,22 @@ export class Events {
         this.aliens.splice(i, 1)
         continue
       }
-      // Invaders chase the player and lob water balloons; keep a stand-off gap.
+      // Invaders keep a wide stand-off and only lob a balloon occasionally - the
+      // splash gag is now a rare side beat, not constant spam. Hard caps: never
+      // within ~22m, long random cooldown, and at most 2 balloons in the air.
       if (a.invader && !a.boarding) {
         const pdx = this.playerPos.x - a.pos.x
         const pdz = this.playerPos.z - a.pos.z
         const pd = Math.hypot(pdx, pdz)
-        const standoff = 11
+        const standoff = 24
         a.target.set(
           this.playerPos.x - (pd > 0.01 ? pdx / pd : 0) * standoff,
           0,
           this.playerPos.z - (pd > 0.01 ? pdz / pd : 0) * standoff,
         )
         a.throwTimer -= dt
-        if (a.throwTimer <= 0 && pd < 55) {
-          a.throwTimer = randRange(1.6, 3.0)
+        if (a.throwTimer <= 0 && pd > 22 && pd < 60 && this.balloons.count < 2) {
+          a.throwTimer = randRange(12, 24)
           const origin = new THREE.Vector3(a.pos.x, a.pos.y + 1.6, a.pos.z)
           const target = new THREE.Vector3(this.playerPos.x, this.playerPos.y + 0.5, this.playerPos.z)
           this.balloons.throw(origin, target, 1.4)

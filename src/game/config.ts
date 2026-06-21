@@ -110,8 +110,8 @@ export const config = {
     minDistance: 2.2,
     height: 2.6,
     targetHeight: 1.5,
-    // Higher, looking-down-over-the-shoulder default so the city reads as you spawn.
-    startPitch: 0.32,
+    // Higher, looking-down GTA-style default so the city reads as you spawn.
+    startPitch: 0.38,
     followLambda: 9,
     rotateLambda: 16,
     pitchMin: -0.85,
@@ -184,12 +184,34 @@ export const config = {
     trafficCount: 6,
   },
 
+  // Lightweight objective chain (one active at a time). Drives the HUD objective
+  // line + completion banners. Config-driven so the flow is tunable in one place.
+  missions: [
+    { id: 'plaza', title: 'Find Portal Plaza', type: 'reach', x: 0, z: 13, radius: 10 },
+    { id: 'mech', title: 'Pilot a battle mech', type: 'mech' },
+    { id: 'mars', title: 'Travel to Mars', type: 'zone', zone: 'mars' },
+    { id: 'moon', title: 'Travel to the Moon', type: 'zone', zone: 'moon' },
+    { id: 'capture', title: 'Capture 3 aliens', type: 'capture', count: 3 },
+    { id: 'arcade', title: 'Play an arcade game', type: 'minigame' },
+  ] as Mission[],
+
   // Per-zone physics + atmosphere. Skybox/terrain swap on zone change.
   zones: {
     earth: { gravity: -24, fog: 0x070a16, fogNear: 26, fogFar: 240, ground: 0x14161d, ambient: 0x223044, ambientI: 0.5 },
     mars: { gravity: -9.5, fog: 0x3a1206, fogNear: 30, fogFar: 200, ground: 0x7a3a1c, ambient: 0x5a2a14, ambientI: 0.7 },
     moon: { gravity: -4.2, fog: 0x05060a, fogNear: 40, fogFar: 320, ground: 0x6a6a73, ambient: 0x1a1a22, ambientI: 0.35 },
   } satisfies Record<Zone, ZoneCfg>,
+}
+
+export interface Mission {
+  id: string
+  title: string
+  type: 'reach' | 'mech' | 'zone' | 'capture' | 'minigame'
+  x?: number
+  z?: number
+  radius?: number
+  zone?: Zone
+  count?: number
 }
 
 export interface ZoneCfg {

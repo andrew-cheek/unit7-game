@@ -48,6 +48,12 @@ export class CameraController {
   private side = new THREE.Vector3()
   private up = new THREE.Vector3()
   private initialized = false
+  private shakeAmt = 0
+
+  /** Kick a quick camera shake (e.g. mech boot-up, heavy landing). 0..1-ish. */
+  shake(amount: number) {
+    this.shakeAmt = Math.min(1.5, this.shakeAmt + amount)
+  }
 
   constructor(cam: THREE.PerspectiveCamera, solids: THREE.Object3D[]) {
     this.cam = cam
@@ -140,6 +146,15 @@ export class CameraController {
     if (down.length > 0) {
       const minY = down[0].point.y + config.camera.minGroundClearance
       if (this.camPos.y < minY) this.camPos.y = minY
+    }
+
+    // Transient shake: decaying random jitter on the final camera position.
+    if (this.shakeAmt > 0.001) {
+      const j = this.shakeAmt
+      this.camPos.x += (Math.random() - 0.5) * j
+      this.camPos.y += (Math.random() - 0.5) * j
+      this.camPos.z += (Math.random() - 0.5) * j
+      this.shakeAmt = dt > 0 ? Math.max(0, this.shakeAmt - dt * 3) : this.shakeAmt
     }
 
     this.cam.position.copy(this.camPos)

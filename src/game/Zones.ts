@@ -43,8 +43,9 @@ export class Zones {
   constructor(scene: THREE.Scene) {
     this.scene = scene
 
-    this.earthPortals.push(this.makePortal('mars', config.palette.orange, new THREE.Vector3(-18, 0, -20)))
-    this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(18, 0, -20)))
+    // Flank the arcade row so it all reads as one Portal Plaza in front of spawn.
+    this.earthPortals.push(this.makePortal('mars', config.palette.orange, new THREE.Vector3(-24, 0, 12)))
+    this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(24, 0, 12)))
     for (const p of this.earthPortals) this.earthPortalGroup.add(p.group)
     scene.add(this.earthPortalGroup)
 
@@ -91,6 +92,12 @@ export class Zones {
     pad.position.y = 0.1
     group.add(pad)
 
+    // Floating label so the player can read the destination from a distance.
+    const label = target === 'mars' ? 'MARS PORTAL' : target === 'moon' ? 'MOON PORTAL' : 'CITY RETURN'
+    const sprite = this.labelSprite(label, color)
+    sprite.position.set(0, 6.0, 0)
+    group.add(sprite)
+
     let t = 0
     return {
       group,
@@ -104,6 +111,25 @@ export class Zones {
         discMat.opacity = 0.22 + Math.sin(t * 2) * 0.1
       },
     }
+  }
+
+  /** Neon text billboard sprite for portal labels. */
+  private labelSprite(text: string, color: number): THREE.Sprite {
+    const cv = document.createElement('canvas')
+    cv.width = 512; cv.height = 128
+    const ctx = cv.getContext('2d')!
+    ctx.clearRect(0, 0, cv.width, cv.height)
+    ctx.font = '800 64px ui-monospace, Menlo, monospace'
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.shadowColor = '#' + color.toString(16).padStart(6, '0')
+    ctx.shadowBlur = 22
+    ctx.fillStyle = '#eaf6ff'
+    ctx.fillText(text, cv.width / 2, cv.height / 2)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
+    sprite.scale.set(6.5, 1.6, 1)
+    return sprite
   }
 
   private makeTerrain(displace: (x: number, z: number) => number, color: number, rough: number): THREE.Mesh {

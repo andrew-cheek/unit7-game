@@ -91,6 +91,11 @@ export class WaterBalloons {
     this.splashes.length = 0
   }
 
+  /** Balloons currently in flight (used to cap the comedy spam). */
+  get count() {
+    return this.list.length
+  }
+
   setVisible(v: boolean) {
     this.group.visible = v
   }

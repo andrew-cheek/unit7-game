@@ -56,6 +56,14 @@ export function HUD({ hud, touch, onRestart }: { hud: HudState; touch: boolean; 
         </div>
       </div>
 
+      {/* current objective (top-center, persistent + readable) */}
+      {hud.objective && !hud.minigame && (
+        <div style={objectiveStyle}>
+          <span style={{ color: NEON.dim, marginRight: 8 }}>OBJECTIVE</span>
+          <span style={{ color: NEON.lime }}>{hud.objective}</span>
+        </div>
+      )}
+
       {/* contextual prompt */}
       {hud.prompt && (
         <div style={promptStyle}>
@@ -79,7 +87,7 @@ export function HUD({ hud, touch, onRestart }: { hud: HudState; touch: boolean; 
       {/* control hints (desktop) */}
       {!touch && (
         <div style={hints}>
-          WASD move · SHIFT sprint · SPACE/J jet · H net · G enter · F boost · T morph · O chute · ESC pause
+          WASD move · SHIFT sprint · SPACE/J jetpack · H capture/fire · G enter · F boost · T transform · O chute · ESC pause
         </div>
       )}
     </div>
@@ -200,6 +208,23 @@ const promptStyle: CSSProperties = {
   font: '700 14px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.08em',
   boxShadow: '0 0 20px rgba(39,231,255,0.25)',
+}
+const objectiveStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: 16,
+  transform: 'translateX(-50%)',
+  padding: '6px 16px',
+  maxWidth: '70vw',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(155,255,77,0.45)',
+  borderRadius: 999,
+  font: '700 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+  boxShadow: '0 0 16px rgba(155,255,77,0.2)',
 }
 const bannerStyle: CSSProperties = {
   position: 'absolute',

@@ -116,6 +116,7 @@ export class World {
   private accentLights: THREE.PointLight[] = []
   private elevatorClimbers: { mesh: THREE.Mesh; t: number; speed: number }[] = []
   private elevatorRing?: THREE.Object3D
+  private hangarBots: { mesh: THREE.Mesh; baseY: number; phase: number }[] = []
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
@@ -163,6 +164,7 @@ export class World {
     this.buildSetPieces()
     this.buildAdPanels()
     this.buildOffices()
+    this.buildMechHangar(60, 60)
     this.buildAtmosphere()
     this.buildLights()
     this.addBoundaryColliders()
@@ -695,6 +697,69 @@ export class World {
     this.elevatorRing = station
   }
 
+  /**
+   * Mech Hangar: an industrial bay framing the colossus mech so it reads as a
+   * destination ("go pilot the giant robot"). Open front faces spawn, with a
+   * warning-stripe pad, tall frame pillars + overhead gantry, neon trim and a
+   * couple of bobbing repair bots. Open-topped so the mech can lift off.
+   */
+  private buildMechHangar(cx: number, cz: number) {
+    const g = new THREE.Group()
+    g.position.set(cx, 0, cz)
+    g.rotation.y = Math.atan2(-cx, -cz) // opening faces the city/spawn
+    const W = 44, H = 56, D = 30
+    const steel = this.own(new THREE.MeshStandardMaterial({ color: 0x1a1f2c, metalness: 0.75, roughness: 0.4 }))
+    const warn = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 2.2, roughness: 0.5 }))
+    const trim = this.glow(config.palette.cyan, 2.6)
+
+    // Landing pad with a warning-stripe border.
+    const pad = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshStandardMaterial({ color: 0x12151f, metalness: 0.6, roughness: 0.6 })))
+    pad.scale.set(W, 0.4, D); pad.position.set(0, 0.2, -D / 2 + 4); pad.receiveShadow = true
+    g.add(pad)
+    for (const sx of [-1, 1]) {
+      const stripe = new THREE.Mesh(this.boxGeo, warn)
+      stripe.scale.set(2, 0.5, D); stripe.position.set(sx * (W / 2 - 1), 0.25, -D / 2 + 4)
+      g.add(stripe)
+    }
+    // Frame: two tall pillars + overhead gantry (open top so the mech flies out).
+    for (const sx of [-1, 1]) {
+      const pillar = new THREE.Mesh(this.boxGeo, steel)
+      pillar.scale.set(4, H, 4); pillar.position.set(sx * (W / 2), H / 2, -D + 4); pillar.castShadow = config.tier.buildingShadows
+      g.add(pillar)
+      this.colliders.push(new THREE.Box3(new THREE.Vector3(cx + sx * (W / 2) - 2, 0, cz - D + 2), new THREE.Vector3(cx + sx * (W / 2) + 2, H, cz - D + 6)))
+      const stripe = new THREE.Mesh(this.boxGeo, warn)
+      stripe.scale.set(4.4, 4, 0.4); stripe.position.set(sx * (W / 2), H - 6, -D + 2)
+      g.add(stripe)
+    }
+    const gantry = new THREE.Mesh(this.boxGeo, steel)
+    gantry.scale.set(W + 4, 4, 5); gantry.position.set(0, H - 2, -D + 4)
+    g.add(gantry)
+    const gantryGlow = new THREE.Mesh(this.boxGeo, trim)
+    gantryGlow.scale.set(W, 0.6, 0.6); gantryGlow.position.set(0, H - 4.2, -D + 1.6)
+    g.add(gantryGlow)
+    // Back wall (low, partial) so it reads as a bay, not a cage.
+    const back = new THREE.Mesh(this.boxGeo, steel)
+    back.scale.set(W, 16, 2); back.position.set(0, 8, -D + 3); back.castShadow = config.tier.buildingShadows
+    g.add(back)
+    this.group.add(g)
+
+    // Bobbing repair bots near the pad (world space, animated in update).
+    const botMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.4 }))
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2
+      const bx = cx + Math.cos(a) * 16
+      const bz = cz + Math.sin(a) * 16
+      const bot = new THREE.Mesh(this.boxGeo, botMat)
+      bot.scale.set(1.2, 1.2, 1.2)
+      const baseY = 3 + i
+      bot.position.set(bx, baseY, bz)
+      this.group.add(bot)
+      const eye = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 3))
+      eye.scale.set(0.5, 0.2, 0.2); eye.position.set(0, 0, 0.6); bot.add(eye)
+      this.hangarBots.push({ mesh: bot, baseY, phase: a })
+    }
+  }
+
   /** A small alien market district: canopied stalls, glow signs, crates, pods. */
   private buildMarket() {
     const ox = -80
@@ -1032,6 +1097,12 @@ export class World {
       ;(this.shafts[i].material as THREE.MeshBasicMaterial).opacity = 0.06 + Math.sin(this.time * 1.5 + i) * 0.03
     }
     for (const d of this.dishes) d.rotation.y += dt * 0.5
+
+    // Mech-hangar repair bots bob + slowly spin.
+    for (const b of this.hangarBots) {
+      b.mesh.position.y = b.baseY + Math.sin(this.time * 1.6 + b.phase) * 0.5
+      b.mesh.rotation.y += dt * 0.8
+    }
 
     // Space elevator: climbers ride the tether, the orbital ring slowly turns.
     if (this.elevatorRing) this.elevatorRing.rotation.y += dt * 0.12

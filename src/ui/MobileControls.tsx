@@ -12,16 +12,16 @@ interface BtnDef {
 
 // Clear, readable labels (was JET/SPR/G/MRPH/NET/CHUTE). The set shown is built
 // contextually each frame so the screen isn't cluttered with irrelevant actions.
-const RUN: BtnDef = { label: 'RUN', action: 'sprint', type: 'sprint', color: '#9bff4d' }
-const JET: BtnDef = { label: 'JET', action: 'jet', type: 'hold', color: '#27e7ff' }
+const RUN: BtnDef = { label: 'SPRINT', action: 'sprint', type: 'sprint', color: '#9bff4d' }
+const JET: BtnDef = { label: 'JETPACK', action: 'jet', type: 'hold', color: '#27e7ff' }
 const BOOST: BtnDef = { label: 'BOOST', action: 'boost', type: 'hold', color: '#ff8a1e' }
-const MORPH: BtnDef = { label: 'MORPH', action: 'morph', type: 'tap', color: '#8a5cff' }
+const MORPH: BtnDef = { label: 'TRANSFORM', action: 'morph', type: 'tap', color: '#8a5cff' }
 const CAPTURE: BtnDef = { label: 'CAPTURE', action: 'net', type: 'tap', color: '#9bff4d' }
 const ENTER: BtnDef = { label: 'ENTER', action: 'enter', type: 'tap', color: '#27e7ff' }
 const EXIT: BtnDef = { label: 'EXIT', action: 'enter', type: 'tap', color: '#ff2bd0' }
 const CHUTE: BtnDef = { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' }
 const FIRE: BtnDef = { label: 'FIRE', action: 'net', type: 'tap', color: '#ff8a1e' }
-const TRANSFORM: BtnDef = { label: 'MORPH', action: 'morph', type: 'tap', color: '#8a5cff' }
+const TRANSFORM: BtnDef = { label: 'TRANSFORM', action: 'morph', type: 'tap', color: '#8a5cff' }
 
 /**
  * Touch controls: a left thumb-stick for movement, a right-side drag area for

@@ -72,6 +72,11 @@ export class Game {
   private launch = { active: false, t: 0, target: 'earth' as Zone }
   private travelCooldown = 0
   private bannerTimer = 0
+  // Lightweight objective chain (config.missions). One active at a time.
+  private missionIdx = 0
+  private captureBase = 0
+  private minigamePlayed = false
+  private heroLight!: THREE.PointLight
 
   /** Net-catchable entities; populated by NPC/alien systems in later stages. */
   readonly capturables: Capturable[] = []
@@ -123,6 +128,10 @@ export class Game {
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
     this.player = new Player(this.engine.scene)
     this.player.object.position.copy(this.world.spawn)
+    // A soft "hero" fill light that follows the player so the robot reads against
+    // dark backgrounds (rim/hero lighting). Cheap: one point light.
+    this.heroLight = new THREE.PointLight(0x9fd8ff, 22, 16, 2)
+    this.engine.scene.add(this.heroLight)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
     this.missiles = new Missiles(this.engine.scene)
     const npcCount = Math.round(config.npc.count * tier.densityScale)
@@ -131,9 +140,9 @@ export class Game {
     this.zones.setActive('earth')
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
-      this.hud.banner = 'SPLASH! SOAKED'
-      this.bannerTimer = 0.9
-      vibrate([30, 40, 30])
+      this.hud.banner = 'SPLASH!'
+      this.bannerTimer = 0.45 // brief, fades fast (it's a side gag now)
+      vibrate(30)
     }
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
@@ -181,6 +190,7 @@ export class Game {
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
+      objective: config.missions[0]?.title ?? null,
       minigame: null,
     }
 
@@ -240,7 +250,7 @@ export class Game {
     this.hud.fade = 1
     this.trans = { phase: 'in', t: 0, target: this.zone }
     this.hud.banner = 'WELCOME TO UNIT 7'
-    this.bannerTimer = 2.4
+    this.bannerTimer = 1.8
   }
 
   // --- Arcade portals ------------------------------------------------------
@@ -323,6 +333,7 @@ export class Game {
 
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
+    this.minigamePlayed = true
     this.hud.minigame = kind
     this.activePortal.copy(pos)
     this.input.setLockEnabled(false)
@@ -445,6 +456,13 @@ export class Game {
     } else {
       this.player.enterVehicle()
       this.vehicles.enter(v)
+      // Mech boot-up moment: name banner + a quick camera shake.
+      if (isMech(v.kind)) {
+        this.hud.banner = `${v.name} ONLINE`
+        this.bannerTimer = 1.6
+        this.camera.shake(0.9)
+        vibrate(40)
+      }
     }
   }
 
@@ -523,6 +541,46 @@ export class Game {
     }
     this.hud.banner = 'MISSILES AWAY'
     this.bannerTimer = 0.8
+  }
+
+  /**
+   * Drive the one-active-at-a-time objective chain (config.missions). Detects
+   * completion by type, advances with a short banner, and keeps hud.objective in
+   * sync. Purely additive: ignored once the chain is finished (free roam).
+   */
+  private updateObjectives() {
+    const list = config.missions
+    if (this.missionIdx >= list.length) { this.hud.objective = null; return }
+    const m = list[this.missionIdx]
+    let done = false
+    switch (m.type) {
+      case 'reach':
+        done = this.zone === 'earth' && Math.hypot(this.player.position.x - (m.x ?? 0), this.player.position.z - (m.z ?? 0)) < (m.radius ?? 8)
+        break
+      case 'mech':
+        done = !!this.vehicles.current && isMech(this.vehicles.current.kind)
+        break
+      case 'zone':
+        done = this.zone === m.zone
+        break
+      case 'capture':
+        done = this.hud.captured - this.captureBase >= (m.count ?? 1)
+        break
+      case 'minigame':
+        done = this.minigamePlayed
+        break
+    }
+    if (done) {
+      this.missionIdx++
+      this.hud.banner = 'OBJECTIVE COMPLETE'
+      this.bannerTimer = 1.4
+      vibrate(40)
+      const nextM = list[this.missionIdx]
+      if (nextM?.type === 'capture') this.captureBase = this.hud.captured
+      this.hud.objective = nextM?.title ?? 'Free roam: explore the world!'
+    } else {
+      this.hud.objective = m.title
+    }
   }
 
   /** Apply a missile blast: capture every live target inside the radius. */
@@ -700,6 +758,10 @@ export class Game {
       this.hud.banner = 'ALIEN INVASION'
       this.bannerTimer = 2.4
     }
+
+    // Hero fill light trails the subject so the robot/mech stays readable.
+    this.heroLight.position.set(this.focus.x + 2, this.focus.y + 6, this.focus.z + 2)
+    this.updateObjectives()
 
     if (onEarth) this.npcs.update(dt, this.player.position)
     if (onEarth) this.events.update(dt, this.player.position)

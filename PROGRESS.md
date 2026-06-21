@@ -523,3 +523,20 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - **Snake.tsx**: classic snake (canvas, swipe/arrows), speeds up as it grows.
 - All three are React.lazy chunks (~6KB each), styled to match, with
   START/REPLAY/RETURN buttons and touch + keyboard controls.
+
+## Upgrade brief pass (objectives, plaza, mech hangar, camera, HUD, balance)
+
+- Objective chain (config.missions): one active goal at a time with HUD pill +
+  "OBJECTIVE COMPLETE" banners. Find Plaza -> Pilot mech -> Mars -> Moon ->
+  Capture 3 -> Arcade.
+- Portal Plaza: Mars/Moon portals moved to flank the 5 arcade portals in one row
+  in front of spawn; all now have floating neon labels.
+- Mech Hangar landmark framing the colossus (warning-stripe pad, frame pillars +
+  gantry, bobbing repair bots).
+- Mech boot-up moment: "MECH-XL ONLINE" banner + camera shake on entering.
+- Player readability: a soft hero fill light follows the subject.
+- Camera: higher GTA-style start angle.
+- HUD: objective pill, faster banner fades, mobile buttons renamed
+  (JET->JETPACK, RUN->SPRINT, MORPH->TRANSFORM).
+- Comedy balance: invasion + water-balloon spam cut hard (few invaders, ~24m
+  stand-off, 12-24s throw cooldown, max 2 balloons aloft, brief SPLASH banner).
