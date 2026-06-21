@@ -16,6 +16,7 @@ import * as THREE from 'three'
 import { config } from './config'
 import { createCitizen, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { OFFICE_ANCHORS } from './World'
+import type { Physics } from './Physics'
 import type { Zone } from './types'
 
 type RiserKind = 'panel' | 'planter' | 'fountain' | 'tree'
@@ -33,10 +34,8 @@ interface Riser {
 
 interface Walker {
   model: CharacterModel
-  from: THREE.Vector3
   to: THREE.Vector3
   t: number
-  dur: number
 }
 
 const PAD = new THREE.Vector3(26, 0, 26)
@@ -46,10 +45,12 @@ const smooth = (x: number) => { const t = clamp01(x); return t * t * (3 - 2 * t)
 
 export class DawnShow {
   private scene: THREE.Scene
+  private physics: Physics
   private groups: Record<Zone, THREE.Group>
   private risers: Record<Zone, Riser[]> = { earth: [], mars: [], moon: [] }
   private shuttle: VehicleModel
   private walkers: Walker[] = []
+  private vscratch = new THREE.Vector3()
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
 
@@ -59,8 +60,9 @@ export class DawnShow {
   private seqT = 0
   private arriveSpawned = false
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, physics: Physics) {
     this.scene = scene
+    this.physics = physics
     this.groups = { earth: new THREE.Group(), mars: new THREE.Group(), moon: new THREE.Group() }
     this.buildZone('earth')
     this.buildZone('mars')
@@ -273,8 +275,7 @@ export class DawnShow {
       model.group.position.copy(from)
       if (depart) this.attachBriefcase(model.group)
       this.groups.earth.add(model.group)
-      const dur = Math.max(2, from.distanceTo(to) / 3.2)
-      this.walkers.push({ model, from, to, t: 0, dur })
+      this.walkers.push({ model, to, t: 0 })
     }
   }
 
@@ -286,20 +287,30 @@ export class DawnShow {
   }
 
   private updateWalkers(dt: number) {
+    const speed = 3.4
     for (let i = this.walkers.length - 1; i >= 0; i--) {
       const w = this.walkers[i]
       w.t += dt
-      const k = Math.min(1, w.t / w.dur)
-      w.model.group.position.lerpVectors(w.from, w.to, k)
-      const dx = w.to.x - w.from.x
-      const dz = w.to.z - w.from.z
-      if (dx * dx + dz * dz > 1e-4) w.model.group.rotation.y = Math.atan2(dx, dz)
-      w.model.update(dt, 0.8, true)
-      if (k >= 1) {
+      const p = w.model.group.position
+      const dx = w.to.x - p.x
+      const dz = w.to.z - p.z
+      const d = Math.hypot(dx, dz)
+      // Arrived (entered the office / boarded), or stuck too long: remove.
+      if (d < 1.1 || w.t > 11) {
         this.groups.earth.remove(w.model.group)
         w.model.dispose()
         this.walkers.splice(i, 1)
+        continue
       }
+      const vx = (dx / d) * speed
+      const vz = (dz / d) * speed
+      p.x += vx * dt
+      p.z += vz * dt
+      // Walk around buildings instead of through them.
+      this.vscratch.set(vx, 0, vz)
+      this.physics.resolveHorizontal(p, this.vscratch, 0.4, 1.6)
+      w.model.group.rotation.y = Math.atan2(dx, dz)
+      w.model.update(dt, 0.8, true)
     }
   }
 

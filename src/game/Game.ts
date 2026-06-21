@@ -212,7 +212,7 @@ export class Game {
     // Interactive toys: trampoline bounce pads (all zones) + a city dance floor.
     this.playground = new Playground(this.engine.scene)
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
-    this.dawnShow = new DawnShow(this.engine.scene)
+    this.dawnShow = new DawnShow(this.engine.scene, this.physics)
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
