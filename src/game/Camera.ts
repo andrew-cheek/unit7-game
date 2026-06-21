@@ -110,8 +110,12 @@ export class CameraController {
       dampVec3(this.currentTarget, this.desiredTarget, config.camera.followLambda, dt)
     }
 
-    // Desired distance, extended a bit at speed.
+    // Desired distance, extended a bit at speed. minDistance is the *manual*
+    // zoom floor and is applied to the desired distance only - a collision hit
+    // below is allowed to tuck the camera closer than this so it never sits
+    // inside a wall.
     let want = config.camera.distance * distanceScale * (1 + (config.camera.speedPullback - 1) * speed01)
+    want = Math.max(config.camera.minDistance, want)
 
     // --- collision: center + 4 offset probes, take the nearest blocker ---
     this.side.set(Math.cos(yaw), 0, -Math.sin(yaw)) // camera-right on the ground
@@ -132,7 +136,10 @@ export class CameraController {
         if (d < nearest) nearest = d
       }
     }
-    want = Math.max(config.camera.minDistance, nearest)
+    // A wall can pull the camera closer than minDistance; only a small hard floor
+    // keeps it off the subject. Clamping back up to minDistance here is what used
+    // to shove the camera through the wall and black out the screen.
+    want = Math.max(config.camera.collisionMinDistance, nearest)
 
     // Snap in toward walls immediately, ease back out when clear.
     this.dist = want < this.dist ? want : damp(this.dist, want, config.camera.returnLambda, dt)

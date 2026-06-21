@@ -111,6 +111,10 @@ export const config = {
     fov: 62,
     distance: 8.5, // close enough that the robot reads big, not tiny
     minDistance: 2.2,
+    // Hard floor the wall-collision pull-in may reach (well below minDistance).
+    // Kept just above the camera near plane so a tucked-in camera still renders
+    // the world instead of clipping to black against a wall.
+    collisionMinDistance: 0.7,
     height: 3.0,
     targetHeight: 1.7,
     // Behind-and-slightly-above chase angle that shows the horizon/city ahead

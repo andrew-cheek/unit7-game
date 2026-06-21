@@ -327,7 +327,7 @@ export class Game {
     ring2.position.y = 7
     g.add(ring2)
     // Tall sky beam, visible from across the map.
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.6, 3.4, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.6, 3.4, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.2, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     beam.position.y = 110
     // Explicit renderOrder so this tall additive column always sorts after the
     // city and in a stable slot, instead of swapping order with other
@@ -335,7 +335,7 @@ export class Game {
     beam.renderOrder = 4
     g.add(beam)
     // Neon ground ring marking the plaza floor.
-    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.36, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     decal.rotation.x = -Math.PI / 2
     decal.position.y = 0.15
     g.add(decal)
@@ -352,20 +352,22 @@ export class Game {
     const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
     const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.arcadeGeos.push(geo); return geo }
 
-    const pad = new THREE.Mesh(ownG(new THREE.CylinderGeometry(3.4, 3.8, 0.2, 32)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 2.8, roughness: 0.4 })))
+    const pad = new THREE.Mesh(ownG(new THREE.CylinderGeometry(3.4, 3.8, 0.2, 32)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 1.8, roughness: 0.4 })))
     pad.position.y = 0.1
     g.add(pad)
 
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(3.0, 0.28, 16, 48)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 3.4, roughness: 0.4 })))
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(3.0, 0.28, 16, 48)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 2.0, roughness: 0.4 })))
     ring.position.y = 3.1
     g.add(ring)
 
-    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(2.85, 48)), own(new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })))
+    // Portal face: single translucent disc (was blowing out to a white sphere
+    // through bloom when stacked over the bright emissive ring/pad).
+    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(2.85, 48)), own(new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.32, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })))
     disc.position.y = 3.1
     disc.renderOrder = 3
     g.add(disc)
 
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.2, 2.2, 90, 18, 1, true)), own(new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.2, 2.2, 90, 18, 1, true)), own(new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     beam.position.y = 45
     // Stable sort slot for the additive column (see plaza beam note).
     beam.renderOrder = 4
@@ -1004,8 +1006,8 @@ export class Game {
       p.group.visible = onEarth
       if (!onEarth) continue
       p.disc.rotation.z += dt * 1.6
-      ;(p.disc.material as THREE.MeshBasicMaterial).opacity = 0.4 + Math.sin(_elapsed * 3) * 0.15
-      ;(p.beam.material as THREE.MeshBasicMaterial).opacity = 0.32 + Math.sin(_elapsed * 2) * 0.08
+      ;(p.disc.material as THREE.MeshBasicMaterial).opacity = 0.26 + Math.sin(_elapsed * 3) * 0.1
+      ;(p.beam.material as THREE.MeshBasicMaterial).opacity = 0.22 + Math.sin(_elapsed * 2) * 0.06
     }
     // Plaza hero hub: spin the rings, pulse the sky beam.
     if (this.plazaHub) {
@@ -1013,7 +1015,7 @@ export class Game {
       if (onEarth) {
         this.plazaHub.ring.rotation.z += dt * 0.5
         this.plazaHub.ring2.rotation.z -= dt * 0.8
-        this.plazaHub.beamMat.opacity = 0.24 + Math.sin(_elapsed * 1.5) * 0.08
+        this.plazaHub.beamMat.opacity = 0.17 + Math.sin(_elapsed * 1.5) * 0.05
       }
     }
 

@@ -92,7 +92,7 @@ export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; to
 
       {/* click-to-look hint (desktop, pointer not yet captured) */}
       {!touch && !hud.lookLocked && !hud.paused && !hud.intro && (
-        <div style={clickHint}>CLICK TO CAPTURE MOUSE · LOOK WITH MOUSE</div>
+        <div style={clickHint}>CLICK TO CAPTURE MOUSE · OR DRAG TO LOOK</div>
       )}
 
       {/* control hints (desktop) */}

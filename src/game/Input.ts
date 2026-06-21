@@ -47,6 +47,12 @@ export class Input {
   private usingVirtualMove = false
   private lockEnabled = true
   private lastLookMs = -1e9
+  // Drag-look fallback: when pointer lock is unavailable (sandboxed iframe /
+  // embedded contexts, where requestPointerLock is rejected) the player can
+  // still look by holding the mouse button and dragging on the canvas.
+  private dragging = false
+  private dragLastX = 0
+  private dragLastY = 0
 
   constructor(dom: HTMLElement) {
     this.dom = dom
@@ -60,6 +66,8 @@ export class Input {
     window.addEventListener('blur', this.onBlur)
     window.addEventListener('mousemove', this.onMouseMove)
     dom.addEventListener('pointerdown', this.onPointerDown)
+    window.addEventListener('pointerup', this.onPointerUp)
+    window.addEventListener('pointercancel', this.onPointerUp)
   }
 
   // ---- lifecycle ----------------------------------------------------------
@@ -86,9 +94,17 @@ export class Input {
     this.locked = false
     this.onUnlock?.()
   }
-  private onPointerDown = () => {
-    // Click on the canvas captures the mouse for look (desktop).
-    if (!('ontouchstart' in window)) this.requestLock()
+  private onPointerDown = (e: PointerEvent) => {
+    if ('ontouchstart' in window) return // touch devices use MobileControls
+    // Click on the canvas captures the mouse for look (desktop). If pointer lock
+    // is rejected (iframe/embed), the drag below still drives look while held.
+    this.requestLock()
+    this.dragging = true
+    this.dragLastX = e.clientX
+    this.dragLastY = e.clientY
+  }
+  private onPointerUp = () => {
+    this.dragging = false
   }
 
   // ---- keyboard -----------------------------------------------------------
@@ -151,9 +167,18 @@ export class Input {
   }
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.locked) return
-    this.lookDX += e.movementX
-    this.lookDY += e.movementY
+    if (this.locked) {
+      this.lookDX += e.movementX
+      this.lookDY += e.movementY
+      return
+    }
+    // Pointer lock unavailable: drag-look from raw client deltas while held.
+    if (this.dragging) {
+      this.lookDX += e.clientX - this.dragLastX
+      this.lookDY += e.clientY - this.dragLastY
+      this.dragLastX = e.clientX
+      this.dragLastY = e.clientY
+    }
   }
 
   // ---- virtual (touch) ----------------------------------------------------
@@ -240,5 +265,7 @@ export class Input {
     window.removeEventListener('blur', this.onBlur)
     window.removeEventListener('mousemove', this.onMouseMove)
     this.dom.removeEventListener('pointerdown', this.onPointerDown)
+    window.removeEventListener('pointerup', this.onPointerUp)
+    window.removeEventListener('pointercancel', this.onPointerUp)
   }
 }

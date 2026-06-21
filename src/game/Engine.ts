@@ -181,6 +181,15 @@ export class Engine {
 
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(container)
+
+    // Debug handle for inspecting live render stats from the console:
+    //   __UNIT7__.fps                 smoothed render FPS
+    //   __UNIT7__.renderer.info       draw calls / triangles / memory
+    //   __UNIT7__.renderScale         current adaptive-resolution scale
+    // Read-only; cleared on dispose. No effect on gameplay.
+    if (typeof window !== 'undefined') {
+      ;(window as unknown as { __UNIT7__?: unknown }).__UNIT7__ = this
+    }
   }
 
   /** Drive the DoF focus distance from gameplay (e.g. distance to the player). */
@@ -316,5 +325,10 @@ export class Engine {
     this.renderer.forceContextLoss()
     const el = this.renderer.domElement
     if (el.parentNode) el.parentNode.removeChild(el)
+
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __UNIT7__?: unknown }
+      if (w.__UNIT7__ === this) delete w.__UNIT7__
+    }
   }
 }
