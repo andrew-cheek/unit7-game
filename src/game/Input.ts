@@ -108,7 +108,18 @@ export class Input {
   }
 
   // ---- keyboard -----------------------------------------------------------
+  // True when the event is going to a text field (e.g. the multiplayer username
+  // box). We must NOT preventDefault or capture game keys then, or letters like
+  // W/A/S/D/F/G and Space never reach the input.
+  private isEditableTarget(e: KeyboardEvent): boolean {
+    const t = e.target as HTMLElement | null
+    if (!t) return false
+    const tag = t.tagName
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable
+  }
+
   private onKeyDown = (e: KeyboardEvent) => {
+    if (this.isEditableTarget(e)) return
     if (GAME_CODES.has(e.code)) e.preventDefault()
     if (e.repeat) return
     this.keys.add(e.code)
@@ -144,6 +155,7 @@ export class Input {
   }
 
   private onKeyUp = (e: KeyboardEvent) => {
+    if (this.isEditableTarget(e)) return
     if (GAME_CODES.has(e.code)) e.preventDefault()
     this.keys.delete(e.code)
     switch (e.code) {
