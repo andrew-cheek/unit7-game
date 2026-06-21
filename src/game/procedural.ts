@@ -953,6 +953,44 @@ export function createSpaceship(): VehicleModel {
   ring.rotation.x = Math.PI / 2
   ring.position.y = -0.55
   group.add(ring)
+  // A second, counter-spinning magenta accent ring tighter to the hull.
+  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.08, 10, 36), glowMat(mats, 0xff2bd0, 3))
+  ring2.rotation.x = Math.PI / 2
+  ring2.position.y = -0.35
+  group.add(ring2)
+
+  // Radial hull panel seams on the upper dome cone.
+  const seam = new THREE.MeshStandardMaterial({ color: 0x141a26, metalness: 0.8, roughness: 0.4 })
+  mats.push(seam)
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2
+    const p = box(0.08, 0.12, 1.4, seam)
+    p.position.set(Math.cos(a) * 1.4, 0.18, Math.sin(a) * 1.4)
+    p.rotation.y = -a
+    group.add(p)
+  }
+  // Sensor mast + nubs on top.
+  const mast = box(0.08, 0.7, 0.08, seam)
+  mast.position.set(0.7, 0.5, 0.4)
+  group.add(mast)
+  const mastTip = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), glowMat(mats, 0xff2bd0, 3))
+  mastTip.position.set(0.7, 0.9, 0.4)
+  group.add(mastTip)
+
+  // Underside hover-thrusters: four nozzles with downward glow cones (pulse).
+  const pulseMats: THREE.MeshStandardMaterial[] = []
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4
+    const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.42, 0.5, 12), hull)
+    noz.position.set(Math.cos(a) * 1.5, -0.85, Math.sin(a) * 1.5)
+    group.add(noz)
+    const jm = glowMat(mats, 0x9fe8ff, 2)
+    pulseMats.push(jm as THREE.MeshStandardMaterial)
+    const jet = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.4, 12, 1, true), jm)
+    jet.rotation.x = Math.PI
+    jet.position.set(Math.cos(a) * 1.5, -1.7, Math.sin(a) * 1.5)
+    group.add(jet)
+  }
 
   const lights: THREE.Mesh[] = []
   const lightMat = glowMat(mats, 0x9bff4d, 4)
@@ -972,6 +1010,9 @@ export function createSpaceship(): VehicleModel {
     update: (dt) => {
       t += dt
       ring.rotation.z += dt * 1.4
+      ring2.rotation.z -= dt * 2.0
+      const e = 1.4 + Math.sin(t * 7) * 0.7
+      for (const m of pulseMats) m.emissiveIntensity = e
       lights.forEach((l, i) => (l.visible = Math.sin(t * 5 + i * 0.7) > -0.2))
     },
     dispose: () => disposeGroup(group, mats),
