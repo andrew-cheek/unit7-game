@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createAlien, createDrone, createHovercar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
+import { createAlien, createBus, createCitizen, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { dampAngle, randRange } from './utils'
+import { OFFICE_ANCHORS } from './World'
+import { WaterBalloons } from './WaterBalloons'
 import type { Physics } from './Physics'
 import type { Capturable } from './Game'
 import type { PowerupKind } from './types'
@@ -22,6 +24,17 @@ interface Alien {
   model: CharacterModel
   alive: boolean
   cap: Capturable
+  boarding: boolean // walking back to a departing ship to "board" and vanish
+  invader: boolean // part of the sunrise invasion: chases + lobs water balloons
+  throwTimer: number
+}
+interface Dropship {
+  model: VehicleModel
+  pos: THREE.Vector3
+  groundY: number
+  state: 'descend' | 'hover' | 'leave'
+  timer: number
+  dropped: boolean
 }
 interface Drone {
   model: VehicleModel
@@ -37,10 +50,41 @@ interface Traffic {
   dir: THREE.Vector3
   speed: number
 }
+interface Police {
+  model: VehicleModel
+  pos: THREE.Vector3
+  yaw: number
+  waypoints: THREE.Vector3[]
+  wp: number
+  speed: number
+}
+interface BusWaypoint {
+  p: THREE.Vector3
+  stopIdx: number // office anchor index if this is a bus stop, else -1
+}
+interface Bus {
+  model: VehicleModel
+  pos: THREE.Vector3
+  yaw: number
+  wp: number
+  speed: number
+  state: 'driving' | 'boarding'
+  timer: number
+}
+interface Commuter {
+  pos: THREE.Vector3
+  vel: THREE.Vector3
+  yaw: number
+  target: THREE.Vector3
+  model: CharacterModel
+  fade: number // 1 -> 0 as they "enter" the building
+  arriving: boolean
+}
 
 const POWERUP_COLOR: Record<PowerupKind, number> = { speed: 0x27e7ff, shield: 0x8a5cff, fuel: 0x9bff4d, score: 0xff8a1e }
 const POWERUP_KINDS: PowerupKind[] = ['speed', 'shield', 'fuel', 'score']
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
+const ACTOR_CULL2 = 150 * 150 // squared distance beyond which ambient actors are culled
 
 /**
  * Ambient + scripted city life (Earth only): collectible powerups, a periodic
@@ -59,7 +103,19 @@ export class Events {
   private aliens: Alien[] = []
   private drones: Drone[] = []
   private traffic: Traffic[] = []
+  private police: Police[] = []
+  private buses: Bus[] = []
+  private commuters: Commuter[] = []
+  private busRoute: BusWaypoint[] = []
   private ownedMats: THREE.Material[] = []
+
+  // Sunrise alien invasion.
+  private balloons: WaterBalloons
+  private invasionActive = false
+  private dropships: Dropship[] = []
+  private playerPos = new THREE.Vector3()
+  /** Fired when a water balloon bursts on the player. Game shows a banner. */
+  onSoak: (() => void) | null = null
 
   private shipModel: VehicleModel
   private ship = {
@@ -76,11 +132,14 @@ export class Events {
     this.capturables = capturables
     this.onPowerup = onPowerup
     scene.add(this.root)
+    this.balloons = new WaterBalloons(scene)
 
-    const q = config.quality === 'high' ? 1 : 0.5
+    const q = config.tier.densityScale
     for (let i = 0; i < config.events.powerupCount; i++) this.spawnPowerup(POWERUP_KINDS[i % 4])
     for (let i = 0; i < Math.round(config.events.droneCount * q); i++) this.spawnDrone(i)
     for (let i = 0; i < Math.round(config.events.trafficCount * q); i++) this.spawnTraffic(i)
+    this.spawnPolice()
+    this.spawnBuses()
 
     this.shipModel = createSpaceship()
     this.shipModel.group.visible = false
@@ -90,6 +149,7 @@ export class Events {
 
   setVisible(v: boolean) {
     this.root.visible = v
+    this.balloons.setVisible(v)
   }
 
   // --- spawn helpers -------------------------------------------------------
@@ -159,15 +219,261 @@ export class Events {
     this.traffic.push({ model, pos, dir, speed: randRange(14, 26) })
   }
 
+  /**
+   * A single police cruiser that loops a rectangular beat through the streets
+   * near spawn (so it's visible right after the intro) with its siren strobing.
+   * Not a chase - just ambient patrol life.
+   */
+  private spawnPolice() {
+    const n = Math.max(1, Math.round(config.city.police * config.tier.densityScale))
+    for (let i = 0; i < n; i++) {
+      const model = createPoliceCar()
+      this.root.add(model.group)
+      // Each cruiser patrols its own concentric rectangular beat and starts on a
+      // different corner, so several are visible around the plaza at once.
+      const r = 30 + i * 18
+      const waypoints = [
+        new THREE.Vector3(r, 0, r),
+        new THREE.Vector3(r, 0, -r),
+        new THREE.Vector3(-r, 0, -r),
+        new THREE.Vector3(-r, 0, r),
+      ]
+      const start = i % waypoints.length
+      const pos = waypoints[start].clone()
+      pos.y = (this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0) + 1.0
+      model.group.position.copy(pos)
+      this.police.push({ model, pos, yaw: 0, waypoints, wp: (start + 1) % waypoints.length, speed: 15 + i * 2 })
+    }
+  }
+
+  /**
+   * Commuter buses that loop the avenues, pause at the office stops and let out
+   * pedestrians who walk into the buildings for work. The route is a rectangle
+   * around the plaza with the three office stops inserted on its edges.
+   */
+  private spawnBuses() {
+    const mk = (x: number, z: number, stopIdx: number): BusWaypoint => ({ p: new THREE.Vector3(x, 0, z), stopIdx })
+    this.busRoute = [
+      mk(38, 38, -1),
+      mk(OFFICE_ANCHORS[1].stop.x, OFFICE_ANCHORS[1].stop.z, 1),
+      mk(-38, 38, -1),
+      mk(OFFICE_ANCHORS[2].stop.x, OFFICE_ANCHORS[2].stop.z, 2),
+      mk(-38, -38, -1),
+      mk(38, -38, -1),
+      mk(OFFICE_ANCHORS[0].stop.x, OFFICE_ANCHORS[0].stop.z, 0),
+    ]
+    const n = config.tier.name === 'high' ? 2 : 1
+    for (let i = 0; i < n; i++) {
+      const model = createBus()
+      this.root.add(model.group)
+      // Stagger the buses around the loop so they don't overlap.
+      const wp = Math.floor((i / n) * this.busRoute.length)
+      const start = this.busRoute[wp].p
+      const pos = new THREE.Vector3(start.x, 0, start.z)
+      pos.y = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
+      model.group.position.copy(pos)
+      this.buses.push({ model, pos, yaw: 0, wp: (wp + 1) % this.busRoute.length, speed: 12, state: 'driving', timer: 0 })
+    }
+  }
+
+  private spawnCommuter(at: THREE.Vector3, door: THREE.Vector3) {
+    // Mix of citizens and a few robot workers heading in for the shift.
+    const model = createCitizen()
+    const pos = new THREE.Vector3(at.x + randRange(-1.5, 1.5), 0, at.z + randRange(-1.5, 1.5))
+    pos.y = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
+    model.group.position.copy(pos)
+    this.root.add(model.group)
+    this.commuters.push({
+      pos,
+      vel: new THREE.Vector3(),
+      yaw: 0,
+      target: new THREE.Vector3(door.x + randRange(-1, 1), 0, door.z),
+      model,
+      fade: 1,
+      arriving: false,
+    })
+  }
+
   // --- per-frame -----------------------------------------------------------
 
   update(dt: number, playerPos: THREE.Vector3) {
     this.t += dt
+    this.playerPos.copy(playerPos)
     this.updatePowerups(dt, playerPos)
     this.updateDrones(dt)
     this.updateTraffic(dt)
+    this.updatePolice(dt)
+    this.updateBuses(dt)
+    this.updateCommuters(dt)
     this.updateShip(dt)
+    this.updateInvasion(dt)
     this.updateAliens(dt)
+    // Step + resolve water balloons; soak the player on a near hit.
+    this.balloons.update(
+      dt,
+      (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0,
+      (pos) => { if (Math.hypot(pos.x - this.playerPos.x, pos.z - this.playerPos.z) < 3.5) this.onSoak?.() },
+    )
+  }
+
+  /**
+   * Kick off the sunrise invasion: a wave of dropships descends around the
+   * player, each disgorging "invader" aliens that chase you and lob water
+   * balloons. Safe to call repeatedly - it only triggers once.
+   */
+  startInvasion(playerPos: THREE.Vector3) {
+    if (this.invasionActive) return
+    this.invasionActive = true
+    // Kept deliberately small: the invasion is a flavour beat, not constant spam.
+    const n = config.tier.name === 'high' ? 2 : 1
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + 0.4
+      const r = 30 + Math.random() * 16
+      const x = playerPos.x + Math.cos(a) * r
+      const z = playerPos.z + Math.sin(a) * r
+      const model = createSpaceship()
+      model.group.scale.setScalar(1.5)
+      const groundY = this.physics.sampleGround(x, z, 80)?.y ?? 0
+      const pos = new THREE.Vector3(x, groundY + 110, z)
+      model.group.position.copy(pos)
+      this.root.add(model.group)
+      this.dropships.push({ model, pos, groundY, state: 'descend', timer: 0, dropped: false })
+    }
+  }
+
+  private updateInvasion(dt: number) {
+    for (let i = this.dropships.length - 1; i >= 0; i--) {
+      const s = this.dropships[i]
+      s.model.update(dt, 0)
+      s.model.group.rotation.y += dt * 0.5
+      if (s.state === 'descend') {
+        s.pos.y = approach(s.pos.y, s.groundY + 6, 40 * dt)
+        if (s.pos.y <= s.groundY + 6.5 && !s.dropped) {
+          s.dropped = true
+          s.state = 'hover'
+          s.timer = 6
+          const k = config.tier.name === 'high' ? 2 : 1
+          for (let j = 0; j < k; j++) {
+            const a = (j / k) * Math.PI * 2
+            this.spawnAlien(s.pos.x + Math.cos(a) * 4, s.pos.z + Math.sin(a) * 4, true)
+          }
+        }
+      } else if (s.state === 'hover') {
+        s.timer -= dt
+        if (s.timer <= 0) s.state = 'leave'
+      } else {
+        s.pos.y += (12 + (s.pos.y - s.groundY)) * dt
+        if (s.pos.y > s.groundY + 120) {
+          this.root.remove(s.model.group)
+          s.model.dispose()
+          this.dropships.splice(i, 1)
+        }
+      }
+      s.model.group.position.copy(s.pos)
+    }
+  }
+
+  private updateBuses(dt: number) {
+    for (const b of this.buses) {
+      b.model.update(dt, 1)
+      if (b.state === 'boarding') {
+        b.timer -= dt
+        if (b.timer <= 0) {
+          b.wp = (b.wp + 1) % this.busRoute.length
+          b.state = 'driving'
+        }
+      } else {
+        const tgt = this.busRoute[b.wp]
+        const dx = tgt.p.x - b.pos.x
+        const dz = tgt.p.z - b.pos.z
+        const d = Math.hypot(dx, dz)
+        if (d < 2.5) {
+          if (tgt.stopIdx >= 0 && this.commuters.length < 14) {
+            // Pull up and let commuters out toward the office door.
+            b.state = 'boarding'
+            b.timer = 3.5
+            const door = OFFICE_ANCHORS[tgt.stopIdx].door
+            const count = 2 + Math.floor(Math.random() * 2)
+            for (let k = 0; k < count; k++) this.spawnCommuter(b.pos, door)
+          } else {
+            b.wp = (b.wp + 1) % this.busRoute.length
+          }
+        } else {
+          b.pos.x += (dx / d) * b.speed * dt
+          b.pos.z += (dz / d) * b.speed * dt
+          b.yaw = dampAngle(b.yaw, Math.atan2(dx, dz), 5, dt)
+        }
+      }
+      const gy = this.physics.sampleGround(b.pos.x, b.pos.z, b.pos.y + 6)?.y ?? 0
+      b.pos.y = gy
+      b.model.group.position.copy(b.pos)
+      b.model.group.rotation.y = b.yaw
+    }
+  }
+
+  private updateCommuters(dt: number) {
+    const speed = config.npc.walkSpeed
+    for (let i = this.commuters.length - 1; i >= 0; i--) {
+      const c = this.commuters[i]
+      if (c.arriving) {
+        // Reached the door: shrink + fade as they step inside, then remove.
+        c.fade -= dt * 1.5
+        const s = Math.max(0.001, c.fade)
+        c.model.group.scale.setScalar(s)
+        if (c.fade <= 0) {
+          this.root.remove(c.model.group)
+          c.model.dispose()
+          this.commuters.splice(i, 1)
+        } else {
+          c.model.update(dt, 0.5, true)
+        }
+        continue
+      }
+      const tx = c.target.x - c.pos.x
+      const tz = c.target.z - c.pos.z
+      const td = Math.hypot(tx, tz)
+      if (td < 1.2) {
+        c.arriving = true
+        continue
+      }
+      c.vel.x = approach(c.vel.x, (tx / td) * speed, 8 * dt)
+      c.vel.z = approach(c.vel.z, (tz / td) * speed, 8 * dt)
+      c.pos.x += c.vel.x * dt
+      c.pos.z += c.vel.z * dt
+      this.physics.resolveHorizontal(c.pos, c.vel, 0.4, 1.6)
+      const g = this.physics.sampleGround(c.pos.x, c.pos.z, c.pos.y + 2)
+      if (g) c.pos.y = g.y
+      const sp = Math.hypot(c.vel.x, c.vel.z)
+      if (sp > 0.1) {
+        c.yaw = dampAngle(c.yaw, Math.atan2(c.vel.x, c.vel.z), 8, dt)
+        c.model.group.rotation.y = c.yaw
+      }
+      c.model.group.position.copy(c.pos)
+      const farC = this.farFromPlayer(c.pos.x, c.pos.z)
+      c.model.group.visible = !farC
+      if (!farC) c.model.update(dt, sp / speed, true)
+    }
+  }
+
+  private updatePolice(dt: number) {
+    for (const p of this.police) {
+      p.model.update(dt, 1) // strobes the light bar
+      const tgt = p.waypoints[p.wp]
+      const dx = tgt.x - p.pos.x
+      const dz = tgt.z - p.pos.z
+      const d = Math.hypot(dx, dz)
+      if (d < 2) {
+        p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
+      } else {
+        p.pos.x += (dx / d) * p.speed * dt
+        p.pos.z += (dz / d) * p.speed * dt
+        p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
+      }
+      const gy = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? 0
+      p.pos.y = gy + 1.0
+      p.model.group.position.copy(p.pos)
+      p.model.group.rotation.y = p.yaw
+    }
   }
 
   private updatePowerups(dt: number, playerPos: THREE.Vector3) {
@@ -198,16 +504,23 @@ export class Events {
     }
   }
 
+  /** Squared distance test for distance-culling ambient actors (mobile perf). */
+  private farFromPlayer(x: number, z: number) {
+    const dx = x - this.playerPos.x
+    const dz = z - this.playerPos.z
+    return dx * dx + dz * dz > ACTOR_CULL2
+  }
+
   private updateDrones(dt: number) {
     for (const d of this.drones) {
       d.angle += d.speed * dt
-      d.model.group.position.set(
-        d.center.x + Math.cos(d.angle) * d.radius,
-        d.height + Math.sin(this.t * 1.5 + d.center.x) * 0.6,
-        d.center.z + Math.sin(d.angle) * d.radius,
-      )
+      const x = d.center.x + Math.cos(d.angle) * d.radius
+      const z = d.center.z + Math.sin(d.angle) * d.radius
+      d.model.group.position.set(x, d.height + Math.sin(this.t * 1.5 + d.center.x) * 0.6, z)
       d.model.group.rotation.y = -d.angle
-      d.model.update(dt, 0)
+      const far = this.farFromPlayer(x, z)
+      d.model.group.visible = !far
+      if (!far) d.model.update(dt, 0)
     }
   }
 
@@ -221,7 +534,9 @@ export class Events {
       if (c.pos.z < -lim) c.pos.z = lim
       c.model.group.position.copy(c.pos)
       c.model.group.rotation.y = Math.atan2(c.dir.x, c.dir.z)
-      c.model.update(dt, 1)
+      const far = this.farFromPlayer(c.pos.x, c.pos.z)
+      c.model.group.visible = !far
+      if (!far) c.model.update(dt, 1)
     }
   }
 
@@ -254,7 +569,16 @@ export class Events {
     } else if (s.phase === 'landed') {
       g.rotation.y += dt * 0.3
       s.timer -= dt
-      if (s.timer <= 0) s.phase = 'leaving'
+      if (s.timer <= 0) {
+        s.phase = 'leaving'
+        // Call nearby aliens back to board the departing ship.
+        for (const a of this.aliens) {
+          if (a.alive && Math.hypot(a.pos.x - s.pos.x, a.pos.z - s.pos.z) < 16) {
+            a.boarding = true
+            a.target.set(s.pos.x, 0, s.pos.z)
+          }
+        }
+      }
     } else if (s.phase === 'leaving') {
       s.pos.y += (10 + (s.pos.y - s.groundY)) * dt
       g.position.copy(s.pos)
@@ -273,8 +597,8 @@ export class Events {
     return n
   }
 
-  private spawnAlien(x: number, z: number) {
-    const model = createAlien()
+  private spawnAlien(x: number, z: number, invader = false) {
+    const model = invader ? createAlien({ color: 0x6a3bd0, eye: 0xff4d4d }) : createAlien()
     const pos = new THREE.Vector3(x, this.physics.sampleGround(x, z, 40)?.y ?? 0, z)
     model.group.position.copy(pos)
     this.root.add(model.group)
@@ -282,16 +606,19 @@ export class Events {
       pos,
       vel: new THREE.Vector3(),
       yaw: 0,
-      target: this.clearPoint(70),
+      target: invader ? this.playerPos.clone() : this.clearPoint(70),
       model,
       alive: true,
+      boarding: false,
+      invader,
+      throwTimer: randRange(6, 14),
       cap: {
         position: pos,
         alive: true,
         capture: () => {
           alien.alive = false
           alien.cap.alive = false
-          return 120
+          return invader ? 200 : 120
         },
       },
     }
@@ -312,12 +639,44 @@ export class Events {
         this.aliens.splice(i, 1)
         continue
       }
+      // Invaders keep a wide stand-off and only lob a balloon occasionally - the
+      // splash gag is now a rare side beat, not constant spam. Hard caps: never
+      // within ~22m, long random cooldown, and at most 2 balloons in the air.
+      if (a.invader && !a.boarding) {
+        const pdx = this.playerPos.x - a.pos.x
+        const pdz = this.playerPos.z - a.pos.z
+        const pd = Math.hypot(pdx, pdz)
+        const standoff = 24
+        a.target.set(
+          this.playerPos.x - (pd > 0.01 ? pdx / pd : 0) * standoff,
+          0,
+          this.playerPos.z - (pd > 0.01 ? pdz / pd : 0) * standoff,
+        )
+        a.throwTimer -= dt
+        if (a.throwTimer <= 0 && pd > 22 && pd < 60 && this.balloons.count < 2) {
+          a.throwTimer = randRange(12, 24)
+          const origin = new THREE.Vector3(a.pos.x, a.pos.y + 1.6, a.pos.z)
+          const target = new THREE.Vector3(this.playerPos.x, this.playerPos.y + 0.5, this.playerPos.z)
+          this.balloons.throw(origin, target, 1.4)
+        }
+      }
       const tx = a.target.x - a.pos.x
       const tz = a.target.z - a.pos.z
       const td = Math.hypot(tx, tz)
-      if (td < 3) a.target = this.clearPoint(70)
-      a.vel.x = approach(a.vel.x, td > 0.01 ? (tx / td) * speed : 0, 8 * dt)
-      a.vel.z = approach(a.vel.z, td > 0.01 ? (tz / td) * speed : 0, 8 * dt)
+      if (a.boarding) {
+        // Reached the ship: vanish (boarded). Cleaned up next frame by the
+        // dead-alien handling at the top of the loop.
+        if (td < 2.5) {
+          a.alive = false
+          a.cap.alive = false
+          continue
+        }
+      } else if (td < 3 && !a.invader) {
+        a.target = this.clearPoint(70)
+      }
+      const mv = a.boarding ? speed * 1.6 : a.invader ? speed * 1.5 : speed // invaders hustle
+      a.vel.x = approach(a.vel.x, td > 0.5 ? (tx / td) * mv : 0, 8 * dt)
+      a.vel.z = approach(a.vel.z, td > 0.5 ? (tz / td) * mv : 0, 8 * dt)
       a.pos.x += a.vel.x * dt
       a.pos.z += a.vel.z * dt
       this.physics.resolveHorizontal(a.pos, a.vel, 0.4, 1.6)
@@ -338,12 +697,22 @@ export class Events {
     for (const a of this.aliens) if (a.alive) fn(a.pos.x, a.pos.z)
   }
 
+  /** Visit each patrolling police cruiser's position (for the radar). */
+  forEachPolice(fn: (x: number, z: number) => void) {
+    for (const p of this.police) fn(p.pos.x, p.pos.z)
+  }
+
   dispose() {
     this.shipModel.dispose()
     for (const p of this.powerups) p.group.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
     for (const d of this.drones) d.model.dispose()
     for (const c of this.traffic) c.model.dispose()
+    for (const p of this.police) p.model.dispose()
+    for (const b of this.buses) b.model.dispose()
+    for (const c of this.commuters) c.model.dispose()
     for (const a of this.aliens) a.model.dispose()
+    for (const s of this.dropships) s.model.dispose()
+    this.balloons.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }
 }

@@ -1,11 +1,12 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createHovercar, createSpaceship, createRocket, type VehicleModel } from './procedural'
+import { createHovercar, createSpaceship, createRocket, createSpeederBike, createMechSuit, type VehicleModel } from './procedural'
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
+import type { Zone } from './types'
 
-export type VehicleKind = 'hovercar' | 'spaceship' | 'rocket'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL'
 type DriveMode = 'hover' | 'fly' | 'rocket'
 
 interface Vehicle {
@@ -19,7 +20,20 @@ interface Vehicle {
   hoverHeight: number
   drive: DriveMode
   bob: number
+  size: number // model scale (1 for non-mechs); used for camera + muzzle height
+  morph: number // mech transform 0=robot .. 1=jet form (eased)
+  morphTarget: number
+  home: THREE.Vector3 // Earth parking spot (restored on return)
 }
+
+// Where the mechs line up relative to spawn when taken to another world.
+const OFFWORLD_MECH_OFFSET: Record<string, THREE.Vector3> = {
+  mechM: new THREE.Vector3(-14, 0, 8),
+  mechL: new THREE.Vector3(8, 0, 16),
+  mechXL: new THREE.Vector3(48, 0, 48),
+}
+
+export const isMech = (k: VehicleKind) => k === 'mechM' || k === 'mechL' || k === 'mechXL'
 
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
 const UP = new THREE.Vector3(0, 1, 0)
@@ -49,19 +63,49 @@ export class Vehicles {
   constructor(scene: THREE.Scene, physics: Physics) {
     this.scene = scene
     this.physics = physics
-    this.spawn('hovercar', createHovercar(), new THREE.Vector3(16, 0, 20), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    // Parked right by the player spawn so there's an obvious car to hop into
+    // straight after the intro.
+    this.spawn('hovercar', createHovercar(), new THREE.Vector3(6, 0, 8), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    // A speeder bike parked just the other side of the spawn for fast travel.
+    this.spawn('speeder', createSpeederBike(), new THREE.Vector3(-6, 0, 8), config.vehicle.speeder.hoverHeight, 1.1, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
-    this.spawn('rocket', createRocket(), new THREE.Vector3(2, 0, -30), 0, 1.4, 'rocket')
+    // Scaled up so it reads as a launch vehicle / destination, not a prop.
+    const rocket = createRocket()
+    rocket.group.scale.setScalar(1.9)
+    this.spawn('rocket', rocket, new THREE.Vector3(2, 0, -20), 0, 2.6, 'rocket')
+    // Drivable cars sitting up on the elevated highway (deck at z=-36, y~9).
+    // sampleGround in spawn() lands them on the deck surface.
+    this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    this.spawn('hovercar', createHovercar(), new THREE.Vector3(20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    // Three battle-mechs lined up by the arcade portals so they're obvious at
+    // spawn: medium (blue), large (crimson), extra-large building-sized (green).
+    const mm = config.vehicle.mechM
+    const ml = config.vehicle.mechL
+    const mx = config.vehicle.mechXL
+    this.spawn('mechM', createMechSuit({ scale: mm.size, armor: 0x2348c8, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(-16, 0, 18), mm.hoverHeight, 2.0 * mm.size, 'fly', mm.size)
+    this.spawn('mechL', createMechSuit({ scale: ml.size, armor: 0xb01f3a, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(4, 0, 24), ml.hoverHeight, 2.0 * ml.size, 'fly', ml.size)
+    // The colossus stands further out (it's ~50m wide at the feet) but towers
+    // over the skyline so it's unmistakable from the portals.
+    this.spawn('mechXL', createMechSuit({ scale: mx.size, armor: 0x1f6e3a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(60, 0, 60), mx.hoverHeight, 2.0 * mx.size, 'fly', mx.size)
   }
 
-  private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode) {
+  private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode, size = 1) {
     const gy = this.physics.sampleGround(at.x, at.z, 40)?.y ?? 0
-    const position = new THREE.Vector3(at.x, gy + hoverHeight, at.z)
+    // Mechs stand parked on the ground; everything else rests at its hover height.
+    const position = new THREE.Vector3(at.x, gy + (isMech(kind) ? 0 : hoverHeight), at.z)
     model.group.position.copy(position)
     this.scene.add(model.group)
+    const name =
+      kind === 'hovercar' ? 'HOVERCAR'
+      : kind === 'speeder' ? 'SPEEDER'
+      : kind === 'spaceship' ? 'SHUTTLE'
+      : kind === 'mechM' ? 'MECH-M'
+      : kind === 'mechL' ? 'MECH-L'
+      : kind === 'mechXL' ? 'MECH-XL'
+      : 'ROCKET'
     this.list.push({
       kind,
-      name: kind === 'hovercar' ? 'HOVERCAR' : kind === 'spaceship' ? 'SHUTTLE' : 'ROCKET',
+      name,
       model,
       position,
       velocity: new THREE.Vector3(),
@@ -70,7 +114,48 @@ export class Vehicles {
       hoverHeight,
       drive,
       bob: kind === 'spaceship' ? 1.7 : 0,
+      size,
+      morph: 0,
+      morphTarget: 0,
+      home: position.clone(),
     })
+  }
+
+  /**
+   * Move vehicles for a zone change. On Earth everything returns to its parking
+   * spot; off-world the cars/shuttle/rocket are hidden and the three mechs are
+   * lined up near the spawn so you can pilot your giant robot on Mars/the Moon.
+   */
+  setZone(zone: Zone, spawn: THREE.Vector3) {
+    const earth = zone === 'earth'
+    this.current = null
+    for (const v of this.list) {
+      const visible = earth || isMech(v.kind)
+      v.model.group.visible = visible
+      if (!visible) continue
+      if (earth) {
+        v.position.copy(v.home)
+      } else {
+        const off = OFFWORLD_MECH_OFFSET[v.kind] ?? new THREE.Vector3()
+        v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
+      }
+      const gy = this.physics.sampleGround(v.position.x, v.position.z, 200)?.y ?? 0
+      v.position.y = gy + (isMech(v.kind) ? 0 : v.hoverHeight)
+      v.yaw = 0
+      v.morph = 0
+      v.morphTarget = 0
+      v.velocity.set(0, 0, 0)
+      v.model.group.position.copy(v.position)
+      v.model.group.rotation.set(0, 0, 0)
+    }
+  }
+
+  /** Toggle the piloted mech between robot and jet form. Returns the new state. */
+  toggleTransform(): 'robot' | 'jet' | null {
+    const v = this.current
+    if (!v || !isMech(v.kind)) return null
+    v.morphTarget = v.morphTarget > 0.5 ? 0 : 1
+    return v.morphTarget > 0.5 ? 'jet' : 'robot'
   }
 
   get currentName() {
@@ -80,11 +165,15 @@ export class Vehicles {
   /** Nearest enterable vehicle within range of a point (or null). */
   nearest(pos: THREE.Vector3): Vehicle | null {
     let best: Vehicle | null = null
-    let bestD = config.vehicle.enterRange
+    let bestScore = Infinity
     for (const v of this.list) {
+      if (!v.model.group.visible) continue // hidden off-world (cars stay on Earth)
+      // Big mechs get a larger boarding radius (you stand at their feet, far
+      // from the model centre). Compare distance against each vehicle's range.
+      const range = config.vehicle.enterRange + (isMech(v.kind) ? v.size * 1.6 : 0)
       const d = Math.hypot(v.position.x - pos.x, v.position.z - pos.z)
-      if (d < bestD) {
-        bestD = d
+      if (d < range && d < bestScore) {
+        bestScore = d
         best = v
       }
     }
@@ -127,6 +216,12 @@ export class Vehicles {
 
   update(dt: number, input: Input) {
     for (const v of this.list) {
+      // Ease the mech transform and drive the model's morph pose.
+      if (v.morph !== v.morphTarget) {
+        v.morph += (v.morphTarget - v.morph) * Math.min(1, dt * 6)
+        if (Math.abs(v.morph - v.morphTarget) < 0.01) v.morph = v.morphTarget
+      }
+      v.model.setMorph?.(v.morph)
       v.model.update(dt, v === this.current ? this.speed01 : 0)
       if (v === this.current) {
         if (v.drive === 'hover') this.driveHover(v, dt, input)
@@ -142,12 +237,14 @@ export class Vehicles {
     if (v.drive === 'rocket') return
     const gy = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 6)?.y ?? 0
     v.bob += dt
-    v.position.y = gy + v.hoverHeight + Math.sin(v.bob * 1.4) * 0.12
+    // Mechs park standing on the ground (feet at gy); others hover.
+    const rest = isMech(v.kind) ? 0 : v.hoverHeight
+    v.position.y = gy + rest + Math.sin(v.bob * 1.4) * 0.12
     v.model.group.rotation.set(0, v.yaw, 0)
   }
 
   private driveHover(v: Vehicle, dt: number, input: Input) {
-    const cfg = config.vehicle.hovercar
+    const cfg = v.kind === 'speeder' ? config.vehicle.speeder : config.vehicle.hovercar
     const boost = input.held.boost ? 1.4 : 1
     const maxSpeed = cfg.maxSpeed * boost
 
@@ -172,21 +269,29 @@ export class Vehicles {
     const gy = g ? g.y : 0
     v.bob += dt
     const targetY = gy + v.hoverHeight + Math.sin(v.bob * 2) * 0.06
-    v.position.y = damp(v.position.y, targetY, 8, dt)
+    // Crisper vertical tracking so the car stays planted on ramps/loops instead
+    // of floating up behind the terrain.
+    v.position.y = damp(v.position.y, targetY, 14, dt)
 
     this.orient(v, g ? g.normal : UP, -input.moveX * 0.25 * Math.min(1, Math.abs(fs) / 12), dt, 12)
     this.speed01 = Math.min(1, Math.abs(fs) / maxSpeed)
   }
 
   private driveFly(v: Vehicle, dt: number, input: Input) {
-    const cfg = config.vehicle.spaceship
+    const cfg =
+      v.kind === 'mechM' ? config.vehicle.mechM
+      : v.kind === 'mechL' ? config.vehicle.mechL
+      : v.kind === 'mechXL' ? config.vehicle.mechXL
+      : config.vehicle.spaceship
     const boost = input.held.boost ? 1.4 : 1
-    const maxSpeed = cfg.maxSpeed * boost
+    // Jet (transformed) form flies a lot faster and turns tighter.
+    const jet = 1 + v.morph * 1.4
+    const maxSpeed = cfg.maxSpeed * boost * jet
 
-    v.yaw -= input.moveX * cfg.turn * dt
+    v.yaw -= input.moveX * cfg.turn * (1 + v.morph * 0.5) * dt
     this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
     let fs = v.velocity.dot(this.fwd)
-    fs = approach(fs, input.moveY * maxSpeed, cfg.accel * boost * dt)
+    fs = approach(fs, input.moveY * maxSpeed, cfg.accel * boost * jet * dt)
 
     // Altitude: jet = up, sprint = down, otherwise hold.
     let vy = v.velocity.y

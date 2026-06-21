@@ -11,13 +11,17 @@ export interface Unit7Config {
   quality?: AssetQuality
   /** Which zone to spawn into. Default 'earth'. */
   initialZone?: Zone
+  /** Show the username / join-world prompt for shared-world multiplayer. Default true. */
+  multiplayer?: boolean
+  /** Override the realtime server host (else auto: localhost in dev, the deployed PartyKit host in prod). */
+  multiplayerHost?: string
 }
 
 export type PlayerMode = 'robot' | 'plane' | 'parachute' | 'vehicle'
 
 export type PowerupKind = 'speed' | 'shield' | 'fuel' | 'score'
 
-export type BlipKind = 'building' | 'npc' | 'vehicle' | 'portal' | 'powerup' | 'alien' | 'ship'
+export type BlipKind = 'building' | 'npc' | 'vehicle' | 'portal' | 'powerup' | 'alien' | 'ship' | 'objective'
 
 /** A radar dot, already transformed into heading-up, normalized [-1,1] space. */
 export interface RadarBlip {
@@ -33,6 +37,8 @@ export interface HudState {
   stamina: number // 0..1
   fuel: number // 0..1
   score: number
+  best: number // best score this device (persisted)
+  credits: number // spendable currency (persisted)
   captured: number
   speed: number // m/s
   altitude: number // m above ground
@@ -51,7 +57,16 @@ export interface HudState {
   radar: RadarBlip[]
   fade: number // 0..1 black overlay for zone transitions / launch
   banner: string | null // transient center banner (e.g. "ENTERING MARS")
+  objective: string | null // current active objective text (top-center)
+  muted: boolean // game audio muted
+  canCapture: boolean // a capturable target is within net range (shows CAPTURE)
+  missionPopup: { title: string; body: string } | null // transient intro/mission card
+  minigame: MinigameKind | null // non-null while a full-screen minigame is active
+  online: number // players in the shared world incl. self (1 = solo / not connected)
+  leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
 }
+
+export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena'
 
 /** Minimal command surface the HUD / mobile controls use to talk back to the engine. */
 export interface GameControls {
@@ -62,6 +77,9 @@ export interface GameControls {
   pause(): void
   skipIntro(): void
   requestPointerLock(): void
+  exitMinigame(): void // leave a minigame and return to the city
+  restartIntro(): void // replay the opening cinematic from the start
+  toggleMute(): void // toggle game audio
 }
 
 export type GameAction =

@@ -19,13 +19,18 @@ const BLIP_COLOR: Record<BlipKind, string> = {
   powerup: NEON.cyan,
   alien: NEON.magenta,
   ship: '#ffffff',
+  objective: NEON.lime,
 }
 
-export function HUD({ hud, touch }: { hud: HudState; touch: boolean }) {
+export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; touch: boolean; onRestart: () => void; onToggleMute: () => void }) {
   return (
     <div style={wrap}>
+      {/* top-left restart (replays the opening cinematic) */}
+      <button style={restartBtn} onClick={onRestart}>RESTART ↺</button>
+      <button style={muteBtn} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+
       {/* top-left meters */}
-      <div style={{ ...panel, top: 14, left: 14 }}>
+      <div style={{ ...panel, top: 52, left: 14 }}>
         <Logo />
         <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
         <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
@@ -43,14 +48,24 @@ export function HUD({ hud, touch }: { hud: HudState; touch: boolean }) {
         <div style={statRow}>
           <Stat label="ZONE" value={hud.zone.toUpperCase()} color={NEON.magenta} />
           <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
+          <Stat label="CREDITS" value={String(hud.credits)} color={NEON.orange} />
           <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
         </div>
         <div style={statRow}>
+          <Stat label="BEST" value={String(hud.best)} color={NEON.purple} />
           <Stat label="SPEED" value={`${hud.speed.toFixed(0)} m/s`} color={NEON.text} />
           {hud.altitude > 1 && <Stat label="ALT" value={`${hud.altitude.toFixed(0)} m`} color={NEON.text} />}
           <Stat label="FPS" value={String(hud.fps)} color={hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta} />
         </div>
       </div>
+
+      {/* current objective (top-center, persistent + readable) */}
+      {hud.objective && !hud.minigame && (
+        <div style={objectiveStyle}>
+          <span style={{ color: NEON.dim, marginRight: 8 }}>OBJECTIVE</span>
+          <span style={{ color: NEON.lime }}>{hud.objective}</span>
+        </div>
+      )}
 
       {/* contextual prompt */}
       {hud.prompt && (
@@ -67,15 +82,23 @@ export function HUD({ hud, touch }: { hud: HudState; touch: boolean }) {
         <div style={bannerStyle}>{hud.banner}</div>
       )}
 
+      {/* intro / mission card */}
+      {hud.missionPopup && !hud.minigame && (
+        <div style={missionCard}>
+          <div style={missionTitle}>{hud.missionPopup.title}</div>
+          <div style={missionBody}>{hud.missionPopup.body}</div>
+        </div>
+      )}
+
       {/* click-to-look hint (desktop, pointer not yet captured) */}
       {!touch && !hud.lookLocked && !hud.paused && !hud.intro && (
-        <div style={clickHint}>CLICK TO CAPTURE MOUSE · LOOK WITH MOUSE</div>
+        <div style={clickHint}>CLICK TO CAPTURE MOUSE · OR DRAG TO LOOK</div>
       )}
 
       {/* control hints (desktop) */}
       {!touch && (
         <div style={hints}>
-          WASD move · SHIFT sprint · SPACE/J jet · H net · G enter · F boost · T morph · O chute · ESC pause
+          WASD move · SHIFT sprint · SPACE/J jetpack · H capture/fire · G enter · F boost · T transform · O chute · ESC pause
         </div>
       )}
     </div>
@@ -133,7 +156,8 @@ function Radar({ hud }: { hud: HudState }) {
       {hud.radar.map((b, i) => {
         const x = R + b.x * (R - 4)
         const y = R - b.y * (R - 4)
-        return <circle key={i} cx={x} cy={y} r={b.kind === 'building' ? 1.6 : 2.6} fill={BLIP_COLOR[b.kind]} />
+        const r = b.kind === 'objective' ? 4 : b.kind === 'building' ? 1.6 : 2.6
+        return <circle key={i} cx={x} cy={y} r={r} fill={BLIP_COLOR[b.kind]} />
       })}
       {/* player + forward indicator */}
       <polygon points={`${R},${R - 6} ${R - 4},${R + 4} ${R + 4},${R + 4}`} fill={NEON.cyan} />
@@ -149,7 +173,20 @@ const wrap: CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   color: NEON.text,
 }
-const panel: CSSProperties = { position: 'absolute', display: 'flex', flexDirection: 'column', gap: 2 }
+const panel: CSSProperties = {
+  position: 'absolute',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '8px 12px',
+  background: 'rgba(5,10,25,0.62)',
+  border: '1px solid rgba(90,255,255,0.28)',
+  borderRadius: 12,
+  boxShadow: '0 0 16px rgba(0,255,255,0.12)',
+  backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
+  textShadow: '0 0 6px rgba(0,0,0,0.85)',
+}
 const microLabel: CSSProperties = { font: '600 9px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.14em' }
 const barTrack: CSSProperties = {
   width: '100%',
@@ -160,6 +197,36 @@ const barTrack: CSSProperties = {
   overflow: 'hidden',
 }
 const statRow: CSSProperties = { display: 'flex', gap: 14, marginTop: 4 }
+const restartBtn: CSSProperties = {
+  position: 'absolute',
+  top: 14,
+  left: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '6px 12px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  boxShadow: '0 0 14px rgba(39,231,255,0.25)',
+}
+const muteBtn: CSSProperties = {
+  position: 'absolute',
+  top: 14,
+  left: 110,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '6px 12px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(138,92,255,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  boxShadow: '0 0 14px rgba(138,92,255,0.2)',
+}
 const chip: CSSProperties = {
   marginTop: 4,
   alignSelf: 'flex-start',
@@ -182,6 +249,23 @@ const promptStyle: CSSProperties = {
   letterSpacing: '0.08em',
   boxShadow: '0 0 20px rgba(39,231,255,0.25)',
 }
+const objectiveStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: 16,
+  transform: 'translateX(-50%)',
+  padding: '6px 16px',
+  maxWidth: '70vw',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(155,255,77,0.45)',
+  borderRadius: 999,
+  font: '700 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+  boxShadow: '0 0 16px rgba(155,255,77,0.2)',
+}
 const bannerStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
@@ -193,6 +277,35 @@ const bannerStyle: CSSProperties = {
   textShadow: '0 0 24px rgba(39,231,255,0.7)',
   pointerEvents: 'none',
   zIndex: 30,
+}
+const missionCard: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '24%',
+  transform: 'translateX(-50%)',
+  maxWidth: '82vw',
+  padding: '14px 22px',
+  textAlign: 'center',
+  background: 'rgba(5,10,25,0.78)',
+  border: '1px solid rgba(90,255,255,0.5)',
+  borderRadius: 14,
+  boxShadow: '0 0 26px rgba(0,255,255,0.25)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  zIndex: 22,
+  pointerEvents: 'none',
+}
+const missionTitle: CSSProperties = {
+  font: '800 20px/1.1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.18em',
+  color: '#27e7ff',
+  textShadow: '0 0 14px rgba(39,231,255,0.7)',
+  marginBottom: 6,
+}
+const missionBody: CSSProperties = {
+  font: '600 12px/1.4 ui-monospace, Menlo, monospace',
+  color: 'rgba(223,238,255,0.92)',
+  letterSpacing: '0.04em',
 }
 const clickHint: CSSProperties = {
   position: 'absolute',
