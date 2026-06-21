@@ -75,6 +75,7 @@ export class Engine {
   private renderTarget: THREE.WebGLRenderTarget
   private envTex: THREE.Texture
   private pixelCap: number
+  private baseBloom = 1
   private saoPass: SAOPass | null = null
   private bokehPass: BokehPass | null = null
   private smaaPass: SMAAPass | null = null
@@ -164,9 +165,10 @@ export class Engine {
     // hit is invisible, but the downsample low-pass-filters the high-frequency
     // sub-pixel glints on distant neon that full-res bloom was turning into
     // crawling shimmer. Cheaper too.
+    this.baseBloom = config.render.bloom.strength * (tier.name === 'high' ? 1 : 0.85)
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE)),
-      config.render.bloom.strength * (tier.name === 'high' ? 1 : 0.85),
+      this.baseBloom,
       config.render.bloom.radius,
       config.render.bloom.threshold,
     )
@@ -207,6 +209,15 @@ export class Engine {
     if (typeof window !== 'undefined') {
       ;(window as unknown as { __UNIT7__?: unknown }).__UNIT7__ = this
     }
+  }
+
+  /**
+   * Scale bloom by time of day: full (capped) neon glow at night, eased down in
+   * daylight so noon reads calm/warm and the night reads as the bright neon
+   * city — without ever exceeding the tuned night value (keeps bloom FPS-safe).
+   */
+  setBloomScale(s: number) {
+    this.bloomPass.strength = this.baseBloom * s
   }
 
   /** Drive the DoF focus distance from gameplay (e.g. distance to the player). */
