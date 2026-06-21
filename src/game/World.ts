@@ -126,6 +126,7 @@ export class World {
   private tickers: { tex: THREE.CanvasTexture; speed: number; redraw: (lines: string[]) => void }[] = []
   private breaking: string[] = [] // runtime "BREAKING" headlines, newest first
   private beacons: { mat: THREE.MeshBasicMaterial; phase: number }[] = []
+  private routeDashes: THREE.MeshBasicMaterial[] = []
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
@@ -177,6 +178,7 @@ export class World {
     this.buildSpaceport(118, 96)
     this.buildHoverTrain()
     this.buildNewsTickers()
+    this.buildRouteTrail()
     this.buildAtmosphere()
     this.buildLights()
     this.addBoundaryColliders()
@@ -1028,6 +1030,24 @@ export class World {
     }
   }
 
+  /**
+   * A glowing dotted "follow me" route on the ground from spawn to Portal Plaza.
+   * Each dash pulses in sequence so the light visibly travels toward the plaza -
+   * an unmissable first-30-seconds navigation cue. Cheap (~10 flat quads).
+   */
+  private buildRouteTrail() {
+    const fromZ = 3, toZ = 12, n = 10
+    for (let i = 0; i < n; i++) {
+      const z = fromZ + (toZ - fromZ) * (i / (n - 1))
+      const mat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const dash = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(1.4, 0.9)), mat)
+      dash.rotation.x = -Math.PI / 2
+      dash.position.set(0, 0.12, z) // spawn plaza is on the flat ground plane
+      this.group.add(dash)
+      this.routeDashes.push(mat)
+    }
+  }
+
   /** A small alien market district: canopied stalls, glow signs, crates, pods. */
   private buildMarket() {
     const ox = -80
@@ -1395,6 +1415,11 @@ export class World {
     for (const t of this.tickers) t.tex.offset.x = (t.tex.offset.x + t.speed * dt) % 1
     // Rooftop beacons blink.
     for (const b of this.beacons) b.mat.opacity = Math.sin(this.time * 3 + b.phase) > 0.4 ? 1 : 0.12
+    // Route trail: a pulse of light travels along the dashes toward the plaza.
+    for (let i = 0; i < this.routeDashes.length; i++) {
+      const phase = (this.time * 1.6 - i * 0.35) % 2
+      this.routeDashes[i].opacity = 0.32 + Math.max(0, Math.cos(phase * Math.PI)) * 0.6
+    }
 
     // Hover-train: cars follow the rail in a tight convoy.
     if (this.trainSamples.length && this.trainCars.length) {

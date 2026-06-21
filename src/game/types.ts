@@ -56,6 +56,7 @@ export interface HudState {
   objective: string | null // current active objective text (top-center)
   muted: boolean // game audio muted
   canCapture: boolean // a capturable target is within net range (shows CAPTURE)
+  missionPopup: { title: string; body: string } | null // transient intro/mission card
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
 }
 

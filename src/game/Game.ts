@@ -80,6 +80,7 @@ export class Game {
   private bannerTimer = 0
   // Lightweight objective chain (config.missions). One active at a time.
   private missionIdx = 0
+  private missionPopupTimer = 0
   private captureBase = 0
   private minigamePlayed = false
   private heroLight!: THREE.PointLight
@@ -227,6 +228,7 @@ export class Game {
       objective: config.missions[0]?.title ?? null,
       muted: this.audio.isMuted,
       canCapture: false,
+      missionPopup: null,
       minigame: null,
     }
 
@@ -285,8 +287,9 @@ export class Game {
     // hand-off to the follow camera reads as one continuous shot.
     this.hud.fade = 1
     this.trans = { phase: 'in', t: 0, target: this.zone }
-    this.hud.banner = 'WELCOME TO UNIT 7'
-    this.bannerTimer = 1.8
+    // Intro mission card: tells the player what to do in the first seconds.
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Portal Plaza detected. Follow the neon route to the beam.' }
+    this.missionPopupTimer = 5
   }
 
   // --- Arcade portals ------------------------------------------------------
@@ -1093,6 +1096,10 @@ export class Game {
     if (this.bannerTimer > 0) {
       this.bannerTimer -= dt
       if (this.bannerTimer <= 0) this.hud.banner = null
+    }
+    if (this.missionPopupTimer > 0) {
+      this.missionPopupTimer -= dt
+      if (this.missionPopupTimer <= 0) this.hud.missionPopup = null
     }
     this.hudAccum += dt
     if (this.hudAccum < 1 / 20) return

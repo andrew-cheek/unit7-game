@@ -656,3 +656,10 @@ generators). Key finding applied: per-window hue + brightness variety with a few
 - Performance: gated decorative per-building neon (spines, light-bands, blinking
   beacons) to the high tier so mobile keeps the window-texture look at far fewer
   draw calls.
+
+## Finish first-30s: intro mission card + neon route trail
+
+- Intro mission card (hud.missionPopup): a styled sci-fi panel "UNIT 7 ONLINE -
+  Portal Plaza detected. Follow the neon route." shown ~5s after the intro ends.
+- Neon route trail: a glowing dotted line from spawn to Portal Plaza whose light
+  pulses toward the plaza - an unmissable navigation cue (cheap, ~10 quads).

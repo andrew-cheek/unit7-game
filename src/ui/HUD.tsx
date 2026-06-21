@@ -82,6 +82,14 @@ export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; to
         <div style={bannerStyle}>{hud.banner}</div>
       )}
 
+      {/* intro / mission card */}
+      {hud.missionPopup && !hud.minigame && (
+        <div style={missionCard}>
+          <div style={missionTitle}>{hud.missionPopup.title}</div>
+          <div style={missionBody}>{hud.missionPopup.body}</div>
+        </div>
+      )}
+
       {/* click-to-look hint (desktop, pointer not yet captured) */}
       {!touch && !hud.lookLocked && !hud.paused && !hud.intro && (
         <div style={clickHint}>CLICK TO CAPTURE MOUSE · LOOK WITH MOUSE</div>
@@ -269,6 +277,35 @@ const bannerStyle: CSSProperties = {
   textShadow: '0 0 24px rgba(39,231,255,0.7)',
   pointerEvents: 'none',
   zIndex: 30,
+}
+const missionCard: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '24%',
+  transform: 'translateX(-50%)',
+  maxWidth: '82vw',
+  padding: '14px 22px',
+  textAlign: 'center',
+  background: 'rgba(5,10,25,0.78)',
+  border: '1px solid rgba(90,255,255,0.5)',
+  borderRadius: 14,
+  boxShadow: '0 0 26px rgba(0,255,255,0.25)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  zIndex: 22,
+  pointerEvents: 'none',
+}
+const missionTitle: CSSProperties = {
+  font: '800 20px/1.1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.18em',
+  color: '#27e7ff',
+  textShadow: '0 0 14px rgba(39,231,255,0.7)',
+  marginBottom: 6,
+}
+const missionBody: CSSProperties = {
+  font: '600 12px/1.4 ui-monospace, Menlo, monospace',
+  color: 'rgba(223,238,255,0.92)',
+  letterSpacing: '0.04em',
 }
 const clickHint: CSSProperties = {
   position: 'absolute',
