@@ -246,9 +246,12 @@ export class Game {
   // --- Arcade portals ------------------------------------------------------
 
   private buildArcadePortals() {
-    // Two neon doorways just ahead of the spawn, side by side.
-    this.arcadePortals.push(this.buildPortal('beamwars', 0x27e7ff, 0x8a5cff, 'BEAM WARS', new THREE.Vector3(-6, 0, 12)))
-    this.arcadePortals.push(this.buildPortal('digduel', 0xff8a1e, 0x9bff4d, 'DIG DUEL', new THREE.Vector3(10, 0, 12)))
+    // A neon arcade row of doorways in an arc just ahead of spawn.
+    this.arcadePortals.push(this.buildPortal('beamwars', 0x27e7ff, 0x8a5cff, 'BEAM WARS', new THREE.Vector3(-15, 0, 10)))
+    this.arcadePortals.push(this.buildPortal('digduel', 0xff8a1e, 0x9bff4d, 'DIG DUEL', new THREE.Vector3(-7.5, 0, 14)))
+    this.arcadePortals.push(this.buildPortal('merge2048', 0xff2bd0, 0x27e7ff, '2048', new THREE.Vector3(0, 0, 16)))
+    this.arcadePortals.push(this.buildPortal('invaders', 0x9bff4d, 0xff2bd0, 'INVADERS', new THREE.Vector3(7.5, 0, 14)))
+    this.arcadePortals.push(this.buildPortal('snake', 0x8a5cff, 0x9bff4d, 'SNAKE', new THREE.Vector3(15, 0, 10)))
   }
 
   private buildPortal(kind: MinigameKind, ringColor: number, discColor: number, label: string, pos: THREE.Vector3) {

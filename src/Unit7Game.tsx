@@ -11,6 +11,9 @@ import { MobileControls } from './ui/MobileControls'
 // over cellular). Suspense shows nothing while the small chunk streams in.
 const BeamWars = lazy(() => import('./ui/BeamWars').then((m) => ({ default: m.BeamWars })))
 const DigDuel = lazy(() => import('./ui/DigDuel').then((m) => ({ default: m.DigDuel })))
+const Game2048 = lazy(() => import('./ui/Game2048').then((m) => ({ default: m.Game2048 })))
+const Invaders = lazy(() => import('./ui/Invaders').then((m) => ({ default: m.Invaders })))
+const Snake = lazy(() => import('./ui/Snake').then((m) => ({ default: m.Snake })))
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -112,6 +115,21 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {hud?.minigame === 'digduel' && controlsRef.current && (
         <Suspense fallback={null}>
           <DigDuel touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.minigame === 'merge2048' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <Game2048 touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.minigame === 'invaders' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <Invaders touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.minigame === 'snake' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <Snake touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
     </div>

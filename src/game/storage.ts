@@ -34,3 +34,20 @@ export function saveProfile(p: Profile) {
     /* storage unavailable - keep going in-memory */
   }
 }
+
+// Per-minigame high scores, keyed by a short id (e.g. 'snake', '2048').
+export function loadHighScore(key: string): number {
+  try {
+    return Number(localStorage.getItem('unit7.hs.' + key)) || 0
+  } catch {
+    return 0
+  }
+}
+
+export function saveHighScore(key: string, value: number) {
+  try {
+    if (value > loadHighScore(key)) localStorage.setItem('unit7.hs.' + key, String(Math.floor(value)))
+  } catch {
+    /* ignore */
+  }
+}

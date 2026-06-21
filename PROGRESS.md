@@ -510,3 +510,16 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   zone; boarding ignores hidden vehicles.
 - **Alien-world life** (Zones): drifting bioluminescent spore-jellies bobbing
   over Mars, and hovering mining drones with survey beams circling the Moon.
+
+## Three more arcade portals: 2048, Invaders, Snake
+
+- Added `merge2048`, `invaders`, `snake` to MinigameKind; five portals now sit in
+  a neon arc in front of spawn.
+- **Game2048.tsx**: clean-room 2048 (DOM grid, swipe/arrows). Slide/merge logic
+  unit-tested. Per-device high score.
+- **Invaders.tsx**: neon alien-wave shooter on a fixed virtual field letterboxed
+  to the canvas (resolution-independent). Drag/arrows to move, auto-fire, lives,
+  escalating waves. High score persisted.
+- **Snake.tsx**: classic snake (canvas, swipe/arrows), speeds up as it grows.
+- All three are React.lazy chunks (~6KB each), styled to match, with
+  START/REPLAY/RETURN buttons and touch + keyboard controls.

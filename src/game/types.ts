@@ -55,7 +55,7 @@ export interface HudState {
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
 }
 
-export type MinigameKind = 'beamwars' | 'digduel'
+export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake'
 
 /** Minimal command surface the HUD / mobile controls use to talk back to the engine. */
 export interface GameControls {
