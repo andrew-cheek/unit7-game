@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
-import type { GameAction, GameControls } from '../game/types'
+import type { GameAction, GameControls, HudState } from '../game/types'
 
-const JOY_R = 54
+const JOY_R = 52
 
 interface BtnDef {
   label: string
@@ -9,29 +9,64 @@ interface BtnDef {
   type: 'hold' | 'tap' | 'sprint'
   color: string
 }
-const BUTTONS: BtnDef[] = [
-  { label: 'JET', action: 'jet', type: 'hold', color: '#27e7ff' },
-  { label: 'BOOST', action: 'boost', type: 'hold', color: '#ff8a1e' },
-  { label: 'SPR', action: 'sprint', type: 'sprint', color: '#9bff4d' },
-  { label: 'NET', action: 'net', type: 'tap', color: '#9bff4d' },
-  { label: 'G', action: 'enter', type: 'tap', color: '#27e7ff' },
-  { label: 'MRPH', action: 'morph', type: 'tap', color: '#8a5cff' },
-  { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' },
-]
+
+// Clear, readable labels (was JET/SPR/G/MRPH/NET/CHUTE). The set shown is built
+// contextually each frame so the screen isn't cluttered with irrelevant actions.
+const RUN: BtnDef = { label: 'SPRINT', action: 'sprint', type: 'sprint', color: '#9bff4d' }
+const JET: BtnDef = { label: 'JETPACK', action: 'jet', type: 'hold', color: '#27e7ff' }
+const BOOST: BtnDef = { label: 'BOOST', action: 'boost', type: 'hold', color: '#ff8a1e' }
+const MORPH: BtnDef = { label: 'TRANSFORM', action: 'morph', type: 'tap', color: '#8a5cff' }
+const CAPTURE: BtnDef = { label: 'CAPTURE', action: 'net', type: 'tap', color: '#9bff4d' }
+const ENTER: BtnDef = { label: 'ENTER', action: 'enter', type: 'tap', color: '#27e7ff' }
+const EXIT: BtnDef = { label: 'EXIT', action: 'enter', type: 'tap', color: '#ff2bd0' }
+const CHUTE: BtnDef = { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' }
+const FIRE: BtnDef = { label: 'FIRE', action: 'net', type: 'tap', color: '#ff8a1e' }
+const TRANSFORM: BtnDef = { label: 'TRANSFORM', action: 'morph', type: 'tap', color: '#8a5cff' }
 
 /**
  * Touch controls: a left thumb-stick for movement, a right-side drag area for
- * the camera, and a compact action cluster bottom-right. Multitouch is handled
- * with pointer capture so move + look + buttons all work at once, and the play
- * area in the middle stays clear.
+ * the camera, and a contextual action cluster bottom-right. The button set and a
+ * one-line helper adapt to what you can actually do right now (near a vehicle,
+ * inside one, airborne, ...) so the layout stays clean and readable on a phone.
  */
-export function MobileControls({ controls }: { controls: GameControls }) {
+export function MobileControls({ controls, hud }: { controls: GameControls; hud: HudState }) {
   const [knob, setKnob] = useState({ x: 0, y: 0 })
   const [sprintOn, setSprintOn] = useState(false)
   const joyId = useRef<number | null>(null)
   const joyOrigin = useRef({ x: 0, y: 0 })
   const lookId = useRef<number | null>(null)
   const lookLast = useRef({ x: 0, y: 0 })
+
+  // --- context ---
+  const inVehicle = hud.mode === 'vehicle'
+  const nearVehicle = !inVehicle && !!hud.prompt
+  const airborne = !inVehicle && hud.altitude > 2.5
+
+  // Build the relevant button set (most-used nearest the thumb = first/bottom).
+  let buttons: BtnDef[]
+  const inMech = inVehicle && !!hud.vehicle && hud.vehicle.startsWith('MECH')
+  if (inVehicle) {
+    buttons = inMech ? [EXIT, FIRE, TRANSFORM, JET, BOOST] : [EXIT, BOOST, JET]
+  } else {
+    // On foot: core buttons, plus contextual ones only when useful.
+    buttons = [RUN, JET, MORPH]
+    if (nearVehicle) buttons.unshift(ENTER)
+    if (hud.canCapture) buttons.push(CAPTURE) // only when a target is in range
+    if (airborne) buttons.push(BOOST, CHUTE) // boost/chute matter when flying
+  }
+
+  // Helper text: the single most relevant hint.
+  const helper = inMech
+    ? 'JET TO FLY · FIRE · MORPH TO JET'
+    : inVehicle
+    ? 'EXIT VEHICLE'
+    : nearVehicle
+      ? 'ENTER VEHICLE'
+      : airborne
+        ? 'CHUTE AVAILABLE'
+        : hud.fuel > 0.15
+          ? 'JETPACK READY'
+          : null
 
   // --- joystick ---
   const onJoyDown = (e: RPointerEvent) => {
@@ -99,37 +134,34 @@ export function MobileControls({ controls }: { controls: GameControls }) {
     <div style={root}>
       <div style={lookArea} onPointerDown={onLookDown} onPointerMove={onLookMove} onPointerUp={onLookUp} onPointerCancel={onLookUp} />
 
-      <div
-        style={joyBase}
-        onPointerDown={onJoyDown}
-        onPointerMove={onJoyMove}
-        onPointerUp={onJoyUp}
-        onPointerCancel={onJoyUp}
-      >
+      <div style={joyBase} onPointerDown={onJoyDown} onPointerMove={onJoyMove} onPointerUp={onJoyUp} onPointerCancel={onJoyUp}>
         <div style={{ ...joyKnob, transform: `translate(${knob.x}px, ${knob.y}px)` }} />
       </div>
 
-      <div style={btnWrap}>
-        {BUTTONS.map((b) => {
-          const active = b.type === 'sprint' && sprintOn
-          return (
-            <div
-              key={b.label}
-              style={{
-                ...btn,
-                borderColor: b.color,
-                color: active ? '#05060b' : b.color,
-                background: active ? b.color : 'rgba(8,12,24,0.6)',
-                boxShadow: `0 0 14px ${b.color}55`,
-              }}
-              onPointerDown={btnDown(b)}
-              onPointerUp={btnUp(b)}
-              onPointerCancel={btnUp(b)}
-            >
-              {b.label}
-            </div>
-          )
-        })}
+      <div style={cluster}>
+        {helper && <div style={helperPill}>{helper}</div>}
+        <div style={btnWrap}>
+          {buttons.map((b) => {
+            const active = b.type === 'sprint' && sprintOn
+            return (
+              <div
+                key={b.label}
+                style={{
+                  ...btn,
+                  borderColor: b.color,
+                  color: active ? '#05060b' : b.color,
+                  background: active ? b.color : 'rgba(8,12,24,0.62)',
+                  boxShadow: `0 0 14px ${b.color}55`,
+                }}
+                onPointerDown={btnDown(b)}
+                onPointerUp={btnUp(b)}
+                onPointerCancel={btnUp(b)}
+              >
+                {b.label}
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -137,13 +169,7 @@ export function MobileControls({ controls }: { controls: GameControls }) {
 
 const root: CSSProperties = { position: 'absolute', inset: 0, zIndex: 8, pointerEvents: 'none', touchAction: 'none' }
 const lookArea: CSSProperties = {
-  position: 'absolute',
-  right: 0,
-  top: 0,
-  width: '55%',
-  height: '78%',
-  pointerEvents: 'auto',
-  touchAction: 'none',
+  position: 'absolute', right: 0, top: 0, width: '55%', height: '70%', pointerEvents: 'auto', touchAction: 'none',
 }
 const joyBase: CSSProperties = {
   position: 'absolute',
@@ -161,17 +187,31 @@ const joyBase: CSSProperties = {
   justifyContent: 'center',
 }
 const joyKnob: CSSProperties = {
-  width: 52,
-  height: 52,
-  borderRadius: '50%',
-  background: 'rgba(39,231,255,0.55)',
-  boxShadow: '0 0 18px rgba(39,231,255,0.6)',
+  width: 50, height: 50, borderRadius: '50%',
+  background: 'rgba(39,231,255,0.55)', boxShadow: '0 0 18px rgba(39,231,255,0.6)',
 }
-const btnWrap: CSSProperties = {
+const cluster: CSSProperties = {
   position: 'absolute',
   right: 'max(16px, env(safe-area-inset-right))',
   bottom: 'max(20px, env(safe-area-inset-bottom))',
-  width: 186,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-end',
+  gap: 8,
+  pointerEvents: 'none',
+}
+const helperPill: CSSProperties = {
+  pointerEvents: 'none',
+  padding: '4px 10px',
+  borderRadius: 999,
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(39,231,255,0.4)',
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+}
+const btnWrap: CSSProperties = {
+  width: 180,
   display: 'flex',
   flexWrap: 'wrap',
   flexDirection: 'row-reverse',
@@ -182,15 +222,16 @@ const btnWrap: CSSProperties = {
 const btn: CSSProperties = {
   pointerEvents: 'auto',
   touchAction: 'none',
-  width: 54,
-  height: 54,
+  width: 56,
+  height: 56,
   borderRadius: '50%',
   border: '2px solid',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  font: '700 11px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.04em',
+  font: '700 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.03em',
+  textAlign: 'center',
   userSelect: 'none',
   WebkitUserSelect: 'none',
 }

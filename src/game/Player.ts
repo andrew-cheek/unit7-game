@@ -10,8 +10,6 @@ function approach(current: number, target: number, maxDelta: number) {
   return current < target ? Math.min(current + maxDelta, target) : Math.max(current - maxDelta, target)
 }
 
-// Max height drop the player will "stick" to when walking down a slope/step.
-const STEP_DOWN = 0.55
 
 /**
  * Player avatar + controller as a small state machine:
@@ -161,10 +159,13 @@ export class Player {
 
   private camRelative(input: Input, out: THREE.Vector3) {
     const yaw = input.yaw
+    // Forward (+moveY) follows the camera heading; strafe (+moveX) is camera-right.
+    // Camera-right is -cross(up, forward), hence the signs on the moveX terms -
+    // getting these wrong is what made "left" steer right.
     out.set(
-      Math.cos(yaw) * input.moveX + Math.sin(yaw) * input.moveY,
+      -Math.cos(yaw) * input.moveX + Math.sin(yaw) * input.moveY,
       0,
-      -Math.sin(yaw) * input.moveX + Math.cos(yaw) * input.moveY,
+      Math.sin(yaw) * input.moveX + Math.cos(yaw) * input.moveY,
     )
     const len = out.length()
     if (len > 1e-3) out.multiplyScalar(1 / len)
@@ -184,12 +185,18 @@ export class Player {
     this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
     this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
 
-    // Jetpack: hold to fly, with an initial hop and a regenerating fuel meter.
-    const jetting = input.held.jet && this.fuel > config.jetpack.fuelMinToFly
+    // Jetpack: hold to fly. It NEVER runs out. A charged boost reserve gives a
+    // fast climb; once the reserve is spent the climb just eases down to a
+    // steady cruise ascend that sustains forever, so you can always keep flying.
+    const jetting = input.held.jet
     if (jetting) {
-      if (!this.prevJet && this.grounded) this.velocity.y = config.player.jumpSpeed
-      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
-      this.fuel = Math.max(0, this.fuel - config.jetpack.fuelDrain * dt)
+      // Coyote time: still allow the launch hop just after stepping off a ledge.
+      const canHop = this.grounded || this.airTime < config.player.coyoteTime
+      if (!this.prevJet && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
+      const boosted = this.fuel > 0
+      const cap = boosted ? config.jetpack.maxAscend : config.jetpack.cruiseAscend
+      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, cap)
+      if (boosted) this.fuel = Math.max(0, this.fuel - config.jetpack.fuelDrain * dt)
       this.model.setThrust(1)
     } else {
       this.fuel = Math.min(config.jetpack.fuelMax, this.fuel + config.jetpack.fuelRegen * dt)
@@ -198,7 +205,10 @@ export class Player {
     this.prevJet = input.held.jet
     this.model.setFlyPose(this.grounded ? 0 : 0.7)
 
-    this.velocity.y += gravity * dt
+    // Heavier gravity on the way down (and when not thrusting up) kills the
+    // floaty hang-time so jumps land with weight.
+    const falling = this.velocity.y < 0 || !jetting
+    this.velocity.y += gravity * (falling ? config.player.fallGravityMult : 1) * dt
   }
 
   private updatePlane(dt: number, input: Input, gravity: number) {
@@ -244,7 +254,7 @@ export class Player {
       pos.y = ground.y
       if (this.velocity.y < 0) this.velocity.y = 0
       this.grounded = true
-    } else if (ground && wasGrounded && pos.y <= ground.y + STEP_DOWN && this.velocity.y <= 0) {
+    } else if (ground && wasGrounded && pos.y <= ground.y + config.player.stepDown && this.velocity.y <= 0) {
       pos.y = ground.y
       this.velocity.y = 0
       this.grounded = true

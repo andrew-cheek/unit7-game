@@ -1,20 +1,21 @@
 import { type CSSProperties } from 'react'
+import type { HudState } from '../game/types'
 
 const CONTROLS: Array<[string, string]> = [
   ['WASD', 'Move'],
   ['Mouse', 'Look'],
   ['Shift', 'Sprint'],
-  ['Space / J', 'Jetpack'],
-  ['G', 'Enter / exit vehicle'],
+  ['Space / J', 'Jetpack / fly'],
+  ['G', 'Enter / exit / unlock'],
   ['F', 'Boost'],
-  ['H', 'Net (capture)'],
-  ['T', 'Morph robot ↔ plane'],
+  ['H', 'Capture / fire'],
+  ['T', 'Transform'],
   ['O', 'Parachute'],
   ['Esc', 'Pause'],
 ]
 
 /** In-game pause menu. ESC opens it without ever leaving the page. */
-export function PauseMenu({ onResume, touch }: { onResume: () => void; touch: boolean }) {
+export function PauseMenu({ onResume, touch, hud, onToggleMute }: { onResume: () => void; touch: boolean; hud: HudState; onToggleMute: () => void }) {
   return (
     <div style={wrap}>
       <div style={panel}>
@@ -22,6 +23,12 @@ export function PauseMenu({ onResume, touch }: { onResume: () => void; touch: bo
           <span style={{ color: '#27e7ff' }}>UNIT</span>
           <span style={{ color: '#ff2bd0' }}> 7</span>
           <span style={{ color: 'rgba(223,238,255,0.5)', fontSize: 14, letterSpacing: '0.3em', marginLeft: 12 }}>PAUSED</span>
+        </div>
+        <div style={statsRow}>
+          <Stat label="SCORE" value={hud.score} color="#27e7ff" />
+          <Stat label="BEST" value={hud.best} color="#8a5cff" />
+          <Stat label="CREDITS" value={hud.credits} color="#ff8a1e" />
+          <Stat label="CAUGHT" value={hud.captured} color="#9bff4d" />
         </div>
         {!touch && (
           <div style={grid}>
@@ -33,10 +40,20 @@ export function PauseMenu({ onResume, touch }: { onResume: () => void; touch: bo
             ))}
           </div>
         )}
-        <button style={resumeBtn} onClick={onResume}>
-          RESUME
-        </button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button style={muteBtn} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+          <button style={resumeBtn} onClick={onResume}>RESUME</button>
+        </div>
       </div>
+    </div>
+  )
+}
+
+function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={{ textAlign: 'center', minWidth: 60 }}>
+      <div style={{ font: '600 9px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.14em', color: 'rgba(223,238,255,0.5)' }}>{label}</div>
+      <div style={{ font: '800 18px/1.2 ui-monospace, Menlo, monospace', color }}>{value}</div>
     </div>
   )
 }
@@ -66,6 +83,11 @@ const panel: CSSProperties = {
   maxWidth: '90vw',
 }
 const title: CSSProperties = { font: '800 30px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.18em', display: 'flex', alignItems: 'baseline' }
+const statsRow: CSSProperties = { display: 'flex', gap: 20 }
+const muteBtn: CSSProperties = {
+  pointerEvents: 'auto', cursor: 'pointer', padding: '12px 22px', font: '700 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em', color: 'rgba(223,238,255,0.9)', background: 'transparent', border: '1px solid rgba(138,92,255,0.5)', borderRadius: 999,
+}
 const grid: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'auto 1fr',
