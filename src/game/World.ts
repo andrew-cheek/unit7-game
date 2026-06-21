@@ -200,7 +200,7 @@ export class World {
       new THREE.MeshStandardMaterial({ color: config.palette.asphalt, roughness: 0.3, metalness: 0.55 }), // wet sheen via env reflection
     )
     this.groundMat.envMapIntensity = config.tier.envMapIntensity
-    this.windowTex = [createWindowTexture(3), createWindowTexture(11), createWindowTexture(27), createWindowTexture(54)]
+    this.windowTex = [3, 11, 27, 54, 71, 96, 123, 158].map((s) => createWindowTexture(s))
     this.windowTex.forEach((t) => {
       t.anisotropy = config.tier.anisotropy
       this.ownedTex.push(t)
@@ -247,6 +247,8 @@ export class World {
     tex.needsUpdate = true
     tex.anisotropy = config.tier.anisotropy
     tex.repeat.set(Math.max(2, Math.round(fx / 6)), Math.max(3, Math.round(h / 8)))
+    // Per-building offset so neighbouring towers don't share the same lit pattern.
+    tex.offset.set(hash01(seed * 3.1), hash01(seed * 4.2))
     this.ownedTex.push(tex)
     const mat = this.own(
       new THREE.MeshStandardMaterial({
@@ -1281,8 +1283,10 @@ export class World {
       moon: [0x010104, 0x0a0a16],
     }
     this.sky.setColors(skyColors[zone][0], skyColors[zone][1])
-    this.groundMat.metalness = zone === 'earth' ? 0.42 : 0.15
-    this.groundMat.roughness = zone === 'earth' ? 0.38 : 0.85
+    // Wetter, more mirror-like roads on Earth so the neon reflects off the tarmac.
+    this.groundMat.metalness = zone === 'earth' ? 0.72 : 0.15
+    this.groundMat.roughness = zone === 'earth' ? 0.18 : 0.85
+    this.groundMat.envMapIntensity = config.tier.envMapIntensity * (zone === 'earth' ? 1.7 : 1)
   }
 
   /** Show/hide the Earth city (used when traveling to Mars/Moon). */

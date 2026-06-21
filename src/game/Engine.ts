@@ -6,10 +6,39 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { SAOPass } from 'three/examples/jsm/postprocessing/SAOPass.js'
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js'
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { config } from './config'
 import { disposeObject } from './utils'
 import { createEnvTexture } from './procedural'
 import type { QualityTier } from './tiers'
+
+// Cinematic colour-grade + vignette applied as a final full-screen pass: a cool
+// cyberpunk tint, gentle S-curve contrast, and darkened corners. Cheap (one
+// texture read), runs on every tier.
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null as THREE.Texture | null } },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      // gentle contrast S-curve
+      c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;
+      // cool teal shadows / faint magenta in the highlights (neon-noir grade)
+      float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+      c.rgb = mix(c.rgb, c.rgb * vec3(0.90, 1.0, 1.10), 0.45);
+      c.rgb += vec3(0.04, 0.0, 0.05) * smoothstep(0.6, 1.0, l);
+      // vignette
+      float d = distance(vUv, vec2(0.5));
+      c.rgb *= 1.0 - smoothstep(0.55, 0.95, d) * 0.45;
+      gl_FragColor = c;
+    }
+  `,
+}
 
 /**
  * Owns the renderer, scene, camera, post-processing chain and the hand-rolled
@@ -128,6 +157,9 @@ export class Engine {
     }
 
     this.composer.addPass(new OutputPass())
+
+    // Cinematic colour-grade + vignette (final look pass).
+    this.composer.addPass(new ShaderPass(GradeShader))
 
     // Cheap edge AA on the path that has no MSAA (mobile).
     if (tier.smaa) {

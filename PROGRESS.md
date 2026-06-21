@@ -628,3 +628,14 @@ generators). Key finding applied: per-window hue + brightness variety with a few
   warm), ~8% are hot near-white (bloom), lit windows get a brighter inner core;
   mullions toned down so windows read.
 - Blinking red rooftop aircraft-warning beacons on antenna towers (animated).
+
+## Cinematic grade, wet-road reflections, facade de-tiling
+
+- Engine: final colour-grade + vignette ShaderPass (cool neon-noir tint, gentle
+  contrast S-curve, darkened corners). Runs on all tiers, one texture read.
+- Wetter Earth roads (lower roughness, higher metalness + envMapIntensity) so neon
+  reflects off the tarmac.
+- Facade de-tiling: 8 window-texture variants + per-building texture offset so
+  neighbouring towers don't share the same lit pattern.
+- (Held back the full custom GLSL facade shader: can't visually verify a shader in
+  this environment and a compile error would black out the city.)
