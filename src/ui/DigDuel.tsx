@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { miniSfx } from './miniSound'
 
 /**
  * DIG DUEL - a fast top-down tank battle in a bright neon arena. The field is
@@ -105,12 +106,13 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     botStrafe.current = null
   }, [])
 
-  const finish = (ph: Phase) => { phaseRef.current = ph; setPhase(ph) }
-  const start = useCallback(() => { reset(); phaseRef.current = 'playing'; setPhase('playing'); last.current = performance.now() }, [reset])
+  const finish = (ph: Phase) => { phaseRef.current = ph; setPhase(ph); miniSfx(ph === 'won' ? 'lap' : 'gameover') }
+  const start = useCallback(() => { reset(); phaseRef.current = 'playing'; setPhase('playing'); last.current = performance.now(); miniSfx('start') }, [reset])
 
   const shoot = (t: Tank, mine: boolean) => {
     if (t.cooldown > 0) return
     t.cooldown = 0.45
+    if (mine) miniSfx('shoot')
     bullets.current.push({ x: t.pos.x + t.dir.x, y: t.pos.y + t.dir.y, dx: t.dir.x, dy: t.dir.y, life: COLS, mine })
   }
 

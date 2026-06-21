@@ -108,7 +108,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}
       {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
-      {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} />}
+      {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
         <Suspense fallback={null}>
           <BeamWars touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />

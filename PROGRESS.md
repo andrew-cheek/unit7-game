@@ -584,3 +584,13 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - Minigame sound (ui/miniSound.ts): a tiny shared WebAudio blip engine the arcade
   games call for start/score/shoot/hit/lap/gameover. Respects the global mute.
   Wired into Snake, 2048, Invaders, Mech Arena and Race Loop.
+
+## Polish batch: full minigame sound, objective distance, capture juice, pause stats, hover train
+
+- Sound now in all seven minigames (added Beam Wars + Dig Duel via miniSound).
+- Objective HUD pill shows live distance to the goal ("Find Portal Plaza · 42m").
+- Capture juice: a cyan ring pops where a target is netted.
+- Pause menu: live stats (score/best/credits/caught), updated control list, and a
+  SOUND ON/OFF toggle.
+- Hover-train: a sleek multi-car maglev loops a glowing rail at rooftop height for
+  living background motion + a landmark.

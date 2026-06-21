@@ -571,6 +571,8 @@ export class Game {
       this.hud.score += Math.round(award * this.scoreMul)
       this.addCredits(Math.round(award * 0.5))
       this.hud.captured += 1
+      // Juice: a quick cyan ring pop where the target was netted.
+      this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
       vibrate(25)
       this.audio.play('capture')
     }
@@ -701,13 +703,15 @@ export class Game {
     } else {
       this.hud.objective = m.title
     }
-    // Guided beacon: drop a glowing column on the current goal.
+    // Guided beacon: drop a glowing column on the current goal + show distance.
     this.objTarget = this.computeObjectiveTarget()
     if (this.objTarget && this.zone === 'earth') {
       const gy = this.physics.sampleGround(this.objTarget.x, this.objTarget.z, 80)?.y ?? 0
       this.objBeacon.position.set(this.objTarget.x, gy, this.objTarget.z)
       this.objBeacon.visible = true
       this.objBeacon.rotation.y += 0.4 * (1 / 60)
+      const d = Math.round(Math.hypot(this.objTarget.x - this.player.position.x, this.objTarget.z - this.player.position.z))
+      if (this.hud.objective) this.hud.objective = `${this.hud.objective} · ${d}m`
     } else {
       this.objBeacon.visible = false
     }

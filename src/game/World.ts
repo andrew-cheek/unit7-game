@@ -120,6 +120,9 @@ export class World {
   private spaceportBeacon?: THREE.Object3D
   private spaceportWarn: THREE.MeshStandardMaterial[] = []
   private launchShip?: { mesh: THREE.Mesh; state: 'parked' | 'rising'; timer: number; vy: number; baseY: number }
+  private trainSamples: THREE.Vector3[] = []
+  private trainCars: THREE.Object3D[] = []
+  private trainT = 0
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
   private sunTarget = new THREE.Object3D()
@@ -169,6 +172,7 @@ export class World {
     this.buildOffices()
     this.buildMechHangar(60, 60)
     this.buildSpaceport(118, 96)
+    this.buildHoverTrain()
     this.buildAtmosphere()
     this.buildLights()
     this.addBoundaryColliders()
@@ -869,6 +873,42 @@ export class World {
     this.landmarks.push({ x: cx, z: cz })
   }
 
+  /**
+   * Elevated hover-train: a sleek multi-car maglev that loops a glowing rail
+   * ringing the city at rooftop height - living background motion + a landmark.
+   * Rail + train are fog-immune so they read from a distance. Animated in update.
+   */
+  private buildHoverTrain() {
+    const ctrl: THREE.Vector3[] = []
+    const N = 7
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2
+      const r = 178 + Math.sin(a * 2) * 24
+      ctrl.push(new THREE.Vector3(Math.cos(a) * r, 30 + Math.sin(a * 3) * 5, Math.sin(a) * r))
+    }
+    const curve = new THREE.CatmullRomCurve3(ctrl, true, 'catmullrom', 0.5)
+    const S = 300
+    for (let i = 0; i < S; i++) this.trainSamples.push(curve.getPointAt(i / S))
+    // Glowing rail.
+    const rail = new THREE.Mesh(
+      this.ownG(new THREE.TubeGeometry(curve, S, 0.5, 5, true)),
+      this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
+    )
+    this.group.add(rail)
+    // Train cars: sleek body + bright window strip.
+    const carGeo = this.ownG(new THREE.BoxGeometry(2.6, 2.0, 7))
+    const winGeo = this.ownG(new THREE.BoxGeometry(2.7, 0.7, 6))
+    const carMat = this.own(new THREE.MeshBasicMaterial({ color: 0x16345a, fog: false }))
+    const winMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe6ff, fog: false }))
+    for (let i = 0; i < 6; i++) {
+      const car = new THREE.Group()
+      car.add(new THREE.Mesh(carGeo, carMat))
+      const w = new THREE.Mesh(winGeo, winMat); w.position.y = 0.4; car.add(w)
+      this.group.add(car)
+      this.trainCars.push(car)
+    }
+  }
+
   /** A small alien market district: canopied stalls, glow signs, crates, pods. */
   private buildMarket() {
     const ox = -80
@@ -1227,6 +1267,20 @@ export class World {
         s.vy += 22 * dt // accelerate upward
         s.mesh.position.y += s.vy * dt
         if (s.mesh.position.y > s.baseY + 520) { s.state = 'parked'; s.timer = 18; s.mesh.position.y = s.baseY }
+      }
+    }
+
+    // Hover-train: cars follow the rail in a tight convoy.
+    if (this.trainSamples.length && this.trainCars.length) {
+      const S = this.trainSamples.length
+      this.trainT = (this.trainT + dt * 0.014) % 1
+      for (let i = 0; i < this.trainCars.length; i++) {
+        const t = (this.trainT - i * 0.012 + 1) % 1
+        const idx = Math.floor(t * S) % S
+        const p = this.trainSamples[idx]
+        const ahead = this.trainSamples[(idx + 2) % S]
+        this.trainCars[i].position.copy(p)
+        this.trainCars[i].lookAt(ahead)
       }
     }
 

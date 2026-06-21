@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { miniSfx } from './miniSound'
 
 /**
  * Beam Wars - a self-contained lightcycle / trail minigame (the BeamWars genre):
@@ -252,6 +253,7 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
   const finish = (ph: Phase) => {
     phaseRef.current = ph
     setPhase(ph)
+    miniSfx(ph === 'won' ? 'lap' : 'gameover')
     if (timer.current) {
       clearInterval(timer.current)
       timer.current = null
@@ -262,6 +264,7 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     reset()
     phaseRef.current = 'playing'
     setPhase('playing')
+    miniSfx('start')
     if (timer.current) clearInterval(timer.current)
     timer.current = window.setInterval(step, TICK_MS)
   }, [reset, step])
