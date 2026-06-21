@@ -8,6 +8,22 @@
     />
     <meta name="theme-color" content="#05060b" />
     <title>Unit 7 — Sci-Fi City</title>
+    <!-- Google Analytics (hostname-aware: game vs main site) -->
+    <script>
+      (function () {
+          var GAME_ID = 'G-68V3G2JBXV';
+          var MAIN_ID = 'G-RCCCLCQX95';
+          var id = (window.location.hostname === 'unit7.humanoidrobots.com') ? GAME_ID : MAIN_ID;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + id;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = function () { window.dataLayer.push(arguments); };
+          window.gtag('js', new Date());
+          window.gtag('config', id, { send_page_view: true });
+      })();
+    </script>
     <style>
       html,
       body,
