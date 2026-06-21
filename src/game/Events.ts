@@ -103,7 +103,7 @@ export class Events {
   private aliens: Alien[] = []
   private drones: Drone[] = []
   private traffic: Traffic[] = []
-  private police: Police | null = null
+  private police: Police[] = []
   private buses: Bus[] = []
   private commuters: Commuter[] = []
   private busRoute: BusWaypoint[] = []
@@ -225,19 +225,25 @@ export class Events {
    * Not a chase - just ambient patrol life.
    */
   private spawnPolice() {
-    const model = createPoliceCar()
-    this.root.add(model.group)
-    // Rectangle of road-level waypoints around the central plaza.
-    const waypoints = [
-      new THREE.Vector3(38, 0, 38),
-      new THREE.Vector3(38, 0, -38),
-      new THREE.Vector3(-38, 0, -38),
-      new THREE.Vector3(-38, 0, 38),
-    ]
-    const pos = waypoints[0].clone()
-    pos.y = (this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0) + 1.0
-    model.group.position.copy(pos)
-    this.police = { model, pos, yaw: 0, waypoints, wp: 1, speed: 16 }
+    const n = Math.max(1, Math.round(config.city.police * config.tier.densityScale))
+    for (let i = 0; i < n; i++) {
+      const model = createPoliceCar()
+      this.root.add(model.group)
+      // Each cruiser patrols its own concentric rectangular beat and starts on a
+      // different corner, so several are visible around the plaza at once.
+      const r = 30 + i * 18
+      const waypoints = [
+        new THREE.Vector3(r, 0, r),
+        new THREE.Vector3(r, 0, -r),
+        new THREE.Vector3(-r, 0, -r),
+        new THREE.Vector3(-r, 0, r),
+      ]
+      const start = i % waypoints.length
+      const pos = waypoints[start].clone()
+      pos.y = (this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0) + 1.0
+      model.group.position.copy(pos)
+      this.police.push({ model, pos, yaw: 0, waypoints, wp: (start + 1) % waypoints.length, speed: 15 + i * 2 })
+    }
   }
 
   /**
@@ -450,24 +456,24 @@ export class Events {
   }
 
   private updatePolice(dt: number) {
-    const p = this.police
-    if (!p) return
-    p.model.update(dt, 1) // strobes the light bar
-    const tgt = p.waypoints[p.wp]
-    const dx = tgt.x - p.pos.x
-    const dz = tgt.z - p.pos.z
-    const d = Math.hypot(dx, dz)
-    if (d < 2) {
-      p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
-    } else {
-      p.pos.x += (dx / d) * p.speed * dt
-      p.pos.z += (dz / d) * p.speed * dt
-      p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
+    for (const p of this.police) {
+      p.model.update(dt, 1) // strobes the light bar
+      const tgt = p.waypoints[p.wp]
+      const dx = tgt.x - p.pos.x
+      const dz = tgt.z - p.pos.z
+      const d = Math.hypot(dx, dz)
+      if (d < 2) {
+        p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
+      } else {
+        p.pos.x += (dx / d) * p.speed * dt
+        p.pos.z += (dz / d) * p.speed * dt
+        p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
+      }
+      const gy = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? 0
+      p.pos.y = gy + 1.0
+      p.model.group.position.copy(p.pos)
+      p.model.group.rotation.y = p.yaw
     }
-    const gy = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? 0
-    p.pos.y = gy + 1.0
-    p.model.group.position.copy(p.pos)
-    p.model.group.rotation.y = p.yaw
   }
 
   private updatePowerups(dt: number, playerPos: THREE.Vector3) {
@@ -691,9 +697,9 @@ export class Events {
     for (const a of this.aliens) if (a.alive) fn(a.pos.x, a.pos.z)
   }
 
-  /** Police cruiser position for the radar (null if none). */
-  get policePos(): THREE.Vector3 | null {
-    return this.police?.pos ?? null
+  /** Visit each patrolling police cruiser's position (for the radar). */
+  forEachPolice(fn: (x: number, z: number) => void) {
+    for (const p of this.police) fn(p.pos.x, p.pos.z)
   }
 
   dispose() {
@@ -701,7 +707,7 @@ export class Events {
     for (const p of this.powerups) p.group.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
     for (const d of this.drones) d.model.dispose()
     for (const c of this.traffic) c.model.dispose()
-    this.police?.model.dispose()
+    for (const p of this.police) p.model.dispose()
     for (const b of this.buses) b.model.dispose()
     for (const c of this.commuters) c.model.dispose()
     for (const a of this.aliens) a.model.dispose()

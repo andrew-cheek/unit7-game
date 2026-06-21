@@ -35,13 +35,14 @@ const smooth01 = (x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// Earth day/night cycle. Mostly daylight so the city is bright and readable,
-// with a dawn (which triggers the invasion) and a brief night for mood. Loops.
-const CYCLE = 210
-const DAWN_START = 5
-const DAWN_END = 13
-const DUSK_START = 150
-const DUSK_END = 165
+// Earth day/night cycle. A shorter loop so the change actually reads in a play
+// session, with a longer dusk/dawn so sunrise and sunset are visible events
+// rather than instant flips, and a real stretch of neon-lit night for mood.
+const CYCLE = 130
+const DAWN_START = 6
+const DAWN_END = 22 // 16s sunrise: sky warms and the sun climbs
+const DUSK_START = 78
+const DUSK_END = 100 // 22s sunset: long fade down into night
 function dayCycle(time: number): number {
   const u = time % CYCLE
   if (u < DAWN_START) return 0
@@ -164,6 +165,7 @@ export class World {
     scene.add(this.sky.group) // sky persists across zones (just recolored)
     this.buildGround()
     this.buildRoads()
+    this.buildStreetProps()
     this.buildCity()
     this.buildNearbyBuildings()
     this.buildElevatedPlatform()
@@ -243,6 +245,52 @@ export class World {
       make(c, 0, 0.4, half * 2) // along Z
       make(0, c, half * 2, 0.4) // along X
     }
+  }
+
+  /**
+   * Street lamps lining the avenues - the single cheapest way to make the
+   * ground plane read as streets instead of empty slabs. Two InstancedMeshes
+   * (posts + warm heads) so the whole set is just two draw calls. Spacing is
+   * widened on mobile to keep the instance count down.
+   */
+  private buildStreetProps() {
+    const half = config.world.half
+    const pitch = config.world.block + config.world.roadWidth
+    const cells = Math.floor(half / pitch)
+    const curb = config.world.roadWidth / 2 + 0.4 // just inside the road edge
+    const spacing = config.tier.name === 'high' ? 40 : 64
+    const postH = 7
+
+    const pts: Array<{ x: number; z: number }> = []
+    for (let i = -cells; i <= cells; i++) {
+      const c = i * pitch + pitch / 2
+      if (Math.abs(c) > half) continue
+      for (let d = -half + spacing; d < half; d += spacing) {
+        pts.push({ x: c - curb, z: d }, { x: c + curb, z: d }) // avenue running Z
+        pts.push({ x: d, z: c - curb }, { x: d, z: c + curb }) // avenue running X
+      }
+    }
+    const n = pts.length
+    if (n === 0) return
+
+    const postGeo = this.ownG(new THREE.CylinderGeometry(0.12, 0.16, postH, 6))
+    const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3038, metalness: 0.7, roughness: 0.5 }))
+    const posts = new THREE.InstancedMesh(postGeo, postMat, n)
+    const headGeo = this.ownG(new THREE.SphereGeometry(0.3, 8, 6))
+    // Warm head, just under the bloom threshold so lamps glow softly without
+    // adding to the neon overload.
+    const headMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffd9a8, fog: true }))
+    const heads = new THREE.InstancedMesh(headGeo, headMat, n)
+    const m = new THREE.Matrix4()
+    for (let k = 0; k < n; k++) {
+      m.makeTranslation(pts[k].x, postH / 2, pts[k].z)
+      posts.setMatrixAt(k, m)
+      m.makeTranslation(pts[k].x, postH + 0.1, pts[k].z)
+      heads.setMatrixAt(k, m)
+    }
+    posts.instanceMatrix.needsUpdate = true
+    heads.instanceMatrix.needsUpdate = true
+    this.group.add(posts, heads)
   }
 
   private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number) {

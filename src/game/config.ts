@@ -123,7 +123,7 @@ export const config = {
     followLambda: 9,
     rotateLambda: 16,
     pitchMin: -0.85,
-    pitchMax: 0.7,
+    pitchMax: 1.05, // look further up so tall rockets / portals / towers are visible
     mouseSensitivity: 0.0022,
     touchSensitivity: 0.006,
     collisionPadding: 0.4,
@@ -161,11 +161,11 @@ export const config = {
   },
 
   npc: {
-    count: 46,
+    count: 64,
     walkSpeed: 1.7,
     separationRadius: 2.2,
     separationForce: 4.0,
-    wanderRadius: 90,
+    wanderRadius: 76, // tighter so the crowd concentrates around the player area
   },
 
   // City life tuning. Counts are the desktop baseline; the mobile tier scales
@@ -180,16 +180,17 @@ export const config = {
     quadrupeds: 4, // four-legged robot walkers patrolling
     mechs: 2, // big mech walkers patrolling slowly
     giants: 2, // massive walker war-machines on the outskirts
-    smallShips: 6, // small ships looping between the towers
-    bigShipInterval: 24, // seconds between big-ship flyovers
+    smallShips: 8, // small ships looping between the towers
+    bigShipInterval: 20, // seconds between big-ship flyovers
+    police: 3, // police cruisers patrolling staggered beats around the plaza
   },
 
   events: {
-    spaceshipInterval: 16, // seconds between landing-ship events
-    aliensPerShip: 4,
+    spaceshipInterval: 13, // seconds between landing-ship events (more alien life)
+    aliensPerShip: 5,
     powerupCount: 14,
-    droneCount: 12,
-    trafficCount: 6,
+    droneCount: 16,
+    trafficCount: 14, // hovercar traffic streaming the avenues
   },
 
   // News-ticker headlines (edit here). Reactive "BREAKING" lines are injected at

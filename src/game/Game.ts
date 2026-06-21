@@ -118,6 +118,7 @@ export class Game {
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
   private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial } | null = null
+  private rocketGate: THREE.Group | null = null
   private inMinigame = false
   private activePortal = new THREE.Vector3()
   private arcadeCooldown = 0
@@ -305,6 +306,7 @@ export class Game {
     this.arcadePortals.push(this.buildPortal('raceloop', 0xff2bd0, 0x27e7ff, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
     this.arcadePortals.push(this.buildPortal('mecharena', 0xff8a1e, 0x27e7ff, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
     this.buildPlazaHub()
+    this.buildRocketGate()
   }
 
   /**
@@ -341,6 +343,32 @@ export class Game {
     g.add(decal)
     this.engine.scene.add(g)
     this.plazaHub = { group: g, ring, ring2, beamMat: beam.material as THREE.MeshBasicMaterial }
+  }
+
+  /**
+   * Dresses the parked rocket (at 2,-20) as an obvious off-world gateway: a
+   * glowing launch-pad ring on the ground and a tall readable sign, so it reads
+   * as "go to Mars / the Moon", not background scenery. Earth-only.
+   */
+  private buildRocketGate() {
+    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
+    const ownG = <T extends THREE.BufferGeometry>(g: T) => { this.arcadeGeos.push(g); return g }
+    const x = 2, z = -20
+    const gy = this.physics.sampleGround(x, z, 40)?.y ?? 0
+    const g = new THREE.Group()
+    g.position.set(x, gy, z)
+    const ring = new THREE.Mesh(ownG(new THREE.RingGeometry(5, 6.3, 44)), own(new THREE.MeshBasicMaterial({ color: config.palette.orange, transparent: true, opacity: 0.45, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.14
+    g.add(ring)
+    const tex = this.makeLabelTexture('LAUNCH → MARS / MOON', config.palette.orange)
+    this.arcadeTex.push(tex)
+    const sign = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })))
+    sign.position.set(0, 17, 0)
+    sign.scale.set(15, 3.75, 1)
+    g.add(sign)
+    this.engine.scene.add(g)
+    this.rocketGate = g
   }
 
   private buildPortal(kind: MinigameKind, ringColor: number, discColor: number, label: string, pos: THREE.Vector3) {
@@ -391,7 +419,14 @@ export class Game {
     cv.height = 128
     const ctx = cv.getContext('2d')!
     ctx.clearRect(0, 0, cv.width, cv.height)
-    ctx.font = '800 72px ui-monospace, Menlo, monospace'
+    // Shrink the font until the label fits the canvas, so longer signage
+    // ("LAUNCH -> MARS / MOON") doesn't clip at the edges.
+    let size = 72
+    ctx.font = `800 ${size}px ui-monospace, Menlo, monospace`
+    while (size > 30 && ctx.measureText(text).width > cv.width - 36) {
+      size -= 4
+      ctx.font = `800 ${size}px ui-monospace, Menlo, monospace`
+    }
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.shadowColor = '#' + color.toString(16).padStart(6, '0')
@@ -1009,6 +1044,7 @@ export class Game {
       ;(p.disc.material as THREE.MeshBasicMaterial).opacity = 0.26 + Math.sin(_elapsed * 3) * 0.1
       ;(p.beam.material as THREE.MeshBasicMaterial).opacity = 0.22 + Math.sin(_elapsed * 2) * 0.06
     }
+    if (this.rocketGate) this.rocketGate.visible = onEarth
     // Plaza hero hub: spin the rings, pulse the sky beam.
     if (this.plazaHub) {
       this.plazaHub.group.visible = onEarth
@@ -1085,8 +1121,7 @@ export class Game {
         add(lm.x, lm.z, 'building'); lmCount++
       }
       for (const v of this.vehicles.list) add(v.position.x, v.position.z, 'vehicle')
-      const pp = this.events.policePos
-      if (pp) add(pp.x, pp.z, 'vehicle')
+      this.events.forEachPolice((x, z) => add(x, z, 'vehicle'))
       // Cap NPC + alien markers so the minimap stays meaningful.
       let npcCount = 0
       this.npcs.forEachAlive((x, z) => { if (npcCount < 8) { add(x, z, 'npc'); npcCount++ } })

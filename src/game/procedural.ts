@@ -550,8 +550,11 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
   const accent = neon[Math.floor(rnd() * neon.length)]
   const litHues = [...neon, '#fff0cf', '#bfe7ff', '#ffd9a8', '#cfffe9']
 
-  const cols = 6
-  const rows = 12
+  // Surface style varies per tower so the skyline isn't one repeated window
+  // grid: an even grid, wide horizontal louvers, or narrow vertical slits.
+  const style = Math.floor(rnd() * 3)
+  const cols = style === 1 ? 4 : style === 2 ? 9 : 6
+  const rows = style === 1 ? 16 : style === 2 ? 9 : 12
   const mx = 3
   const my = 3
   const cw = (w - mx * (cols + 1)) / cols
