@@ -79,6 +79,9 @@ export class Engine {
   private renderScale = 1
   private adaptTimer = 0
   private static readonly SCALE_FLOOR = 0.6
+  // Bloom render-target scale relative to the frame. Half-res = soft, cheap,
+  // and free of the sub-pixel shimmer full-res bloom amplifies on far neon.
+  private static readonly BLOOM_SCALE = 0.5
 
   constructor(container: HTMLElement, tier: QualityTier) {
     this.container = container
@@ -110,7 +113,12 @@ export class Engine {
     this.envTex = createEnvTexture(this.renderer)
     this.scene.environment = this.envTex
 
-    this.camera = new THREE.PerspectiveCamera(config.camera.fov, w / h, 0.1, 2000)
+    // Near/far define depth-buffer precision: the ratio (far/near) is what
+    // matters. 0.1/2000 (20,000:1) starved the buffer and let distant towers,
+    // the road grid and billboards z-fight and shimmer. 0.5/900 (1,800:1) is
+    // ~9x tighter while still clearing every fog-immune landmark (640m space
+    // elevator, 220m plaza beam, skyline ring, high ship flyovers).
+    this.camera = new THREE.PerspectiveCamera(config.camera.fov, w / h, 0.5, 900)
     this.camera.position.set(0, 12, 22)
     this.camera.lookAt(0, 1, 0)
 
@@ -137,8 +145,12 @@ export class Engine {
       this.composer.addPass(this.saoPass)
     }
 
+    // Bloom runs at half resolution. It's a blur to begin with, so the quality
+    // hit is invisible, but the downsample low-pass-filters the high-frequency
+    // sub-pixel glints on distant neon that full-res bloom was turning into
+    // crawling shimmer. Cheaper too.
     this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(w, h),
+      new THREE.Vector2(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE)),
       config.render.bloom.strength * (tier.name === 'high' ? 1 : 0.85),
       config.render.bloom.radius,
       config.render.bloom.threshold,
@@ -259,7 +271,7 @@ export class Engine {
     this.renderer.setSize(w, h)
     this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
-    this.bloomPass.setSize(w, h)
+    this.bloomPass.setSize(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE))
     this.saoPass?.setSize(w, h)
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }
@@ -275,7 +287,7 @@ export class Engine {
     this.renderer.setSize(w, h)
     this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
-    this.bloomPass.setSize(w, h)
+    this.bloomPass.setSize(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE))
     this.saoPass?.setSize(w, h)
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }

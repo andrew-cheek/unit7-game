@@ -329,6 +329,10 @@ export class Game {
     // Tall sky beam, visible from across the map.
     const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.6, 3.4, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     beam.position.y = 110
+    // Explicit renderOrder so this tall additive column always sorts after the
+    // city and in a stable slot, instead of swapping order with other
+    // transparent layers as the camera moves (the additive-flicker fix).
+    beam.renderOrder = 4
     g.add(beam)
     // Neon ground ring marking the plaza floor.
     const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
@@ -358,10 +362,13 @@ export class Game {
 
     const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(2.85, 48)), own(new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })))
     disc.position.y = 3.1
+    disc.renderOrder = 3
     g.add(disc)
 
     const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.2, 2.2, 90, 18, 1, true)), own(new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     beam.position.y = 45
+    // Stable sort slot for the additive column (see plaza beam note).
+    beam.renderOrder = 4
     g.add(beam)
 
     const tex = this.makeLabelTexture(label, ringColor)

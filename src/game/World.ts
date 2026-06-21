@@ -75,8 +75,10 @@ const DAWN = {
   sunI: 3.0,
 }
 // Building window glow is dimmed toward daytime so lit windows don't read at noon.
-const WINDOW_NIGHT_I = 1.7
-const WINDOW_DAY_I = 0.35
+// Night intensity pulled down (1.7 -> 1.25) on feedback that the city was a wall
+// of glow; windows should read as lit, not as light sources.
+const WINDOW_NIGHT_I = 1.25
+const WINDOW_DAY_I = 0.3
 
 /**
  * The futuristic district + its atmosphere. Stage 5 art pass turns the gray test
@@ -276,8 +278,11 @@ export class World {
 
     // Neon roofline trim on most towers + a vertical neon spine up tall ones.
     const neonCorner = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime][Math.floor(hash01(seed * 6.7) * 5)]
-    if (hash01(seed * 5.1) > 0.2) {
-      const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 3.2))
+    // Roofline trim on a little over half of towers (was ~80%), at a calmer
+    // intensity (was 3.2) so neon reads as accent trim, not a glowing crown on
+    // every roof. The dominant accent hue per tower keeps blocks coherent.
+    if (hash01(seed * 5.1) > 0.45) {
+      const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.9))
       trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
       trim.position.set(cx, h + 0.1, cz)
       this.group.add(trim)
@@ -286,8 +291,8 @@ export class World {
     // texture carries the sci-fi look, so these are skipped to hold frame rate.
     const richFacade = config.tier.name === 'high'
     // A glowing vertical spine on taller towers (front + back faces).
-    if (richFacade && h > 46 && hash01(seed * 8.9) > 0.4) {
-      const spineMat = this.glow(neonCorner, 2.8)
+    if (richFacade && h > 46 && hash01(seed * 8.9) > 0.55) {
+      const spineMat = this.glow(neonCorner, 1.8)
       for (const sz of [fz / 2 + 0.05, -fz / 2 - 0.05]) {
         const spine = new THREE.Mesh(this.boxGeo, spineMat)
         spine.scale.set(0.5, h * 0.92, 0.3)
@@ -296,8 +301,8 @@ export class World {
       }
     }
     // Stacked horizontal neon light-bands wrapping tall towers (Coruscant look).
-    if (richFacade && h > 58 && hash01(seed * 9.7) > 0.35) {
-      const bandMat = this.glow(neonCorner, 2.2)
+    if (richFacade && h > 58 && hash01(seed * 9.7) > 0.55) {
+      const bandMat = this.glow(neonCorner, 1.5)
       const bands = Math.min(3, Math.floor(h / 26))
       for (let k = 1; k <= bands; k++) {
         const band = new THREE.Mesh(this.boxGeo, bandMat)

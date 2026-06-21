@@ -558,32 +558,35 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
   const ch = (h - my * (rows + 1)) / rows
 
   for (let yy = 0; yy < rows; yy++) {
-    // Occasional full-width glowing "data band" (sci-fi signage strips).
-    const band = rnd() < 0.14
+    // Occasional full-width glowing "data band" (sci-fi signage strips). Rarer
+    // and dimmer now so they read as the odd lit strip, not a glowing grid.
+    const band = rnd() < 0.08
     for (let xx = 0; xx < cols; xx++) {
       const x = mx + xx * (cw + mx)
       const y = my + yy * (ch + my)
       if (band) {
         ctx.fillStyle = accent
-        ctx.globalAlpha = 0.55 + rnd() * 0.35
+        ctx.globalAlpha = 0.4 + rnd() * 0.25
         ctx.fillRect(x, y + ch * 0.3, cw, ch * 0.4)
         continue
       }
       const r = rnd()
-      if (r < 0.44) {
+      // Most windows are dark (was 44%, now ~60%) so the lit ones stand out.
+      if (r < 0.6) {
         // dark/unlit window
         ctx.fillStyle = '#0c1018'
         ctx.globalAlpha = 1
         ctx.fillRect(x, y, cw, ch)
-      } else if (r < 0.52) {
-        // "hot" window: near-white, full brightness -> blooms
+      } else if (r < 0.635) {
+        // "hot" window: near-white, full brightness -> blooms. Kept rare (~3.5%)
+        // so only a few specks blow out instead of a sheet of white.
         ctx.fillStyle = '#ffffff'
         ctx.globalAlpha = 1
         ctx.fillRect(x, y, cw, ch)
       } else {
         // lit: mostly the tower's accent, sometimes another neon/warm hue
         ctx.fillStyle = rnd() < 0.55 ? accent : litHues[Math.floor(rnd() * litHues.length)]
-        ctx.globalAlpha = 0.3 + rnd() * 0.6
+        ctx.globalAlpha = 0.25 + rnd() * 0.5
         ctx.fillRect(x, y, cw, ch)
         // half the lit windows get a brighter inner core for depth
         if (rnd() < 0.5) {
@@ -598,12 +601,12 @@ export function createWindowTexture(seed = 1): THREE.CanvasTexture {
   // Glowing neon mullions: thin vertical + horizontal lines between cells. These
   // tile across the facade and give the classic layered-neon megatower look.
   ctx.fillStyle = accent
-  ctx.globalAlpha = 0.32
+  ctx.globalAlpha = 0.2
   for (let xx = 0; xx <= cols; xx++) ctx.fillRect(mx / 2 + xx * (cw + mx) - 1, 0, 1, h)
-  ctx.globalAlpha = 0.12
+  ctx.globalAlpha = 0.08
   for (let yy = 0; yy <= rows; yy++) ctx.fillRect(0, my / 2 + yy * (ch + my) - 1, w, 1)
   // Bright edge pillars (left/right seams) so tiled facades show vertical neon.
-  ctx.globalAlpha = 0.9
+  ctx.globalAlpha = 0.6
   ctx.fillRect(0, 0, 2, h)
   ctx.fillRect(w - 2, 0, 2, h)
   ctx.globalAlpha = 1

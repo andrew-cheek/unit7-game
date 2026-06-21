@@ -15,7 +15,10 @@ export const config = {
     exposure: 0.98,
     // Toned down on feedback that the neon was too bright: lower strength + a
     // higher threshold so only genuinely bright sources bloom, not everything.
-    bloom: { strength: 0.5, radius: 0.5, threshold: 0.85 },
+    // Threshold raised again (0.85 -> 0.92) so dim/mid neon and sub-pixel glints
+    // on distant geometry stay below the bloom floor and don't shimmer; only the
+    // hero-bright signs blow out. Bloom also runs at half res (see Engine).
+    bloom: { strength: 0.5, radius: 0.5, threshold: 0.92 },
     shadowMapSize: 2048,
     // Frame dt is clamped to this so a backgrounded tab can't fling entities.
     maxFrameDelta: 0.05,
