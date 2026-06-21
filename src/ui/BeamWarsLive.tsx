@@ -9,16 +9,20 @@ import { miniSfx } from './miniSound'
  * for rendering and sends our steering inputs back. No local simulation, so the
  * two players always agree on the outcome. Your beam is cyan, the rival magenta.
  */
+const hexCss = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0')
+
 export function BeamWarsLive({
   match,
   touch,
   onDir,
   onQuit,
+  onRematch,
 }: {
   match: MatchView
   touch: boolean
   onDir: (dx: number, dy: number) => void
   onQuit: () => void
+  onRematch: () => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const trailA = useRef<Set<number>>(new Set())
@@ -75,10 +79,8 @@ export function BeamWarsLive({
   // --- render loop ---
   useEffect(() => {
     let raf = 0
-    const ourCol = '#27e7ff'
-    const rivalCol = '#ff2bd0'
-    const colA = side === 'a' ? ourCol : rivalCol
-    const colB = side === 'a' ? rivalCol : ourCol
+    const colA = hexCss(match.trailA)
+    const colB = hexCss(match.trailB)
     const draw = () => {
       raf = requestAnimationFrame(draw)
       const cv = canvasRef.current
@@ -134,26 +136,40 @@ export function BeamWarsLive({
   const won = match.winner === side
   const resultText = match.winner === 'draw' ? 'DRAW' : won ? 'YOU WIN' : 'DEFEATED'
   const resultColor = match.winner === 'draw' ? '#ffd24a' : won ? '#9bff4d' : '#ff2bd0'
+  const ourColor = hexCss(side === 'a' ? match.trailA : match.trailB)
+  const rivalColor = hexCss(side === 'a' ? match.trailB : match.trailA)
+  const r = match.result
 
   return (
     <div style={root}>
       <div style={topBar}>
-        <span style={{ color: '#27e7ff', fontWeight: 800 }}>YOU</span>
+        <span style={{ color: ourColor, fontWeight: 800 }}>YOU</span>
         <span style={{ color: 'rgba(223,238,255,0.6)' }}>BEAM WARS DUEL</span>
-        <span style={{ color: '#ff2bd0', fontWeight: 800 }}>{match.opp}</span>
+        <span style={{ color: rivalColor, fontWeight: 800 }}>{match.opp}</span>
       </div>
       <canvas ref={canvasRef} style={{ borderRadius: 8, boxShadow: '0 0 30px rgba(39,231,255,0.2)' }} />
 
       {match.status === 'ready' && (
         <div style={overlay}>
-          <div style={{ ...bigText, color: '#27e7ff' }}>GET READY</div>
+          <div style={{ ...bigText, color: ourColor }}>GET READY</div>
           <div style={subText}>facing {match.opp}</div>
         </div>
       )}
       {match.status === 'over' && (
         <div style={overlay}>
           <div style={{ ...bigText, color: resultColor }}>{resultText}</div>
-          <button style={ghostBtn} onClick={onQuit}>RETURN TO HUMANOID CITY</button>
+          {r && (
+            <div style={subText}>
+              <span style={{ color: r.delta >= 0 ? '#9bff4d' : '#ff5c5c' }}>{r.delta >= 0 ? '+' : ''}{r.delta} RP</span>
+              {'  ·  '}
+              <span style={{ color: r.tierColor }}>{r.tier}</span>
+              {r.streak > 1 ? `  ·  ${r.streak} WIN STREAK` : ''}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+            <button style={rematchBtn} onClick={onRematch}>REMATCH ↺</button>
+            <button style={ghostBtn} onClick={onQuit}>RETURN TO CITY</button>
+          </div>
         </div>
       )}
 
@@ -236,6 +252,17 @@ const ghostBtn: CSSProperties = {
   borderRadius: 999,
   color: 'rgba(223,238,255,0.95)',
   font: '700 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+}
+const rematchBtn: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '12px 22px',
+  background: 'linear-gradient(180deg,#5cf0ff,#27e7ff)',
+  border: 'none',
+  borderRadius: 999,
+  color: '#04121a',
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.14em',
 }
 const pad: CSSProperties = {

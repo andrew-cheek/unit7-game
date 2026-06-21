@@ -40,14 +40,19 @@ export function HUD({
   onRestart,
   onToggleMute,
   onChallenge,
+  onBuy,
+  onEquip,
 }: {
   hud: HudState
   touch: boolean
   onRestart: () => void
   onToggleMute: () => void
   onChallenge?: (id: string) => void
+  onBuy?: (id: string) => void
+  onEquip?: (slot: 'trail' | 'accent', id: string) => void
 }) {
   const [rosterOpen, setRosterOpen] = useState(false)
+  const [storeOpen, setStoreOpen] = useState(false)
   const [viewing, setViewing] = useState<string | null>(null)
   const profiles = hud.profiles ?? []
   const viewed = viewing === '__self__' ? profiles.find((p) => p.self) : viewing ? profiles.find((p) => p.id === viewing) : null
@@ -60,6 +65,7 @@ export function HUD({
       {/* top-left meters */}
       <div style={{ ...panel, top: 52, left: 14 }}>
         <Logo />
+        <PilotProgress p={hud.progress} />
         <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
         <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
         {hud.powerup && (
@@ -132,9 +138,17 @@ export function HUD({
 
       {/* pilots roster: open profiles + stats for yourself and everyone online */}
       {!hud.minigame && !hud.intro && (
-        <button style={pilotsBtn} onClick={() => setRosterOpen((v) => !v)}>
+        <button style={pilotsBtn} onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}>
           PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
         </button>
+      )}
+      {!hud.minigame && !hud.intro && (
+        <button style={storeBtn} onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}>
+          STORE
+        </button>
+      )}
+      {storeOpen && !hud.minigame && (
+        <CosmeticsStore p={hud.progress} onBuy={onBuy} onEquip={onEquip} onClose={() => setStoreOpen(false)} />
       )}
       {rosterOpen && !hud.minigame && (
         <div style={rosterPanel}>
@@ -193,9 +207,13 @@ function ProfileCard({ profile, onClose, onChallenge }: { profile: PlayerProfile
         <button style={closeX} onClick={onClose}>✕</button>
       </div>
       <div style={statRow}>
+        <Stat label="PILOT LV" value={String(profile.level)} color={NEON.cyan} />
+        <Stat label="DUEL RANK" value={profile.duelTier.replace('CLASS ', '')} color={profile.duelTierColor} />
+        <Stat label="CAUGHT" value={String(profile.aliens)} color={NEON.magenta} />
+      </div>
+      <div style={statRow}>
         <Stat label="W / L" value={`${totalWon} / ${totalLost}`} color={NEON.lime} />
         <Stat label="WIN RATE" value={`${rate}%`} color={NEON.orange} />
-        <Stat label="CAUGHT" value={String(profile.aliens)} color={NEON.magenta} />
       </div>
       <div style={{ ...microLabel, color: NEON.dim, marginTop: 12, marginBottom: 4 }}>BY GAME</div>
       {games.length === 0 && <div style={rosterHint}>No games played yet.</div>}
@@ -212,6 +230,90 @@ function ProfileCard({ profile, onClose, onChallenge }: { profile: PlayerProfile
           ⚔ CHALLENGE TO BEAM WARS
         </button>
       )}
+    </div>
+  )
+}
+
+const DAILY_LABEL: Record<string, (t: number) => string> = {
+  capture: (t) => `Capture ${t} aliens`,
+  play: (t) => `Play ${t} arcade games`,
+  duelWins: (t) => `Win ${t} duels`,
+}
+
+function PilotProgress({ p }: { p: HudState['progress'] }) {
+  const frac = p.xpSpan > 0 ? Math.max(0, Math.min(1, p.xpInto / p.xpSpan)) : 0
+  const d = p.daily
+  const dailyText = (DAILY_LABEL[d.kind] ?? ((t: number) => `Goal ${t}`))(d.target)
+  return (
+    <div style={{ width: 160, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+        <span style={{ ...microLabel, color: NEON.cyan }}>PILOT LV {p.level}</span>
+        {p.streak > 0 && <span style={{ ...microLabel, color: NEON.orange }}>🔥 {p.streak}d</span>}
+      </div>
+      <div style={barTrack}>
+        <div style={{ width: `${frac * 100}%`, height: '100%', background: NEON.cyan, boxShadow: `0 0 8px ${NEON.cyan}` }} />
+      </div>
+      <div style={{ ...microLabel, color: NEON.dim, marginTop: 5, display: 'flex', justifyContent: 'space-between' }}>
+        <span>DAILY</span>
+        <span style={{ color: d.claimed ? NEON.lime : NEON.text }}>{Math.min(d.progress, d.target)}/{d.target}{d.claimed ? ' ✓' : ''}</span>
+      </div>
+      <div style={{ font: '600 9px/1.3 ui-monospace, Menlo, monospace', color: d.claimed ? NEON.lime : 'rgba(223,238,255,0.7)', letterSpacing: '0.04em' }}>
+        {d.claimed ? 'Daily complete!' : dailyText}
+      </div>
+    </div>
+  )
+}
+
+const COSMETIC_SWATCHES: { id: string; name: string; css: string; cost: number }[] = [
+  { id: 'cyan', name: 'Cyan', css: '#27e7ff', cost: 0 },
+  { id: 'lime', name: 'Lime', css: '#9bff4d', cost: 300 },
+  { id: 'magenta', name: 'Magenta', css: '#ff2bd0', cost: 300 },
+  { id: 'orange', name: 'Ember', css: '#ff8a1e', cost: 500 },
+  { id: 'purple', name: 'Violet', css: '#8a5cff', cost: 500 },
+  { id: 'gold', name: 'Gold', css: '#ffd24a', cost: 900 },
+  { id: 'white', name: 'Pure', css: '#ffffff', cost: 1200 },
+  { id: 'red', name: 'Crimson', css: '#ff5c5c', cost: 1500 },
+]
+
+function CosmeticsStore({
+  p,
+  onBuy,
+  onEquip,
+  onClose,
+}: {
+  p: HudState['progress']
+  onBuy?: (id: string) => void
+  onEquip?: (slot: 'trail' | 'accent', id: string) => void
+  onClose: () => void
+}) {
+  return (
+    <div style={rosterPanel}>
+      <div style={rosterHead}>
+        <span>COLORS · {p.credits}c</span>
+        <button style={closeX} onClick={onClose}>✕</button>
+      </div>
+      <div style={rosterHint}>Your trail color shows in duels; your accent recolors your robot.</div>
+      <div style={swatchGrid}>
+        {COSMETIC_SWATCHES.map((c) => {
+          const owned = p.cosmetics.owned.includes(c.id)
+          const equipped = p.cosmetics.trail === c.id || p.cosmetics.accent === c.id
+          return (
+            <button
+              key={c.id}
+              style={{ ...swatch, borderColor: equipped ? c.css : 'rgba(255,255,255,0.14)', boxShadow: equipped ? `0 0 12px ${c.css}` : 'none' }}
+              onClick={() => (owned ? onEquip?.('trail', c.id) : onBuy?.(c.id))}
+              onContextMenu={(e) => { e.preventDefault(); if (owned) onEquip?.('accent', c.id) }}
+            >
+              <span style={{ width: 22, height: 22, borderRadius: 6, background: c.css, boxShadow: `0 0 8px ${c.css}` }} />
+              <span style={{ color: NEON.text, fontWeight: 700, fontSize: 10 }}>{c.name}</span>
+              <span style={{ color: owned ? (equipped ? NEON.lime : NEON.dim) : NEON.orange, fontSize: 9 }}>
+                {owned ? (equipped ? 'EQUIPPED' : 'tap: trail') : `${c.cost}c`}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div style={rosterHint}>Tap to buy / equip as trail. Right-click (or long-press) an owned color to set it as your robot accent.</div>
     </div>
   )
 }
@@ -457,6 +559,41 @@ const pilotsBtn: CSSProperties = {
   letterSpacing: '0.16em',
   boxShadow: '0 0 14px rgba(155,255,77,0.22)',
   zIndex: 24,
+}
+const storeBtn: CSSProperties = {
+  position: 'absolute',
+  right: 110,
+  bottom: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.72)',
+  border: '1px solid rgba(255,138,30,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 14px rgba(255,138,30,0.22)',
+  zIndex: 24,
+}
+const swatchGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 6,
+  margin: '6px 0',
+}
+const swatch: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  textAlign: 'left',
+  padding: '8px 10px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 8,
+  font: '600 10px/1.2 ui-monospace, Menlo, monospace',
 }
 const rosterPanel: CSSProperties = {
   position: 'absolute',

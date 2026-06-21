@@ -69,6 +69,22 @@ export interface HudState {
   profiles: PlayerProfile[] // roster of viewable pilot profiles (self first; networked others follow)
   challenge: { fromId: string; name: string } | null // incoming duel offer awaiting accept/decline
   match: MatchView | null // non-null while a live Beam Wars duel is on screen
+  progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
+}
+
+/** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */
+export interface ProgressHud {
+  level: number
+  xpInto: number // XP into the current level
+  xpSpan: number // XP the current level spans
+  streak: number // daily login streak
+  daily: { kind: string; target: number; progress: number; claimed: boolean }
+  duelRating: number
+  duelTier: string
+  duelTierColor: string
+  duelStreak: number
+  credits: number
+  cosmetics: { trail: string; accent: string; owned: string[] }
 }
 
 /** Live duel state the HUD/PvP view renders, driven by the server. */
@@ -84,6 +100,10 @@ export interface MatchView {
   status: 'ready' | 'play' | 'over'
   winner: 'a' | 'b' | 'draw' | null
   seq: number // increments each server tick (so the view appends trail cells)
+  oppId: string // opponent connection id (for one-tap rematch)
+  trailA: number // beam-A trail color (hex int), from that pilot's equipped cosmetic
+  trailB: number // beam-B trail color (hex int)
+  result: { delta: number; rating: number; tier: string; tierColor: string; streak: number } | null // filled on match end
 }
 
 /**
@@ -96,6 +116,9 @@ export interface PlayerProfile {
   name: string
   self: boolean
   aliens: number // lifetime shared-world alien captures
+  level: number // pilot level
+  duelTier: string // duel rank tier name (e.g. CLASS B)
+  duelTierColor: string
   games: { game: string; played: number; won: number; lost: number; best: number }[]
 }
 
@@ -120,6 +143,9 @@ export interface GameControls {
   declineChallenge(): void // decline the pending incoming duel offer
   matchDir(dx: number, dy: number): void // steer our beam in the active duel
   quitMatch(): void // leave / forfeit the active duel
+  rematch(): void // re-challenge the same opponent after a duel ends
+  buyCosmetic(id: string): void // unlock a cosmetic with credits (then auto-equips)
+  equipCosmetic(slot: 'trail' | 'accent', id: string): void // equip an owned cosmetic
 }
 
 export type GameAction =

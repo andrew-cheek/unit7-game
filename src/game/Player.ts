@@ -114,6 +114,10 @@ export class Player {
   setVisible(v: boolean) {
     this.object.visible = v
   }
+  /** Recolor the robot's accent/trim to an equipped cosmetic color. */
+  setAccent(color: number) {
+    this.model.setAccent(color)
+  }
   /** Fling the player upward (trampoline / bounce pad). */
   launch(strength: number) {
     this.velocity.y = strength

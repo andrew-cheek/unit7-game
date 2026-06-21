@@ -27,7 +27,11 @@ import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
 import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, recordGameResult, type Profile } from './storage'
-import type { HudState, MatchView, MinigameKind, PlayerProfile, RadarBlip, Unit7Config, Zone } from './types'
+import {
+  loadProgression, addXp, noteLogin, noteDaily, recordDuel, levelForXp, levelInfo, tierForRating, cosmeticById,
+  ownCosmetic, equipCosmetic as equipCosmeticStore, type Progression,
+} from './progression'
+import type { HudState, MatchView, MinigameKind, PlayerProfile, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
 export interface Capturable {
@@ -166,6 +170,7 @@ export class Game {
   private username = '' // callsign we joined the shared world under (empty when solo)
   private incomingChallenge: { fromId: string; name: string } | null = null
   private matchView: MatchView | null = null // live Beam Wars duel state (null when not dueling)
+  private progression: Progression = loadProgression()
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -288,10 +293,10 @@ export class Game {
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
       cycleNeon: () => this.cycleNeon(),
-      challengePilot: (id: string) => this.net?.sendChallenge(id),
+      challengePilot: (id: string) => this.net?.sendChallenge(id, this.equippedTrailColor()),
       acceptChallenge: () => {
         if (!this.incomingChallenge) return
-        this.net?.sendAccept(this.incomingChallenge.fromId)
+        this.net?.sendAccept(this.incomingChallenge.fromId, this.equippedTrailColor())
         this.incomingChallenge = null
       },
       declineChallenge: () => {
@@ -301,6 +306,13 @@ export class Game {
       },
       matchDir: (dx: number, dy: number) => this.net?.sendMatchDir(dx, dy),
       quitMatch: () => this.leaveMatch(),
+      rematch: () => {
+        const oppId = this.matchView?.oppId
+        this.leaveMatch()
+        if (oppId) this.net?.sendChallenge(oppId, this.equippedTrailColor())
+      },
+      buyCosmetic: (id: string) => this.buyCosmetic(id),
+      equipCosmetic: (slot: 'trail' | 'accent', id: string) => this.equipCosmetic(slot, id),
     }
 
     this.hud = {
@@ -319,9 +331,15 @@ export class Game {
       profiles: [],
       challenge: null,
       match: null,
+      progress: this.buildProgressHud(),
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
+    // Roll the daily objective / update the login streak, and apply the equipped
+    // accent cosmetic to the player's robot.
+    noteLogin()
+    this.refreshProgression()
+    this.applyAccentCosmetic()
 
     this.engine.onUpdate = this.update
     if (import.meta.env.DEV) (window as unknown as { __unit7?: Game }).__unit7 = this
@@ -681,6 +699,11 @@ export class Game {
     this.input.setLockEnabled(true)
     this.camera.snap(this.player.position)
     this.engine.start()
+    // Playing a cabinet counts toward XP + the daily "play" objective.
+    this.awardXp(15)
+    const d = noteDaily('play', 1)
+    if (d.completed && d.reward) this.grantDailyReward(d.reward)
+    this.refreshProgression()
     this.hudListener({ ...this.hud, radar: this.radar })
     // A minigame may have changed our W/L record; refresh the shared profile.
     this.publishProfile()
@@ -893,6 +916,7 @@ export class Game {
       this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
       vibrate(25)
       this.audio.play('capture')
+      this.awardCaptureProgress(1)
       // Let everyone else see the capture happen.
       this.net?.sendCapture([best.position.x, best.position.y, best.position.z], award)
     }
@@ -1089,7 +1113,7 @@ export class Game {
       this.hud.captured += 1
       hits++
     }
-    if (hits > 0) vibrate(40)
+    if (hits > 0) { vibrate(40); this.awardCaptureProgress(hits) }
     this.audio.play('explosion')
   }
 
@@ -1244,9 +1268,13 @@ export class Game {
           this.hud.banner = `${name} IS BUSY`
           this.bannerTimer = 2
         },
-        onMatchStart: (side, opp, cols, rows, a, b, _startIn) => {
+        onMatchStart: (info) => {
           this.incomingChallenge = null
-          this.matchView = { side, opp, cols, rows, a, b, aAlive: true, bAlive: true, status: 'ready', winner: null, seq: 0 }
+          this.matchView = {
+            side: info.side, opp: info.opp, oppId: info.oppId, cols: info.cols, rows: info.rows,
+            a: info.a, b: info.b, aAlive: true, bAlive: true, status: 'ready', winner: null, seq: 0,
+            trailA: info.trailA, trailB: info.trailB, result: null,
+          }
           this.input.setLockEnabled(false)
           this.audio.play('ui')
         },
@@ -1262,8 +1290,21 @@ export class Game {
           if (!m) return
           m.status = 'over'
           m.winner = winner
-          if (winner !== 'draw') recordGameResult('beamwars', winner === m.side ? 'win' : 'loss')
-          this.publishProfile() // duel changed our W/L; refresh the shared profile
+          if (winner !== 'draw') {
+            const won = winner === m.side
+            recordGameResult('beamwars', won ? 'win' : 'loss')
+            const r = recordDuel(won)
+            m.result = { delta: r.delta, rating: r.rating, tier: r.tier.name, tierColor: r.tier.color, streak: r.streak }
+            this.awardXp(won ? 60 : 15)
+            if (won) {
+              const d = noteDaily('duelWins', 1)
+              if (d.completed && d.reward) this.grantDailyReward(d.reward)
+            }
+          } else {
+            this.awardXp(20) // a draw still earns a little
+          }
+          this.refreshProgression()
+          this.publishProfile() // duel changed our W/L + level; refresh the shared profile
         },
       },
       { host },
@@ -1272,6 +1313,85 @@ export class Game {
     // open + the server to register us), then it refreshes on captures / game
     // results via publishProfile().
     setTimeout(() => this.publishProfile(), 800)
+  }
+
+  // --- progression / gamification ---------------------------------------------
+
+  /** Refresh the cached progression snapshot and mark the HUD roster dirty. */
+  private refreshProgression() {
+    this.progression = loadProgression()
+    this.profilesDirty = true
+  }
+
+  /** Banner + sting when a level boundary is crossed. */
+  private flashLevelUp(level: number) {
+    this.hud.banner = `PILOT LV ${level}`
+    this.bannerTimer = 2.2
+    this.audio.play('objective')
+    vibrate(60)
+  }
+
+  /** Grant the daily-objective reward (credits + the XP was already added). */
+  private grantDailyReward(reward: { credits: number; xp: number }) {
+    this.addCredits(reward.credits)
+    this.hud.banner = `DAILY DONE  +${reward.credits}c`
+    this.bannerTimer = 2.6
+    this.audio.play('objective')
+    vibrate(50)
+  }
+
+  /** Award XP (with level-up feedback) and refresh the cached snapshot. */
+  private awardXp(amount: number) {
+    const r = addXp(amount)
+    if (r.leveledUp) this.flashLevelUp(r.level)
+    this.refreshProgression()
+  }
+
+  /** One capture's worth of progress: XP + daily objective. */
+  private awardCaptureProgress(n = 1) {
+    this.awardXp(5 * n)
+    const d = noteDaily('capture', n)
+    if (d.completed && d.reward) this.grantDailyReward(d.reward)
+    this.refreshProgression()
+  }
+
+  /** Equipped trail color (hex int) for duels; defaults to cyan. */
+  private equippedTrailColor(): number {
+    return cosmeticById(this.progression.cosmetics.trail).color
+  }
+
+  /** Buy a cosmetic with credits, then auto-equip it (trail by default). */
+  private buyCosmetic(id: string) {
+    const c = cosmeticById(id)
+    if (this.progression.cosmetics.owned.includes(id)) return // already owned
+    if (this.credits < c.cost) {
+      this.hud.banner = 'NOT ENOUGH CREDITS'
+      this.bannerTimer = 1.8
+      this.audio.play('ui')
+      return
+    }
+    this.addCredits(-c.cost)
+    ownCosmetic(id)
+    equipCosmeticStore('trail', id)
+    equipCosmeticStore('accent', id)
+    this.refreshProgression()
+    this.applyAccentCosmetic()
+    this.hud.banner = `UNLOCKED ${c.name.toUpperCase()}`
+    this.bannerTimer = 2
+    this.audio.play('objective')
+    vibrate(40)
+  }
+
+  private equipCosmetic(slot: 'trail' | 'accent', id: string) {
+    equipCosmeticStore(slot, id)
+    this.refreshProgression()
+    if (slot === 'accent') this.applyAccentCosmetic()
+  }
+
+  /** Recolor the local robot avatar to the equipped accent cosmetic. */
+  private applyAccentCosmetic() {
+    const color = cosmeticById(this.progression.cosmetics.accent).color
+    this.player.setAccent(color)
   }
 
   /** Build our wire profile from persisted stats + lifetime captures and send it. */
@@ -1283,7 +1403,27 @@ export class Game {
     for (const [game, r] of Object.entries(stats.games)) {
       games[game] = [r.played, r.won, r.lost, r.best]
     }
-    this.net.sendProfile(this.profile.lifetimeCaptured + this.hud.captured, games)
+    this.net.sendProfile(this.profile.lifetimeCaptured + this.hud.captured, games, levelForXp(this.progression.xp), this.progression.duelRating)
+  }
+
+  /** Snapshot the gamification state for the HUD (level/streak/daily/rank/cosmetics). */
+  private buildProgressHud(): ProgressHud {
+    const p = this.progression
+    const li = levelInfo(p.xp)
+    const tier = tierForRating(p.duelRating)
+    return {
+      level: li.level,
+      xpInto: li.into,
+      xpSpan: li.span,
+      streak: p.streak,
+      daily: { kind: p.daily.kind, target: p.daily.target, progress: p.daily.progress, claimed: p.daily.claimed },
+      duelRating: p.duelRating,
+      duelTier: tier.name,
+      duelTierColor: tier.color,
+      duelStreak: p.duelStreak,
+      credits: this.credits,
+      cosmetics: { trail: p.cosmetics.trail, accent: p.cosmetics.accent, owned: [...p.cosmetics.owned] },
+    }
   }
 
   /** Rebuild the HUD profile roster (self first, then networked pilots). */
@@ -1296,28 +1436,38 @@ export class Game {
       lost: r.lost,
       best: r.best,
     }))
+    const selfTier = tierForRating(this.progression.duelRating)
     const self: PlayerProfile = {
       id: this.net?.myId ?? '',
       name: this.username || stats.callsign || 'YOU',
       self: true,
       aliens: this.profile.lifetimeCaptured + this.hud.captured,
+      level: levelForXp(this.progression.xp),
+      duelTier: selfTier.name,
+      duelTierColor: selfTier.color,
       games: selfGames,
     }
     const others: PlayerProfile[] = this.remoteProfiles
       .filter((p) => p.id !== this.net?.myId)
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        self: false,
-        aliens: p.aliens,
-        games: Object.entries(p.games).map(([game, t]) => ({
-          game,
-          played: t[0] ?? 0,
-          won: t[1] ?? 0,
-          lost: t[2] ?? 0,
-          best: t[3] ?? 0,
-        })),
-      }))
+      .map((p) => {
+        const t = tierForRating(p.rating ?? 1000)
+        return {
+          id: p.id,
+          name: p.name,
+          self: false,
+          aliens: p.aliens,
+          level: p.level ?? 1,
+          duelTier: t.name,
+          duelTierColor: t.color,
+          games: Object.entries(p.games).map(([game, tup]) => ({
+            game,
+            played: tup[0] ?? 0,
+            won: tup[1] ?? 0,
+            lost: tup[2] ?? 0,
+            best: tup[3] ?? 0,
+          })),
+        }
+      })
     return [self, ...others]
   }
 
@@ -1772,6 +1922,7 @@ export class Game {
     this.hud.profiles = this.hudProfiles
     this.hud.challenge = this.incomingChallenge
     this.hud.match = this.matchView ? { ...this.matchView } : null
+    this.hud.progress = this.buildProgressHud()
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }

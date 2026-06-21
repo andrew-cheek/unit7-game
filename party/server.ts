@@ -48,6 +48,8 @@ type WireGames = Record<string, [number, number, number, number]>
 
 interface Profile {
   aliens: number
+  level: number
+  rating: number
   games: WireGames
 }
 
@@ -61,6 +63,7 @@ interface Match {
   an: string // names (for the result toast)
   bn: string
   grid: Uint8Array // COLS*ROWS, 0 empty / 1 a-trail / 2 b-trail
+  aTrail: number; bTrail: number // each pilot's equipped trail color (hex int)
   ax: number; ay: number; adx: number; ady: number; aAlive: boolean; aq: Dir | null
   bx: number; by: number; bdx: number; bdy: number; bAlive: boolean; bq: Dir | null
   loop: ReturnType<typeof setInterval> | null
@@ -71,9 +74,9 @@ type ClientMsg =
   | ({ t: 'state' } & Omit<PlayerSnapshot, 'id' | 'name'>)
   | { t: 'capture'; p: Vec3; award: number }
   | { t: 'claim'; id: number }
-  | { t: 'profile'; aliens: number; games: WireGames }
-  | { t: 'challenge'; to: string }
-  | { t: 'accept'; from: string }
+  | { t: 'profile'; aliens: number; games: WireGames; level?: number; rating?: number }
+  | { t: 'challenge'; to: string; trail?: number }
+  | { t: 'accept'; from: string; trail?: number }
   | { t: 'decline'; from: string }
   | { t: 'matchDir'; dir: Dir }
   | { t: 'matchQuit' }
@@ -95,8 +98,8 @@ export default class WorldServer implements Party.Server {
   private profiles = new Map<string, Profile>()
   private nextAlienId = 1
   private tick: ReturnType<typeof setInterval> | null = null
-  // Challenge handshakes (challengerId -> targetId) and live matches by id.
-  private challenges = new Map<string, string>()
+  // Challenge handshakes (challengerId -> {target, trail}) and live matches by id.
+  private challenges = new Map<string, { to: string; trail: number }>()
   private matches = new Map<string, Match>()
   private inMatch = new Map<string, string>() // connId -> matchId (busy guard)
 
@@ -139,7 +142,7 @@ export default class WorldServer implements Party.Server {
         id: sender.id, name, p: [0, 0, 0], y: 0, m: 'robot', v: null, z: 'earth', s: 0, g: true,
       })
       this.scores.set(sender.id, { name, score: 0 })
-      this.profiles.set(sender.id, { aliens: 0, games: {} })
+      this.profiles.set(sender.id, { aliens: 0, level: 1, rating: 1000, games: {} })
       // Newcomer gets the roster, the live scoreboard, the current swarm and
       // the profiles of everyone already here.
       sender.send(
@@ -161,7 +164,12 @@ export default class WorldServer implements Party.Server {
 
     if (msg.t === 'profile') {
       if (!this.players.has(sender.id)) return
-      this.profiles.set(sender.id, { aliens: Math.max(0, msg.aliens | 0), games: sanitizeGames(msg.games) })
+      this.profiles.set(sender.id, {
+        aliens: Math.max(0, msg.aliens | 0),
+        level: Math.max(1, Math.min(9999, (msg.level as number) | 0 || 1)),
+        rating: Math.max(0, Math.min(99999, (msg.rating as number) | 0 || 1000)),
+        games: sanitizeGames(msg.games),
+      })
       this.broadcastProfiles()
       return
     }
@@ -175,7 +183,7 @@ export default class WorldServer implements Party.Server {
         sender.send(JSON.stringify({ t: 'challengeBusy', name: target.name }))
         return
       }
-      this.challenges.set(sender.id, msg.to)
+      this.challenges.set(sender.id, { to: msg.to, trail: colorOf(msg.trail) })
       const conn = this.room.getConnection(msg.to)
       conn?.send(JSON.stringify({ t: 'challenged', from: sender.id, name: me.name }))
       return
@@ -183,7 +191,7 @@ export default class WorldServer implements Party.Server {
 
     if (msg.t === 'decline') {
       // `from` is the challenger; tell them it was declined and drop the offer.
-      if (this.challenges.get(msg.from) === sender.id) {
+      if (this.challenges.get(msg.from)?.to === sender.id) {
         this.challenges.delete(msg.from)
         const me = this.players.get(sender.id)
         this.room.getConnection(msg.from)?.send(JSON.stringify({ t: 'challengeDeclined', name: me?.name ?? 'PILOT' }))
@@ -193,10 +201,11 @@ export default class WorldServer implements Party.Server {
 
     if (msg.t === 'accept') {
       // `from` is the challenger; the sender is the target accepting.
-      if (this.challenges.get(msg.from) !== sender.id) return
+      const offer = this.challenges.get(msg.from)
+      if (!offer || offer.to !== sender.id) return
       this.challenges.delete(msg.from)
       if (this.inMatch.has(msg.from) || this.inMatch.has(sender.id)) return
-      this.startMatch(msg.from, sender.id)
+      this.startMatch(msg.from, sender.id, offer.trail, colorOf(msg.trail))
       return
     }
 
@@ -317,7 +326,7 @@ export default class WorldServer implements Party.Server {
 
   // --- live Beam Wars duels ----------------------------------------------------
 
-  private startMatch(aId: string, bId: string) {
+  private startMatch(aId: string, bId: string, aTrail = 0x27e7ff, bTrail = 0xff2bd0) {
     const C = WorldServer.BW_COLS
     const R = WorldServer.BW_ROWS
     const grid = new Uint8Array(C * R)
@@ -330,7 +339,7 @@ export default class WorldServer implements Party.Server {
       id, a: aId, b: bId,
       an: this.players.get(aId)?.name ?? 'PILOT',
       bn: this.players.get(bId)?.name ?? 'PILOT',
-      grid,
+      grid, aTrail, bTrail,
       ax, ay, adx: 1, ady: 0, aAlive: true, aq: null,
       bx, by, bdx: -1, bdy: 0, bAlive: true, bq: null,
       loop: null,
@@ -338,10 +347,11 @@ export default class WorldServer implements Party.Server {
     this.matches.set(id, m)
     this.inMatch.set(aId, id)
     this.inMatch.set(bId, id)
-    // Each side learns which beam is theirs, who they face, and both start cells.
-    const base = { cols: C, rows: R, a: [ax, ay], b: [bx, by], startIn: WorldServer.BW_START_MS }
-    this.room.getConnection(aId)?.send(JSON.stringify({ t: 'matchStart', side: 'a', opp: m.bn, ...base }))
-    this.room.getConnection(bId)?.send(JSON.stringify({ t: 'matchStart', side: 'b', opp: m.an, ...base }))
+    // Each side learns which beam is theirs, who they face (id for rematch), both
+    // start cells, and both trail colors.
+    const base = { cols: C, rows: R, a: [ax, ay], b: [bx, by], trailA: aTrail, trailB: bTrail, startIn: WorldServer.BW_START_MS }
+    this.room.getConnection(aId)?.send(JSON.stringify({ t: 'matchStart', side: 'a', opp: m.bn, oppId: bId, ...base }))
+    this.room.getConnection(bId)?.send(JSON.stringify({ t: 'matchStart', side: 'b', opp: m.an, oppId: aId, ...base }))
     // Begin stepping after the "get ready" beat.
     setTimeout(() => {
       if (this.matches.get(id) !== m) return
@@ -391,12 +401,12 @@ export default class WorldServer implements Party.Server {
     this.room.getConnection(m.b)?.send(payload)
   }
 
-  private profileArray(): { id: string; name: string; aliens: number; games: WireGames }[] {
-    const out: { id: string; name: string; aliens: number; games: WireGames }[] = []
+  private profileArray(): { id: string; name: string; aliens: number; level: number; rating: number; games: WireGames }[] {
+    const out: { id: string; name: string; aliens: number; level: number; rating: number; games: WireGames }[] = []
     for (const [id, prof] of this.profiles) {
       const player = this.players.get(id)
       if (!player) continue
-      out.push({ id, name: player.name, aliens: prof.aliens, games: prof.games })
+      out.push({ id, name: player.name, aliens: prof.aliens, level: prof.level, rating: prof.rating, games: prof.games })
     }
     return out
   }
@@ -424,6 +434,12 @@ function sanitizeGames(raw: unknown): WireGames {
 function num(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) && n >= 0 ? Math.min(1e7, Math.floor(n)) : 0
+}
+
+/** Clamp an incoming trail color to a valid 24-bit hex int (default cyan). */
+function colorOf(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 && n <= 0xffffff ? Math.floor(n) : 0x27e7ff
 }
 
 function round(n: number): number {

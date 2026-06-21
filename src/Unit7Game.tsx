@@ -114,6 +114,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onRestart={() => controlsRef.current?.restartIntro()}
           onToggleMute={() => controlsRef.current?.toggleMute()}
           onChallenge={(id) => controlsRef.current?.challengePilot(id)}
+          onBuy={(id) => controlsRef.current?.buyCosmetic(id)}
+          onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
         />
       )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
@@ -180,6 +182,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
             touch={touch}
             onDir={(dx, dy) => controlsRef.current?.matchDir(dx, dy)}
             onQuit={() => controlsRef.current?.quitMatch()}
+            onRematch={() => controlsRef.current?.rematch()}
           />
         </Suspense>
       )}

@@ -23,6 +23,8 @@ export interface RobotModel extends CharacterModel {
   setThrust(amount: number): void
   /** Morph toward the winged plane form. amount 0..1. */
   setPlanePose(amount: number): void
+  /** Recolor the robot's accent + trim/wing glow (cosmetic). */
+  setAccent(color: number): void
 }
 
 export interface VehicleModel {
@@ -281,6 +283,12 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     thrust = Math.min(1, Math.max(0, amount))
   }
 
+  const setAccent = (color: number) => {
+    accentMat.color.setHex(color)
+    trimMat.emissive.setHex(color)
+    wingEdgeMat.emissive.setHex(color)
+  }
+
   const dispose = () => {
     group.traverse((o) => {
       const m = o as THREE.Mesh
@@ -289,7 +297,7 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     mats.forEach((m) => m.dispose())
   }
 
-  return { group, update, setFlyPose, setPlanePose, setThrust, dispose }
+  return { group, update, setFlyPose, setPlanePose, setThrust, setAccent, dispose }
 }
 
 /** Spindly big-headed alien with glowing eyes - distinct from the citizens. */
