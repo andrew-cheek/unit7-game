@@ -16,7 +16,7 @@ import { Zones } from './Zones'
 import { Events } from './Events'
 import { Intro } from './Intro'
 import { CameraController } from './Camera'
-import { Net, type NetState, type ScoreRow } from './Net'
+import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
 import { WorldEvents } from './WorldEvents'
@@ -26,8 +26,8 @@ import { DawnShow } from './DawnShow'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, type Profile } from './storage'
-import type { HudState, MinigameKind, RadarBlip, Unit7Config, Zone } from './types'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
+import type { HudState, MinigameKind, PlayerProfile, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
 export interface Capturable {
@@ -160,6 +160,10 @@ export class Game {
   private netAccum = 0
   private online = 1 // players in the world incl. self (1 = solo)
   private leaderboard: ScoreRow[] = []
+  private remoteProfiles: NetProfile[] = [] // other pilots' viewable profiles (networked)
+  private hudProfiles: PlayerProfile[] = [] // built roster (self + others) for the HUD
+  private profilesDirty = true // rebuild hudProfiles only when stats/roster change
+  private username = '' // callsign we joined the shared world under (empty when solo)
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -297,6 +301,7 @@ export class Game {
       online: 1,
       leaderboard: [],
       neon: this.neonLevel,
+      profiles: [],
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -660,6 +665,8 @@ export class Game {
     this.camera.snap(this.player.position)
     this.engine.start()
     this.hudListener({ ...this.hud, radar: this.radar })
+    // A minigame may have changed our W/L record; refresh the shared profile.
+    this.publishProfile()
   }
 
   // --- zone travel ---------------------------------------------------------
@@ -1145,6 +1152,7 @@ export class Game {
    */
   connectMultiplayer(username: string, host?: string) {
     if (this.net) return // already connected/connecting
+    this.username = username
     this.net = new Net(
       username,
       {
@@ -1185,14 +1193,70 @@ export class Game {
             this.addCredits(Math.round(award * 0.5))
             vibrate(25)
             this.audio.play('capture')
+            this.publishProfile() // capture count changed; refresh shared profile
           }
         },
         onScores: (board) => {
           this.leaderboard = board
         },
+        onProfiles: (list) => {
+          this.remoteProfiles = list
+          this.profilesDirty = true
+        },
       },
       { host },
     )
+    // Publish our profile shortly after connecting (gives the socket time to
+    // open + the server to register us), then it refreshes on captures / game
+    // results via publishProfile().
+    setTimeout(() => this.publishProfile(), 800)
+  }
+
+  /** Build our wire profile from persisted stats + lifetime captures and send it. */
+  private publishProfile() {
+    this.profilesDirty = true // our own stats changed; rebuild the HUD roster (solo + networked)
+    if (!this.net) return
+    const stats = loadStats()
+    const games: WireGames = {}
+    for (const [game, r] of Object.entries(stats.games)) {
+      games[game] = [r.played, r.won, r.lost, r.best]
+    }
+    this.net.sendProfile(this.profile.lifetimeCaptured + this.hud.captured, games)
+  }
+
+  /** Rebuild the HUD profile roster (self first, then networked pilots). */
+  private buildHudProfiles(): PlayerProfile[] {
+    const stats = loadStats()
+    const selfGames = Object.entries(stats.games).map(([game, r]) => ({
+      game,
+      played: r.played,
+      won: r.won,
+      lost: r.lost,
+      best: r.best,
+    }))
+    const self: PlayerProfile = {
+      id: this.net?.myId ?? '',
+      name: this.username || stats.callsign || 'YOU',
+      self: true,
+      aliens: this.profile.lifetimeCaptured + this.hud.captured,
+      games: selfGames,
+    }
+    const others: PlayerProfile[] = this.remoteProfiles
+      .filter((p) => p.id !== this.net?.myId)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        self: false,
+        aliens: p.aliens,
+        games: Object.entries(p.games).map(([game, t]) => ({
+          game,
+          played: t[0] ?? 0,
+          won: t[1] ?? 0,
+          lost: t[2] ?? 0,
+          best: t[3] ?? 0,
+        })),
+      }))
+    return [self, ...others]
   }
 
   /**
@@ -1633,6 +1697,11 @@ export class Game {
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
     this.hud.online = this.online
     this.hud.leaderboard = this.leaderboard
+    if (this.profilesDirty) {
+      this.hudProfiles = this.buildHudProfiles()
+      this.profilesDirty = false
+    }
+    this.hud.profiles = this.hudProfiles
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }

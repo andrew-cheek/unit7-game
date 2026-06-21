@@ -43,11 +43,20 @@ interface Alien {
   big: boolean
 }
 
+/** Compact per-game record on the wire: [played, won, lost, best]. */
+type WireGames = Record<string, [number, number, number, number]>
+
+interface Profile {
+  aliens: number
+  games: WireGames
+}
+
 type ClientMsg =
   | { t: 'join'; name: string }
   | ({ t: 'state' } & Omit<PlayerSnapshot, 'id' | 'name'>)
   | { t: 'capture'; p: Vec3; award: number }
   | { t: 'claim'; id: number }
+  | { t: 'profile'; aliens: number; games: WireGames }
 
 export default class WorldServer implements Party.Server {
   static readonly MAX_PLAYERS = 60
@@ -58,6 +67,7 @@ export default class WorldServer implements Party.Server {
   private players = new Map<string, PlayerSnapshot>()
   private aliens = new Map<number, Alien>()
   private scores = new Map<string, { name: string; score: number }>()
+  private profiles = new Map<string, Profile>()
   private nextAlienId = 1
   private tick: ReturnType<typeof setInterval> | null = null
 
@@ -65,9 +75,11 @@ export default class WorldServer implements Party.Server {
 
   onClose(conn: Party.Connection) {
     this.players.delete(conn.id)
+    this.profiles.delete(conn.id)
     if (this.scores.delete(conn.id)) {
       this.broadcastScores()
     }
+    this.broadcastProfiles()
     this.room.broadcast(JSON.stringify({ t: 'leave', id: conn.id }))
     if (this.scores.size === 0) this.stopSim()
   }
@@ -94,7 +106,9 @@ export default class WorldServer implements Party.Server {
         id: sender.id, name, p: [0, 0, 0], y: 0, m: 'robot', v: null, z: 'earth', s: 0, g: true,
       })
       this.scores.set(sender.id, { name, score: 0 })
-      // Newcomer gets the roster, the live scoreboard and the current swarm.
+      this.profiles.set(sender.id, { aliens: 0, games: {} })
+      // Newcomer gets the roster, the live scoreboard, the current swarm and
+      // the profiles of everyone already here.
       sender.send(
         JSON.stringify({
           t: 'welcome',
@@ -102,11 +116,20 @@ export default class WorldServer implements Party.Server {
           players: [...this.players.values()].filter((p) => p.id !== sender.id),
           scores: this.boardArray(),
           aliens: this.alienArray(),
+          profiles: this.profileArray(),
         }),
       )
       this.room.broadcast(JSON.stringify({ t: 'join', id: sender.id, name }), [sender.id])
       this.broadcastScores()
+      this.broadcastProfiles()
       this.startSim()
+      return
+    }
+
+    if (msg.t === 'profile') {
+      if (!this.players.has(sender.id)) return
+      this.profiles.set(sender.id, { aliens: Math.max(0, msg.aliens | 0), games: sanitizeGames(msg.games) })
+      this.broadcastProfiles()
       return
     }
 
@@ -204,6 +227,40 @@ export default class WorldServer implements Party.Server {
   private broadcastScores() {
     this.room.broadcast(JSON.stringify({ t: 'scores', board: this.boardArray() }))
   }
+
+  private profileArray(): { id: string; name: string; aliens: number; games: WireGames }[] {
+    const out: { id: string; name: string; aliens: number; games: WireGames }[] = []
+    for (const [id, prof] of this.profiles) {
+      const player = this.players.get(id)
+      if (!player) continue
+      out.push({ id, name: player.name, aliens: prof.aliens, games: prof.games })
+    }
+    return out
+  }
+
+  private broadcastProfiles() {
+    this.room.broadcast(JSON.stringify({ t: 'profiles', list: this.profileArray() }))
+  }
+}
+
+/** Clamp incoming profile games to a sane, bounded shape (avoid abuse / bloat). */
+function sanitizeGames(raw: unknown): WireGames {
+  const out: WireGames = {}
+  if (!raw || typeof raw !== 'object') return out
+  let n = 0
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (n++ >= 24) break
+    if (!Array.isArray(v)) continue
+    const key = String(k).replace(/[^\w]/g, '').slice(0, 16)
+    if (!key) continue
+    out[key] = [num(v[0]), num(v[1]), num(v[2]), num(v[3])]
+  }
+  return out
+}
+
+function num(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.min(1e7, Math.floor(n)) : 0
 }
 
 function round(n: number): number {

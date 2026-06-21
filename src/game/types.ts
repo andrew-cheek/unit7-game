@@ -66,6 +66,20 @@ export interface HudState {
   online: number // players in the shared world incl. self (1 = solo / not connected)
   leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
   neon: 'low' | 'med' | 'high' // neon density / quality setting
+  profiles: PlayerProfile[] // roster of viewable pilot profiles (self first; networked others follow)
+}
+
+/**
+ * A pilot's viewable profile: identity plus a compact win/loss record per
+ * competitive game and lifetime shared-world captures. `self` flags the local
+ * player. `id` is the network connection id (empty for the offline self).
+ */
+export interface PlayerProfile {
+  id: string
+  name: string
+  self: boolean
+  aliens: number // lifetime shared-world alien captures
+  games: { game: string; played: number; won: number; lost: number; best: number }[]
 }
 
 export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena' | 'drivemad'

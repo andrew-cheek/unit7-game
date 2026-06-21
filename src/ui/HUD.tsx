@@ -1,5 +1,17 @@
-import { type CSSProperties } from 'react'
-import type { BlipKind, HudState } from '../game/types'
+import { useState, type CSSProperties } from 'react'
+import type { BlipKind, HudState, PlayerProfile } from '../game/types'
+
+// Friendly labels for the per-game W/L lines on a profile card.
+const GAME_LABELS: Record<string, string> = {
+  beamwars: 'BEAM WARS',
+  digduel: 'DIG DUEL',
+  merge2048: '2048',
+  invaders: 'INVADERS',
+  snake: 'SNAKE',
+  raceloop: 'RACE LOOP',
+  mecharena: 'MECH ARENA',
+  drivemad: 'DRIVE FRENZY',
+}
 
 const NEON = {
   cyan: '#27e7ff',
@@ -23,6 +35,10 @@ const BLIP_COLOR: Record<BlipKind, string> = {
 }
 
 export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; touch: boolean; onRestart: () => void; onToggleMute: () => void }) {
+  const [rosterOpen, setRosterOpen] = useState(false)
+  const [viewing, setViewing] = useState<string | null>(null)
+  const profiles = hud.profiles ?? []
+  const viewed = viewing === '__self__' ? profiles.find((p) => p.self) : viewing ? profiles.find((p) => p.id === viewing) : null
   return (
     <div style={wrap}>
       {/* top-left restart (replays the opening cinematic) */}
@@ -101,6 +117,72 @@ export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; to
           WASD move · SHIFT sprint · SPACE/J jetpack · H capture/fire · G enter · F boost · T transform · O chute · ESC pause
         </div>
       )}
+
+      {/* pilots roster: open profiles + stats for yourself and everyone online */}
+      {!hud.minigame && !hud.intro && (
+        <button style={pilotsBtn} onClick={() => setRosterOpen((v) => !v)}>
+          PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
+        </button>
+      )}
+      {rosterOpen && !hud.minigame && (
+        <div style={rosterPanel}>
+          <div style={rosterHead}>
+            <span>PILOTS ONLINE · {hud.online}</span>
+            <button style={closeX} onClick={() => setRosterOpen(false)}>✕</button>
+          </div>
+          {profiles.map((p) => {
+            const bw = p.games.find((g) => g.game === 'beamwars')
+            return (
+              <button key={p.self ? '__self__' : p.id} style={rosterRow} onClick={() => setViewing(p.self ? '__self__' : p.id)}>
+                <span style={{ color: p.self ? NEON.cyan : NEON.text, fontWeight: 800 }}>
+                  {p.name}{p.self ? ' (you)' : ''}
+                </span>
+                <span style={{ color: NEON.dim }}>
+                  BW {bw ? `${bw.won}-${bw.lost}` : '0-0'} · {p.aliens} caught
+                </span>
+              </button>
+            )
+          })}
+          {hud.online <= 1 && <div style={rosterHint}>Solo right now. Others appear here when they join the shared world.</div>}
+        </div>
+      )}
+      {viewed && (
+        <div style={profileOverlay} onClick={() => setViewing(null)}>
+          <ProfileCard profile={viewed} onClose={() => setViewing(null)} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProfileCard({ profile, onClose }: { profile: PlayerProfile; onClose: () => void }) {
+  const games = [...profile.games].filter((g) => g.played > 0).sort((a, b) => b.played - a.played)
+  const totalWon = games.reduce((s, g) => s + g.won, 0)
+  const totalLost = games.reduce((s, g) => s + g.lost, 0)
+  const rate = totalWon + totalLost > 0 ? Math.round((totalWon / (totalWon + totalLost)) * 100) : 0
+  return (
+    <div style={profileCard} onClick={(e) => e.stopPropagation()}>
+      <div style={profileHead}>
+        <span style={{ color: NEON.cyan, font: '800 18px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.12em' }}>
+          {profile.name}{profile.self ? ' (you)' : ''}
+        </span>
+        <button style={closeX} onClick={onClose}>✕</button>
+      </div>
+      <div style={statRow}>
+        <Stat label="W / L" value={`${totalWon} / ${totalLost}`} color={NEON.lime} />
+        <Stat label="WIN RATE" value={`${rate}%`} color={NEON.orange} />
+        <Stat label="CAUGHT" value={String(profile.aliens)} color={NEON.magenta} />
+      </div>
+      <div style={{ ...microLabel, color: NEON.dim, marginTop: 12, marginBottom: 4 }}>BY GAME</div>
+      {games.length === 0 && <div style={rosterHint}>No games played yet.</div>}
+      {games.map((g) => (
+        <div key={g.game} style={profileGameRow}>
+          <span style={{ color: NEON.text, fontWeight: 700 }}>{GAME_LABELS[g.game] ?? g.game.toUpperCase()}</span>
+          <span style={{ color: NEON.dim }}>
+            {g.won}W · {g.lost}L{g.best > 0 ? ` · best ${g.best}` : ''}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -330,4 +412,113 @@ const hints: CSSProperties = {
   maxWidth: '96vw',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+}
+const pilotsBtn: CSSProperties = {
+  position: 'absolute',
+  right: 14,
+  bottom: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.72)',
+  border: '1px solid rgba(155,255,77,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 14px rgba(155,255,77,0.22)',
+  zIndex: 24,
+}
+const rosterPanel: CSSProperties = {
+  position: 'absolute',
+  right: 14,
+  bottom: 54,
+  width: 280,
+  maxHeight: '52vh',
+  overflowY: 'auto',
+  pointerEvents: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  padding: 12,
+  background: 'rgba(5,10,25,0.88)',
+  border: '1px solid rgba(90,255,255,0.4)',
+  borderRadius: 12,
+  boxShadow: '0 0 26px rgba(0,255,255,0.18)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  zIndex: 25,
+}
+const rosterHead: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  font: '800 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: NEON.cyan,
+  marginBottom: 6,
+}
+const rosterRow: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  textAlign: 'left',
+  padding: '7px 9px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 8,
+  font: '600 11px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.04em',
+}
+const rosterHint: CSSProperties = {
+  font: '600 10px/1.4 ui-monospace, Menlo, monospace',
+  color: 'rgba(223,238,255,0.5)',
+  letterSpacing: '0.04em',
+  padding: '4px 2px',
+}
+const closeX: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  background: 'transparent',
+  border: 'none',
+  color: 'rgba(223,238,255,0.7)',
+  font: '800 14px/1 ui-monospace, Menlo, monospace',
+}
+const profileOverlay: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'auto',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(2,4,10,0.55)',
+  zIndex: 40,
+}
+const profileCard: CSSProperties = {
+  width: 'min(360px, 88vw)',
+  padding: '18px 20px',
+  background: 'rgba(5,10,25,0.94)',
+  border: '1px solid rgba(90,255,255,0.5)',
+  borderRadius: 16,
+  boxShadow: '0 0 32px rgba(0,255,255,0.28)',
+  backdropFilter: 'blur(10px)',
+  WebkitBackdropFilter: 'blur(10px)',
+}
+const profileHead: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 14,
+}
+const profileGameRow: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '5px 0',
+  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  font: '600 11px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.04em',
 }

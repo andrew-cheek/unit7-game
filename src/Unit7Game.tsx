@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSPropertie
 import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
 import type { GameControls, HudState, Unit7Config } from './game/types'
+import { loadCallsign, saveCallsign } from './game/storage'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
@@ -114,6 +115,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {multiplayer && !mpJoined && hud && !hud.intro && (
         <JoinWorld
           onJoin={(name) => {
+            saveCallsign(name)
             gameRef.current?.connectMultiplayer(name, config?.multiplayerHost)
             setMpJoined(true)
           }}
@@ -169,7 +171,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
 }
 
 function JoinWorld({ onJoin, onSolo }: { onJoin: (name: string) => void; onSolo: () => void }) {
-  const [name, setName] = useState('')
+  const [name, setName] = useState(() => loadCallsign())
   const submit = () => {
     const n = name.trim()
     if (n) onJoin(n)

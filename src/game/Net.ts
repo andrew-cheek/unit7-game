@@ -34,6 +34,17 @@ export interface ScoreRow {
   score: number
 }
 
+/** Compact per-game record on the wire: [played, won, lost, best]. */
+export type WireGames = Record<string, [number, number, number, number]>
+
+/** A pilot's profile as relayed by the server. */
+export interface NetProfile {
+  id: string
+  name: string
+  aliens: number
+  games: WireGames
+}
+
 export interface NetHandlers {
   onWelcome(players: RemoteSnapshot[]): void
   onJoin(id: string, name: string): void
@@ -46,6 +57,7 @@ export interface NetHandlers {
   onAliens(list: AlienTuple[]): void
   onAlienGone(id: number, by: string, award: number): void
   onScores(board: ScoreRow[]): void
+  onProfiles(list: NetProfile[]): void
 }
 
 /**
@@ -149,6 +161,7 @@ export class Net {
         this.handlers.onWelcome((msg.players as RemoteSnapshot[]) ?? [])
         if (msg.scores) this.handlers.onScores(msg.scores as ScoreRow[])
         if (msg.aliens) this.handlers.onAliens(msg.aliens as AlienTuple[])
+        if (msg.profiles) this.handlers.onProfiles(msg.profiles as NetProfile[])
         break
       case 'aliens':
         this.handlers.onAliens((msg.list as AlienTuple[]) ?? [])
@@ -158,6 +171,9 @@ export class Net {
         break
       case 'scores':
         this.handlers.onScores((msg.board as ScoreRow[]) ?? [])
+        break
+      case 'profiles':
+        this.handlers.onProfiles((msg.list as NetProfile[]) ?? [])
         break
       case 'join':
         this.handlers.onJoin(msg.id as string, msg.name as string)
@@ -194,6 +210,11 @@ export class Net {
   /** Try to claim a shared alien; the server decides first-claim-wins. */
   sendClaim(id: number) {
     this.send({ t: 'claim', id })
+  }
+
+  /** Publish our profile (lifetime captures + per-game W/L) to the room. */
+  sendProfile(aliens: number, games: WireGames) {
+    this.send({ t: 'profile', aliens, games })
   }
 
   get connected(): boolean {
