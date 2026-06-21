@@ -9,7 +9,7 @@ const GAME_CODES = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space',
-  'KeyJ', 'KeyH', 'KeyG', 'KeyF', 'KeyT', 'KeyO',
+  'KeyJ', 'KeyH', 'KeyG', 'KeyF', 'KeyT', 'KeyO', 'KeyB',
 ])
 
 const HELD: GameAction[] = ['sprint', 'jet', 'boost']
@@ -30,7 +30,7 @@ export class Input {
   pitch = config.camera.startPitch
 
   held: Record<GameAction, boolean> = {
-    sprint: false, jet: false, net: false, enter: false, boost: false, morph: false, chute: false,
+    sprint: false, jet: false, net: false, enter: false, boost: false, morph: false, chute: false, dance: false,
   }
   locked = false
   pausePressed = false
@@ -147,6 +147,9 @@ export class Input {
         break
       case 'KeyO':
         this.edges.add('chute')
+        break
+      case 'KeyB':
+        this.edges.add('dance')
         break
       case 'Escape':
         this.pausePressed = true

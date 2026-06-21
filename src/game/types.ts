@@ -91,3 +91,4 @@ export type GameAction =
   | 'boost'
   | 'morph'
   | 'chute'
+  | 'dance'

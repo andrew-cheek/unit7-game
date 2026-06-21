@@ -21,6 +21,7 @@ import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
+import { Playground } from './Playground'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -140,6 +141,8 @@ export class Game {
   private sharedAliens!: SharedAliens
   private worldEvents!: WorldEvents
   private exploration!: ExplorationPoints
+  private playground!: Playground
+  private danceToggle = false // 'B' key toggle for the robot dance emote
   // Transient steam puffs for the mech boot-up burst.
   private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
   private bootGeo = new THREE.SphereGeometry(1, 10, 8)
@@ -200,6 +203,8 @@ export class Game {
       this.audio.play('capture')
       vibrate(20)
     })
+    // Interactive toys: trampoline bounce pads (all zones) + a city dance floor.
+    this.playground = new Playground(this.engine.scene)
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -636,6 +641,7 @@ export class Game {
     this.world.applyZone(zone)
     this.worldEvents.setZone(zone)
     this.exploration.setActive(zone)
+    this.playground.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -1272,6 +1278,15 @@ export class Game {
       this.player.position.x = clamp(this.player.position.x, -lim, lim)
       this.player.position.z = clamp(this.player.position.z, -lim, lim)
       this.focus.copy(this.player.position)
+      // Robot dance: 'B' toggles it; standing on the city dance floor auto-dances.
+      if (this.input.consumeEdge('dance')) this.danceToggle = !this.danceToggle
+      const onFloor = this.playground.onDanceFloor(this.zone, this.player.position.x, this.player.position.z)
+      this.player.setDancing(this.danceToggle || onFloor)
+      // Trampoline bounce pads fling you skyward.
+      if (this.player.grounded) {
+        const s = this.playground.bouncePadAt(this.zone, this.player.position.x, this.player.position.z)
+        if (s > 0) { this.player.launch(s); this.audio.play('portal'); vibrate(20) }
+      }
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
       if (onEarth && this.trans.phase === 'none') this.checkArcadePortals()
     }
@@ -1310,6 +1325,7 @@ export class Game {
     // Ambient events + exploration rewards run in every zone.
     this.worldEvents.update(dt, this.focus)
     this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
+    this.playground.update(dt)
     this.updateBootPuffs(dt)
     if (this.net) {
       this.netAccum += dt
@@ -1506,6 +1522,7 @@ export class Game {
     this.sharedAliens.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
+    this.playground.dispose()
     for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
     this.bootPuffs = []
     this.bootGeo.dispose()
