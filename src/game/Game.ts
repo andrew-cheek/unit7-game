@@ -145,6 +145,7 @@ export class Game {
   private playground!: Playground
   private dawnShow!: DawnShow
   private danceToggle = false // 'B' key toggle for the robot dance emote
+  private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
   // Transient steam puffs for the mech boot-up burst.
   private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
   private bootGeo = new THREE.SphereGeometry(1, 10, 8)
@@ -479,7 +480,7 @@ export class Game {
     ring2.position.y = 7
     g.add(ring2)
     // Tall sky beam, visible from across the map.
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.6, 3.4, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.2, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     beam.position.y = 110
     // Explicit renderOrder so this tall additive column always sorts after the
     // city and in a stable slot, instead of swapping order with other
@@ -487,7 +488,7 @@ export class Game {
     beam.renderOrder = 4
     g.add(beam)
     // Neon ground ring marking the plaza floor.
-    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.36, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     decal.rotation.x = -Math.PI / 2
     decal.position.y = 0.15
     g.add(decal)
@@ -1197,6 +1198,33 @@ export class Game {
     }
   }
 
+  /** A known-good spawn for the active zone (used by stuck/fall recovery). */
+  private safeSpawn(): THREE.Vector3 {
+    if (this.zone === 'earth') return this.world.spawn.clone()
+    const env = this.zones.env(this.zone)
+    return env ? env.spawn.clone() : new THREE.Vector3(0, 2, -10)
+  }
+
+  /**
+   * Free-roam safety net: if the player drops below the world (into the plaza
+   * water / off an edge) or gets wedged against geometry while trying to move,
+   * pop them back to the zone spawn so they're never stranded.
+   */
+  private checkRecovery(dt: number) {
+    const tryingToMove = Math.hypot(this.input.moveX, this.input.moveY) > 0.3
+    if (tryingToMove && this.player.grounded && this.player.speed < 0.4) this.stuckT += dt
+    else this.stuckT = 0
+    if (this.player.position.y < -6 || this.stuckT > 4) {
+      this.player.exitVehicle(this.safeSpawn()) // resets to robot at the safe point
+      this.player.setVisible(true)
+      this.camera.snap(this.player.position)
+      this.stuckT = 0
+      this.hud.banner = 'RECOVERED'
+      this.bannerTimer = 1.4
+      this.audio.play('ui')
+    }
+  }
+
   /** Fire a bubble-gun shot forward; it arcs out and bursts into floating bubbles. */
   private fireBubble() {
     const yaw = this.input.yaw
@@ -1318,6 +1346,7 @@ export class Game {
       this.player.position.x = clamp(this.player.position.x, -lim, lim)
       this.player.position.z = clamp(this.player.position.z, -lim, lim)
       this.focus.copy(this.player.position)
+      this.checkRecovery(dt)
       // Robot dance: 'B' toggles it; standing on the city dance floor auto-dances.
       if (this.input.consumeEdge('dance')) this.danceToggle = !this.danceToggle
       const onFloor = this.playground.onDanceFloor(this.zone, this.player.position.x, this.player.position.z)
@@ -1358,6 +1387,9 @@ export class Game {
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
     this.world.update(dt, this.focus)
+    // Neon contrast by time of day: full bloom at night, eased down toward noon
+    // so daylight reads warm/calm and night reads as the bright neon city.
+    this.engine.setBloomScale(1 - this.world.dayFactor * 0.5)
 
     // Multiplayer: advance the other players' avatars and broadcast our own
     // transform a few times a second. No-ops cleanly when playing solo.
@@ -1399,7 +1431,7 @@ export class Game {
       if (onEarth) {
         this.plazaHub.ring.rotation.z += dt * 0.5
         this.plazaHub.ring2.rotation.z -= dt * 0.8
-        this.plazaHub.beamMat.opacity = 0.17 + Math.sin(_elapsed * 1.5) * 0.05
+        this.plazaHub.beamMat.opacity = 0.1 + Math.sin(_elapsed * 1.5) * 0.03
       }
     }
 
