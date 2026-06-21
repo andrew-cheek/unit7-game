@@ -1497,6 +1497,7 @@ export class Game {
       level: levelForXp(this.progression.xp),
       duelTier: selfTier.name,
       duelTierColor: selfTier.color,
+      rating: this.progression.duelRating,
       badges: this.progression.achievements.length,
       games: selfGames,
     }
@@ -1512,6 +1513,7 @@ export class Game {
           level: p.level ?? 1,
           duelTier: t.name,
           duelTierColor: t.color,
+          rating: p.rating ?? 1000,
           badges: p.badges ?? 0,
           games: Object.entries(p.games).map(([game, tup]) => ({
             game,

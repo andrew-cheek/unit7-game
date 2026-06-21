@@ -121,6 +121,7 @@ export interface PlayerProfile {
   level: number // pilot level
   duelTier: string // duel rank tier name (e.g. CLASS B)
   duelTierColor: string
+  rating: number // duel rank points (for the rankings sort)
   badges: number // achievements unlocked
   games: { game: string; played: number; won: number; lost: number; best: number }[]
 }

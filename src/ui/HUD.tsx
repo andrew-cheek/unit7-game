@@ -55,6 +55,7 @@ export function HUD({
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
   const [viewing, setViewing] = useState<string | null>(null)
+  const [rosterSort, setRosterSort] = useState<'rank' | 'caught'>('rank')
   const profiles = hud.profiles ?? []
   const viewed = viewing === '__self__' ? profiles.find((p) => p.self) : viewing ? profiles.find((p) => p.id === viewing) : null
   return (
@@ -162,22 +163,29 @@ export function HUD({
       {rosterOpen && !hud.minigame && (
         <div style={rosterPanel}>
           <div style={rosterHead}>
-            <span>PILOTS ONLINE · {hud.online}</span>
-            <button style={closeX} onClick={() => setRosterOpen(false)}>✕</button>
+            <span>PILOTS · {hud.online}</span>
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button style={{ ...sortTab, ...(rosterSort === 'rank' ? sortTabOn : {}) }} onClick={() => setRosterSort('rank')}>RANK</button>
+              <button style={{ ...sortTab, ...(rosterSort === 'caught' ? sortTabOn : {}) }} onClick={() => setRosterSort('caught')}>CAUGHT</button>
+              <button style={closeX} onClick={() => setRosterOpen(false)}>✕</button>
+            </span>
           </div>
-          {profiles.map((p) => {
-            const bw = p.games.find((g) => g.game === 'beamwars')
-            return (
-              <button key={p.self ? '__self__' : p.id} style={rosterRow} onClick={() => setViewing(p.self ? '__self__' : p.id)}>
-                <span style={{ color: p.self ? NEON.cyan : NEON.text, fontWeight: 800 }}>
-                  {p.name}{p.self ? ' (you)' : ''}
+          {[...profiles]
+            .sort((a, b) => (rosterSort === 'rank' ? b.rating - a.rating : b.aliens - a.aliens))
+            .map((p, i) => (
+              <button key={p.self ? '__self__' : p.id} style={{ ...rosterRow, ...(p.self ? { borderColor: 'rgba(39,231,255,0.4)' } : {}) }} onClick={() => setViewing(p.self ? '__self__' : p.id)}>
+                <span style={{ display: 'flex', gap: 7, alignItems: 'center', minWidth: 0 }}>
+                  <span style={{ color: i === 0 ? '#ffd24a' : NEON.dim, fontWeight: 800, width: 16 }}>{i + 1}</span>
+                  <span style={{ color: p.self ? NEON.cyan : NEON.text, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.name}{p.self ? ' (you)' : ''}
+                  </span>
                 </span>
-                <span style={{ color: NEON.dim }}>
-                  BW {bw ? `${bw.won}-${bw.lost}` : '0-0'} · {p.aliens} caught
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                  <span style={{ color: NEON.dim }}>LV{p.level}</span>
+                  <span style={{ color: p.duelTierColor, fontWeight: 700 }}>{p.duelTier.replace('CLASS ', '')}</span>
                 </span>
               </button>
-            )
-          })}
+            ))}
           {hud.online <= 1 && <div style={rosterHint}>Solo right now. Others appear here when they join the shared world.</div>}
         </div>
       )}
@@ -611,6 +619,22 @@ const swatchGrid: CSSProperties = {
   gridTemplateColumns: '1fr 1fr',
   gap: 6,
   margin: '6px 0',
+}
+const sortTab: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '3px 8px',
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.55)',
+  font: '700 9px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+}
+const sortTabOn: CSSProperties = {
+  color: '#04121a',
+  background: 'rgba(39,231,255,0.85)',
+  borderColor: 'transparent',
 }
 const badgeGrid: CSSProperties = {
   display: 'flex',
