@@ -65,6 +65,7 @@ export interface HudState {
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
   online: number // players in the shared world incl. self (1 = solo / not connected)
   leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
+  neon: 'low' | 'med' | 'high' // neon density / quality setting
 }
 
 export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena'
@@ -81,6 +82,7 @@ export interface GameControls {
   exitMinigame(): void // leave a minigame and return to the city
   restartIntro(): void // replay the opening cinematic from the start
   toggleMute(): void // toggle game audio
+  cycleNeon(): void // cycle neon density: low -> med -> high
 }
 
 export type GameAction =
