@@ -136,14 +136,22 @@ export function HUD({
         </div>
       )}
 
-      {/* pilots roster: open profiles + stats for yourself and everyone online */}
+      {/* pilots roster: open profiles + stats for yourself and everyone online.
+          On touch they move to the bottom-center so they clear the thumb-stick
+          (bottom-left) and the action cluster (bottom-right) in any orientation. */}
       {!hud.minigame && !hud.intro && (
-        <button style={pilotsBtn} onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}>
+        <button
+          style={touch ? { ...pilotsBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-104%)' } : pilotsBtn}
+          onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}
+        >
           PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
         </button>
       )}
       {!hud.minigame && !hud.intro && (
-        <button style={storeBtn} onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}>
+        <button
+          style={touch ? { ...storeBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(4%)' } : storeBtn}
+          onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}
+        >
           STORE
         </button>
       )}

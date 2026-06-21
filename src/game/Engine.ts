@@ -135,6 +135,8 @@ export class Engine {
     // ~9x tighter while still clearing every fog-immune landmark (640m space
     // elevator, 220m plaza beam, skyline ring, high ship flyovers).
     this.camera = new THREE.PerspectiveCamera(config.camera.fov, w / h, 0.5, 900)
+    this.applyAdaptiveFov(w / h)
+    this.camera.updateProjectionMatrix()
     this.camera.position.set(0, 12, 22)
     this.camera.lookAt(0, 1, 0)
 
@@ -317,11 +319,34 @@ export class Engine {
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }
 
+  /**
+   * Keep a consistent HORIZONTAL field of view across aspect ratios. Three.js
+   * `fov` is vertical, so a tall portrait phone would otherwise collapse the
+   * view into a narrow tunnel. We treat `config.camera.fov` as the vertical fov
+   * at a 16:9 reference and, on anything narrower, widen the vertical fov so the
+   * horizontal view is preserved (capped to avoid fisheye). Landscape is
+   * unchanged. This is what makes the game playable in portrait.
+   */
+  private applyAdaptiveFov(aspect: number) {
+    // Reference at 3:2 so normal laptop/desktop ratios (1.5..2.1) keep the exact
+    // framing they had; only narrower/portrait viewports widen the fov.
+    const refAspect = 1.5
+    const baseV = config.camera.fov
+    if (aspect >= refAspect) {
+      this.camera.fov = baseV
+      return
+    }
+    const hRef = 2 * Math.atan(Math.tan((baseV * Math.PI) / 360) * refAspect)
+    const v = (2 * Math.atan(Math.tan(hRef / 2) / Math.max(0.35, aspect)) * 180) / Math.PI
+    this.camera.fov = Math.min(100, v)
+  }
+
   resize = () => {
     if (this.disposed) return
     const w = Math.max(1, this.container.clientWidth)
     const h = Math.max(1, this.container.clientHeight)
     this.camera.aspect = w / h
+    this.applyAdaptiveFov(w / h)
     this.camera.updateProjectionMatrix()
     const dpr = this.effectiveDpr()
     this.renderer.setPixelRatio(dpr)
