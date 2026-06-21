@@ -26,6 +26,14 @@ export interface RemoteSnapshot extends NetState {
   name: string
 }
 
+/** One alien in the shared swarm: [id, x, y, z, big(1|0)]. */
+export type AlienTuple = [number, number, number, number, number]
+
+export interface ScoreRow {
+  name: string
+  score: number
+}
+
 export interface NetHandlers {
   onWelcome(players: RemoteSnapshot[]): void
   onJoin(id: string, name: string): void
@@ -34,6 +42,10 @@ export interface NetHandlers {
   onCapture(id: string, p: NetVec3, award: number): void
   onStatus(connected: boolean): void
   onFull?(): void
+  // Shared-world (server-authoritative) content.
+  onAliens(list: AlienTuple[]): void
+  onAlienGone(id: number, by: string, award: number): void
+  onScores(board: ScoreRow[]): void
 }
 
 /**
@@ -67,6 +79,8 @@ export class Net {
   private closed = false
   private retry = 0
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  /** Our own connection id (known after `welcome`); used to spot our own claims. */
+  myId = ''
 
   constructor(name: string, handlers: NetHandlers, opts: { host?: string; room?: string } = {}) {
     this.name = name
@@ -131,7 +145,19 @@ export class Net {
     }
     switch (msg.t) {
       case 'welcome':
+        this.myId = (msg.id as string) ?? ''
         this.handlers.onWelcome((msg.players as RemoteSnapshot[]) ?? [])
+        if (msg.scores) this.handlers.onScores(msg.scores as ScoreRow[])
+        if (msg.aliens) this.handlers.onAliens(msg.aliens as AlienTuple[])
+        break
+      case 'aliens':
+        this.handlers.onAliens((msg.list as AlienTuple[]) ?? [])
+        break
+      case 'alienGone':
+        this.handlers.onAlienGone(msg.id as number, (msg.by as string) ?? '', (msg.award as number) ?? 0)
+        break
+      case 'scores':
+        this.handlers.onScores((msg.board as ScoreRow[]) ?? [])
         break
       case 'join':
         this.handlers.onJoin(msg.id as string, msg.name as string)
@@ -163,6 +189,11 @@ export class Net {
 
   sendCapture(p: NetVec3, award: number) {
     this.send({ t: 'capture', p, award })
+  }
+
+  /** Try to claim a shared alien; the server decides first-claim-wins. */
+  sendClaim(id: number) {
+    this.send({ t: 'claim', id })
   }
 
   get connected(): boolean {

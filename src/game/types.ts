@@ -63,6 +63,7 @@ export interface HudState {
   missionPopup: { title: string; body: string } | null // transient intro/mission card
   minigame: MinigameKind | null // non-null while a full-screen minigame is active
   online: number // players in the shared world incl. self (1 = solo / not connected)
+  leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
 }
 
 export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena'

@@ -120,6 +120,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
         />
       )}
       {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
+      {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && <Leaderboard rows={hud.leaderboard} />}
       {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
@@ -200,6 +201,23 @@ function OnlinePill({ n }: { n: number }) {
   return (
     <div style={onlinePill}>
       <span style={{ color: '#4affc1' }}>●</span> {n} ONLINE
+    </div>
+  )
+}
+
+function Leaderboard({ rows }: { rows: { name: string; score: number }[] }) {
+  const top = rows.slice(0, 5)
+  return (
+    <div style={boardBox}>
+      <div style={{ color: 'rgba(39,231,255,0.9)', marginBottom: 6, letterSpacing: '0.2em' }}>WORLD SCORES</div>
+      {top.map((r, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, opacity: i === 0 ? 1 : 0.82 }}>
+          <span style={{ color: i === 0 ? '#ffd24a' : '#dff0ff' }}>
+            {i + 1}. {r.name}
+          </span>
+          <span style={{ color: '#dff0ff' }}>{r.score}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -319,6 +337,20 @@ const onlinePill: CSSProperties = {
   background: 'rgba(8,12,24,0.7)',
   border: '1px solid rgba(74,255,193,0.4)',
   borderRadius: 999,
+  pointerEvents: 'none',
+}
+const boardBox: CSSProperties = {
+  position: 'absolute',
+  top: 44,
+  right: 16,
+  zIndex: 14,
+  minWidth: 168,
+  padding: '10px 12px',
+  font: '700 12px/1.6 ui-monospace, Menlo, monospace',
+  color: 'rgba(223,238,255,0.92)',
+  background: 'rgba(8,12,24,0.7)',
+  border: '1px solid rgba(39,231,255,0.3)',
+  borderRadius: 10,
   pointerEvents: 'none',
 }
 const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}`

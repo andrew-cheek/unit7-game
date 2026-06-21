@@ -16,8 +16,9 @@ import { Zones } from './Zones'
 import { Events } from './Events'
 import { Intro } from './Intro'
 import { CameraController } from './Camera'
-import { Net, type NetState } from './Net'
+import { Net, type NetState, type ScoreRow } from './Net'
 import { RemotePlayers } from './RemotePlayers'
+import { SharedAliens } from './SharedAliens'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -134,8 +135,10 @@ export class Game {
   // Shared-world multiplayer. `net` is null until the player joins with a name.
   private net: Net | null = null
   private remotePlayers!: RemotePlayers
+  private sharedAliens!: SharedAliens
   private netAccum = 0
   private online = 1 // players in the world incl. self (1 = solo)
+  private leaderboard: ScoreRow[] = []
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -176,6 +179,7 @@ export class Game {
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
     this.remotePlayers = new RemotePlayers(this.engine.scene)
+    this.sharedAliens = new SharedAliens(this.engine.scene)
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -247,6 +251,7 @@ export class Game {
       missionPopup: null,
       minigame: null,
       online: 1,
+      leaderboard: [],
     }
 
     this.engine.onUpdate = this.update
@@ -762,6 +767,20 @@ export class Game {
         best = c
       }
     }
+    // Multiplayer: if a shared (server-owned) alien is in reach and at least as
+    // close as any local target, claim it instead. The server resolves it
+    // first-claim-wins and confirms the removal + score via `onAlienGone`.
+    if (this.net) {
+      const claim = this.sharedAliens.nearestClaimable(sx, sz, this.scratchFwd.x, this.scratchFwd.z, range, 0.45)
+      if (claim) {
+        const cd = Math.hypot(claim.pos.x - sx, claim.pos.z - sz)
+        if (!best || cd <= bestD) {
+          this.net.sendClaim(claim.id)
+          return
+        }
+      }
+    }
+
     if (best) {
       const award = best.capture()
       this.hud.score += Math.round(award * this.scoreMul)
@@ -1084,6 +1103,23 @@ export class Game {
           this.hud.banner = 'WORLD FULL — TRY AGAIN'
           this.bannerTimer = 3
         },
+        onAliens: (list) => this.sharedAliens.sync(list),
+        onAlienGone: (id, by, award) => {
+          // Pop a ring where it was netted; credit our own confirmed claims.
+          const p = this.sharedAliens.positionOf(id)
+          this.sharedAliens.remove(id)
+          if (p) this.missiles.shockwave({ x: p.x, y: p.y, z: p.z }, 0x27e7ff, 3, 0.4)
+          if (by === this.net?.myId) {
+            this.hud.score += award
+            this.hud.captured += 1
+            this.addCredits(Math.round(award * 0.5))
+            vibrate(25)
+            this.audio.play('capture')
+          }
+        },
+        onScores: (board) => {
+          this.leaderboard = board
+        },
       },
       { host },
     )
@@ -1183,8 +1219,9 @@ export class Game {
       if (onEarth && this.trans.phase === 'none') this.checkArcadePortals()
     }
 
-    // When the sun finishes rising, the aliens invade (once).
-    if (onEarth && !this.invasionTriggered && this.world.dayFactor >= 0.96) {
+    // When the sun finishes rising, the aliens invade (once). In multiplayer the
+    // shared server swarm is the content, so the local invasion is suppressed.
+    if (onEarth && !this.net && !this.invasionTriggered && this.world.dayFactor >= 0.96) {
       this.invasionTriggered = true
       this.events.startInvasion(this.player.position)
       this.hud.banner = 'ALIEN INVASION'
@@ -1211,6 +1248,8 @@ export class Game {
     // transform a few times a second. No-ops cleanly when playing solo.
     this.remotePlayers.setLocalZone(this.zone)
     this.remotePlayers.update(dt)
+    this.sharedAliens.setVisible(this.zone === 'earth')
+    this.sharedAliens.update(dt)
     if (this.net) {
       this.netAccum += dt
       if (this.netAccum >= 1 / 12) {
@@ -1391,6 +1430,7 @@ export class Game {
     this.hud.powerup =
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
     this.hud.online = this.online
+    this.hud.leaderboard = this.leaderboard
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }
@@ -1402,6 +1442,7 @@ export class Game {
     saveProfile(this.profile)
     this.net?.close()
     this.remotePlayers.dispose()
+    this.sharedAliens.dispose()
     this.objBeaconMats.forEach((m) => m.dispose())
     this.input.dispose()
     this.player.dispose()

@@ -81,18 +81,24 @@ username.
 
 ---
 
-## What Phase 1 does and does not do
+## What this does and does not do
 
-**Does:** presence + movement of every player in the same world (and same
-zone — earth/mars/moon are filtered), name tags, smooth interpolation, automatic
-reconnect, a room cap, and broadcasting captures so you see others playing.
+**Does:**
+- Presence + movement of every player in the same world (zone-filtered:
+  earth/mars/moon), name tags, smooth interpolation, auto-reconnect, room cap.
+- **Server-authoritative shared aliens.** The server (`party/server.ts`) spawns
+  and moves one swarm of aliens that *everyone sees and fights*. Capturing is
+  first-claim-wins: your net sends a `claim`, the server picks the winner,
+  removes the alien for everyone, and awards the score. The swarm refills over
+  time so the world is never empty. In multiplayer the old single-player sunrise
+  invasion is suppressed (the shared swarm replaces it).
+- **Shared scoreboard.** The server tracks score per player and broadcasts a
+  live leaderboard, shown top-right in the HUD.
 
-**Does not yet:** shared *authoritative* entities. Aliens, score, and pickups
-are still simulated per-client, so netting an alien removes it for you, not for
-everyone. Remote players are drawn as robots even while piloting a vehicle.
-Making the world entities server-owned (one set of aliens everyone fights, shared
-scoreboard, combat that affects others) is the next phase — it builds on this
-relay by moving entity state into `party/server.ts`.
+**Does not yet:** vehicle-accurate remote avatars (remote players are drawn as
+robots even when piloting), and shared physics/combat between players (missiles
+only affect your own client). Those are the next increments — they extend the
+same server.
 
 **Not testable in CI / headless:** real multi-client behavior needs two live
 browsers against a running server (local or deployed) as in section 1.
