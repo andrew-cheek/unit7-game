@@ -75,8 +75,8 @@ const DAWN = {
   sunI: 3.0,
 }
 // Building window glow is dimmed toward daytime so lit windows don't read at noon.
-const WINDOW_NIGHT_I = 1.25
-const WINDOW_DAY_I = 0.3
+const WINDOW_NIGHT_I = 1.7
+const WINDOW_DAY_I = 0.35
 
 /**
  * The futuristic district + its atmosphere. Stage 5 art pass turns the gray test
@@ -266,12 +266,24 @@ export class World {
     this.landmarks.push({ x: cx, z: cz })
     this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - fx / 2, 0, cz - fz / 2), new THREE.Vector3(cx + fx / 2, h, cz + fz / 2)))
 
-    // Neon roofline trim for a few towers.
-    if (hash01(seed * 5.1) > 0.55) {
-      const trim = new THREE.Mesh(this.boxGeo, this.glow([config.palette.cyan, config.palette.magenta, config.palette.purple][Math.floor(hash01(seed * 6.7) * 3)], 2.6))
-      trim.scale.set(fx + 0.4, 0.5, fz + 0.4)
+    // Neon roofline trim on most towers + a vertical neon spine up tall ones.
+    const neonCorner = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime][Math.floor(hash01(seed * 6.7) * 5)]
+    if (hash01(seed * 5.1) > 0.2) {
+      const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 3.2))
+      trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
       trim.position.set(cx, h + 0.1, cz)
       this.group.add(trim)
+    }
+    // A glowing vertical spine on taller towers (front + back faces) - cheap, 2
+    // thin emissive strips, and a strong sci-fi read on the skyline.
+    if (h > 46 && hash01(seed * 8.9) > 0.4) {
+      const spineMat = this.glow(neonCorner, 2.8)
+      for (const sz of [fz / 2 + 0.05, -fz / 2 - 0.05]) {
+        const spine = new THREE.Mesh(this.boxGeo, spineMat)
+        spine.scale.set(0.5, h * 0.92, 0.3)
+        spine.position.set(cx, h * 0.5, cz + sz)
+        this.group.add(spine)
+      }
     }
     // Roof-shape variety so the skyline isn't all flat boxes.
     const roof = hash01(seed * 4.4)

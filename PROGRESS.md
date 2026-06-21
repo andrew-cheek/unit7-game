@@ -594,3 +594,12 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
   SOUND ON/OFF toggle.
 - Hover-train: a sleek multi-car maglev loops a glowing rail at rooftop height for
   living background motion + a landmark.
+
+## Sci-fi building facelift
+
+- Rewrote createWindowTexture: dark glass with a per-tower neon accent hue,
+  brighter lit windows, glowing neon mullions (vertical + horizontal), full-width
+  "data band" signage strips, and bright edge pillars so tiled facades show
+  vertical neon seams. Higher-res (128x192).
+- addBuilding: neon roofline trim on most towers (brighter), plus a glowing
+  vertical neon spine up tall towers. Window glow raised (1.7 night).

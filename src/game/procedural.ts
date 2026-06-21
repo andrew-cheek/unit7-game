@@ -523,41 +523,82 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
 
 /** Tileable lit-window facade pattern, used as an emissiveMap so towers glow. */
 export function createWindowTexture(seed = 1): THREE.CanvasTexture {
-  const w = 64
-  const h = 96
+  const w = 128
+  const h = 192
   const cv = document.createElement('canvas')
   cv.width = w
   cv.height = h
   const ctx = cv.getContext('2d')!
-  ctx.fillStyle = '#06070d'
-  ctx.fillRect(0, 0, w, h)
-  const cols = 4
-  const rows = 6
-  const mx = 4
-  const my = 5
-  const cw = (w - mx * (cols + 1)) / cols
-  const ch = (h - my * (rows + 1)) / rows
-  const tints = ['#fff0cf', '#bfe7ff', '#ffc9ee', '#cfffe9', '#ffe0a8']
   let s = seed * 9301 + 1
   const rnd = () => {
     s = (s * 9301 + 49297) % 233280
     return s / 233280
   }
+
+  // Dark glass facade with a faint vertical sheen.
+  const grad = ctx.createLinearGradient(0, 0, 0, h)
+  grad.addColorStop(0, '#0a0e1a')
+  grad.addColorStop(0.5, '#070910')
+  grad.addColorStop(1, '#0b0f1c')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, w, h)
+
+  // Each tower gets a dominant neon hue so the skyline reads colourful.
+  const neon = ['#27e7ff', '#ff2bd0', '#8a5cff', '#9bff4d', '#ff8a1e', '#7fd7ff']
+  const accent = neon[Math.floor(rnd() * neon.length)]
+  const warm = ['#fff0cf', '#bfe7ff', '#ffd9a8', '#cfffe9']
+
+  const cols = 6
+  const rows = 12
+  const mx = 3
+  const my = 3
+  const cw = (w - mx * (cols + 1)) / cols
+  const ch = (h - my * (rows + 1)) / rows
+
   for (let yy = 0; yy < rows; yy++) {
+    // Occasional full-width glowing "data band" (sci-fi signage strips).
+    const band = rnd() < 0.16
     for (let xx = 0; xx < cols; xx++) {
       const x = mx + xx * (cw + mx)
       const y = my + yy * (ch + my)
-      if (rnd() < 0.42) {
-        ctx.fillStyle = '#0a0c14'
+      if (band) {
+        ctx.fillStyle = accent
+        ctx.globalAlpha = 0.55 + rnd() * 0.35
+        ctx.fillRect(x, y + ch * 0.3, cw, ch * 0.4)
+        continue
+      }
+      const r = rnd()
+      if (r < 0.4) {
+        // dark/unlit window
+        ctx.fillStyle = '#0c1018'
         ctx.globalAlpha = 1
+      } else if (r < 0.62) {
+        // accent-lit window (matches the tower's neon hue)
+        ctx.fillStyle = accent
+        ctx.globalAlpha = 0.5 + rnd() * 0.5
       } else {
-        ctx.fillStyle = tints[Math.floor(rnd() * tints.length)]
-        ctx.globalAlpha = 0.45 + rnd() * 0.55
+        // warm interior light
+        ctx.fillStyle = warm[Math.floor(rnd() * warm.length)]
+        ctx.globalAlpha = 0.4 + rnd() * 0.55
       }
       ctx.fillRect(x, y, cw, ch)
     }
   }
   ctx.globalAlpha = 1
+
+  // Glowing neon mullions: thin vertical + horizontal lines between cells. These
+  // tile across the facade and give the classic layered-neon megatower look.
+  ctx.fillStyle = accent
+  ctx.globalAlpha = 0.5
+  for (let xx = 0; xx <= cols; xx++) ctx.fillRect(mx / 2 + xx * (cw + mx) - 1, 0, 1, h)
+  ctx.globalAlpha = 0.18
+  for (let yy = 0; yy <= rows; yy++) ctx.fillRect(0, my / 2 + yy * (ch + my) - 1, w, 1)
+  // Bright edge pillars (left/right seams) so tiled facades show vertical neon.
+  ctx.globalAlpha = 0.9
+  ctx.fillRect(0, 0, 2, h)
+  ctx.fillRect(w - 2, 0, 2, h)
+  ctx.globalAlpha = 1
+
   const tex = new THREE.CanvasTexture(cv)
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
   tex.colorSpace = THREE.SRGBColorSpace
