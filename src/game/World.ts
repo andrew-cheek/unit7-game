@@ -22,10 +22,18 @@ export interface OfficeAnchor {
   stop: THREE.Vector3 // bus stop on the avenue
   face: number // office rotation.y
 }
+// A ring of office buildings around the plaza. Each opens toward the city
+// centre (front +Z local rotated by `face`), with a door + bus stop stepped in
+// along the same axis. Commuters (Events) and the dawn/dusk shuttle (DawnShow)
+// both iterate these, so adding more here expands the whole working district.
 export const OFFICE_ANCHORS: OfficeAnchor[] = [
   { office: new THREE.Vector3(48, 0, 10), door: new THREE.Vector3(44, 0, 10), stop: new THREE.Vector3(38, 0, 10), face: -Math.PI / 2 },
   { office: new THREE.Vector3(10, 0, 48), door: new THREE.Vector3(10, 0, 44), stop: new THREE.Vector3(10, 0, 38), face: Math.PI },
   { office: new THREE.Vector3(-48, 0, -10), door: new THREE.Vector3(-44, 0, -10), stop: new THREE.Vector3(-38, 0, -10), face: Math.PI / 2 },
+  { office: new THREE.Vector3(-48, 0, 10), door: new THREE.Vector3(-44, 0, 10), stop: new THREE.Vector3(-38, 0, 10), face: Math.PI / 2 },
+  { office: new THREE.Vector3(48, 0, -10), door: new THREE.Vector3(44, 0, -10), stop: new THREE.Vector3(38, 0, -10), face: -Math.PI / 2 },
+  { office: new THREE.Vector3(-10, 0, 48), door: new THREE.Vector3(-10, 0, 44), stop: new THREE.Vector3(-10, 0, 38), face: Math.PI },
+  { office: new THREE.Vector3(10, 0, -48), door: new THREE.Vector3(10, 0, -44), stop: new THREE.Vector3(10, 0, -38), face: 0 },
 ]
 
 const ROT_NONE = new THREE.Quaternion() // identity rotation for instanced transforms
@@ -1342,6 +1350,14 @@ export class World {
         head.scale.set(0.3, 0.3, 0.3); head.position.set(dx, 1.75, -D + 2.1)
         g.add(head)
       }
+      // A spare worker robot charging against the side wall (glowing charge bar).
+      const charger = new THREE.Mesh(this.boxGeo, workerMat)
+      charger.scale.set(0.5, 1.5, 0.4); charger.position.set(W / 2 - 0.6, 0.95, -D + 1.2)
+      charger.castShadow = true
+      g.add(charger)
+      const cbar = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 2.4))
+      cbar.scale.set(0.12, 1.0, 0.18); cbar.position.set(W / 2 - 0.15, 1.1, -D + 1.2)
+      g.add(cbar)
       this.group.add(g)
     }
   }
