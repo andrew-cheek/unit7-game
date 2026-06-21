@@ -59,16 +59,19 @@ export function RaceLoop({ onExit, touch }: { onExit: () => void; touch: boolean
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [start, onExit])
 
-  // touch: left/right screen halves steer
+  // touch: left/right screen halves steer. Track the active pointer + capture it
+  // so dragging across the midline keeps steering (e.pressure / e.buttons read 0
+  // on touch, so gating on them dropped steering mid-corner).
+  const ptrId = useRef<number | null>(null)
   const setSteerFromX = (clientX: number) => {
     const cv = canvasRef.current
     if (!cv) return
     const r = cv.getBoundingClientRect()
     steer.current = clientX - r.left < r.width / 2 ? -1 : 1
   }
-  const onDown = (e: React.PointerEvent) => setSteerFromX(e.clientX)
-  const onMove = (e: React.PointerEvent) => { if (e.pressure > 0 || e.buttons) setSteerFromX(e.clientX) }
-  const onUp = () => { steer.current = 0 }
+  const onDown = (e: React.PointerEvent) => { ptrId.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); setSteerFromX(e.clientX) }
+  const onMove = (e: React.PointerEvent) => { if (e.pointerId === ptrId.current) setSteerFromX(e.clientX) }
+  const onUp = (e: React.PointerEvent) => { if (e.pointerId === ptrId.current) { ptrId.current = null; steer.current = 0 } }
 
   // loop
   useEffect(() => {
