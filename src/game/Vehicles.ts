@@ -6,7 +6,7 @@ import type { Input } from './Input'
 import type { Physics } from './Physics'
 import type { Zone } from './types'
 
-export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL' | 'titan'
 type DriveMode = 'hover' | 'fly' | 'rocket'
 
 interface Vehicle {
@@ -24,6 +24,8 @@ interface Vehicle {
   morph: number // mech transform 0=robot .. 1=jet form (eased)
   morphTarget: number
   home: THREE.Vector3 // Earth parking spot (restored on return)
+  wander: boolean // titans that roam the outskirts when not piloted
+  wanderTurn: number // current idle turn timer
 }
 
 // Where the mechs line up relative to spawn when taken to another world.
@@ -34,6 +36,9 @@ const OFFWORLD_MECH_OFFSET: Record<string, THREE.Vector3> = {
 }
 
 export const isMech = (k: VehicleKind) => k === 'mechM' || k === 'mechL' || k === 'mechXL'
+// Walkers stand on the ground, board from a wide radius and drive like mechs.
+// Titans are walkers but free to pilot (no unlock) and roam on their own.
+const isWalker = (k: VehicleKind) => isMech(k) || k === 'titan'
 
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
 const UP = new THREE.Vector3(0, 1, 0)
@@ -87,12 +92,21 @@ export class Vehicles {
     // The colossus stands further out (it's ~50m wide at the feet) but towers
     // over the skyline so it's unmistakable from the portals.
     this.spawn('mechXL', createMechSuit({ scale: mx.size, armor: 0x1f6e3a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(60, 0, 60), mx.hoverHeight, 2.0 * mx.size, 'fly', mx.size)
+    // Pilotable titans. The arcade guardian stands at the back of the cabinet row
+    // facing the player; two more roam the outskirts and can be boarded on sight.
+    const tt = config.vehicle.titan
+    const arcade = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(0, 0, 44), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
+    arcade.yaw = Math.PI // face -Z, toward the player / cabinets
+    const roam1 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x394b2a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(-95, 0, -78), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
+    const roam2 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x4a2330, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(100, 0, 86), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
+    roam1.wander = true
+    roam2.wander = true
   }
 
-  private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode, size = 1) {
+  private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode, size = 1): Vehicle {
     const gy = this.physics.sampleGround(at.x, at.z, 40)?.y ?? 0
-    // Mechs stand parked on the ground; everything else rests at its hover height.
-    const position = new THREE.Vector3(at.x, gy + (isMech(kind) ? 0 : hoverHeight), at.z)
+    // Walkers (mechs / titans) stand parked on the ground; everything else rests at its hover height.
+    const position = new THREE.Vector3(at.x, gy + (isWalker(kind) ? 0 : hoverHeight), at.z)
     model.group.position.copy(position)
     this.scene.add(model.group)
     const name =
@@ -102,8 +116,9 @@ export class Vehicles {
       : kind === 'mechM' ? 'MECH-M'
       : kind === 'mechL' ? 'MECH-L'
       : kind === 'mechXL' ? 'MECH-XL'
+      : kind === 'titan' ? 'TITAN'
       : 'ROCKET'
-    this.list.push({
+    const v: Vehicle = {
       kind,
       name,
       model,
@@ -118,7 +133,11 @@ export class Vehicles {
       morph: 0,
       morphTarget: 0,
       home: position.clone(),
-    })
+      wander: false,
+      wanderTurn: Math.random() * 4,
+    }
+    this.list.push(v)
+    return v
   }
 
   /**
@@ -140,7 +159,7 @@ export class Vehicles {
         v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
       }
       const gy = this.physics.sampleGround(v.position.x, v.position.z, 200)?.y ?? 0
-      v.position.y = gy + (isMech(v.kind) ? 0 : v.hoverHeight)
+      v.position.y = gy + (isWalker(v.kind) ? 0 : v.hoverHeight)
       v.yaw = 0
       v.morph = 0
       v.morphTarget = 0
@@ -235,11 +254,44 @@ export class Vehicles {
 
   private idle(v: Vehicle, dt: number) {
     if (v.drive === 'rocket') return
+    // Roaming titans plod around the outskirts on their own until boarded.
+    if (v.wander) {
+      this.wanderTitan(v, dt)
+      return
+    }
     const gy = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 6)?.y ?? 0
     v.bob += dt
-    // Mechs park standing on the ground (feet at gy); others hover.
-    const rest = isMech(v.kind) ? 0 : v.hoverHeight
+    // Walkers park standing on the ground (feet at gy); others hover.
+    const rest = isWalker(v.kind) ? 0 : v.hoverHeight
     v.position.y = gy + rest + Math.sin(v.bob * 1.4) * 0.12
+    v.model.group.rotation.set(0, v.yaw, 0)
+  }
+
+  /** Slow autonomous plod for an unpiloted titan: walk forward, turn now and
+   *  then, and steer back toward the map when it nears the edge. */
+  private wanderTitan(v: Vehicle, dt: number) {
+    const half = config.world.half - 20
+    v.wanderTurn -= dt
+    // Turn toward the centre near the edge, otherwise drift occasionally.
+    if (Math.abs(v.position.x) > half || Math.abs(v.position.z) > half) {
+      const toCentre = Math.atan2(-v.position.x, -v.position.z)
+      let d = toCentre - v.yaw
+      while (d > Math.PI) d -= Math.PI * 2
+      while (d < -Math.PI) d += Math.PI * 2
+      v.yaw += d * Math.min(1, dt * 1.5)
+    } else if (v.wanderTurn <= 0) {
+      v.yaw += (Math.random() - 0.5) * 0.9
+      v.wanderTurn = 3 + Math.random() * 4
+    }
+    this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
+    const speed = 6
+    v.velocity.copy(this.fwd).multiplyScalar(speed)
+    v.position.x += v.velocity.x * dt
+    v.position.z += v.velocity.z * dt
+    this.physics.resolveHorizontal(v.position, v.velocity, v.radius, 2)
+    const gy = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 8)?.y ?? 0
+    v.bob += dt
+    v.position.y = gy + Math.sin(v.bob * 1.4) * 0.1
     v.model.group.rotation.set(0, v.yaw, 0)
   }
 
@@ -282,6 +334,7 @@ export class Vehicles {
       v.kind === 'mechM' ? config.vehicle.mechM
       : v.kind === 'mechL' ? config.vehicle.mechL
       : v.kind === 'mechXL' ? config.vehicle.mechXL
+      : v.kind === 'titan' ? config.vehicle.titan
       : config.vehicle.spaceship
     const boost = input.held.boost ? 1.4 : 1
     // Jet (transformed) form flies a lot faster and turns tighter.

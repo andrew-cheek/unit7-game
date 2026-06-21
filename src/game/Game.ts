@@ -5,7 +5,7 @@ import { Input } from './Input'
 import { Player } from './Player'
 import { Physics } from './Physics'
 import { Vehicles, isMech } from './Vehicles'
-import { createMechSuit, type VehicleModel } from './procedural'
+import { type VehicleModel } from './procedural'
 import { Missiles } from './Missiles'
 import { AudioManager } from './Audio'
 import { NPCManager } from './NPC'
@@ -529,23 +529,17 @@ export class Game {
    * "the arcade is a giant robot" read; the cabinets are the working portals.
    */
   private buildArcadeRobot() {
-    const SCALE = 13
-    const robot = createMechSuit({ scale: SCALE, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff })
+    // The colossal Unit-7 robot at the back of the arcade is now a real,
+    // pilotable TITAN (spawned in Vehicles at 0,0,44): walk up and press G to
+    // climb in and stomp around. Here we just hang the ARCADE marquee above it.
     const x = 0, z = 44
     const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
-    // The model's feet sit ~0.3 below its origin; lift by that x scale so the
-    // colossus stands on the ground rather than sinking into it.
-    robot.group.position.set(x, gy + 0.3 * SCALE, z)
-    robot.group.rotation.y = Math.PI // face -Z, toward the player / cabinets
-    this.engine.scene.add(robot.group)
-    this.arcadeRobot = robot
-    // ARCADE marquee floating in front of the robot's chest.
     const tex = this.makeLabelTexture('ARCADE', config.palette.cyan)
     this.arcadeTex.push(tex)
     const signMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
     this.arcadeMats.push(signMat)
     const sign = new THREE.Sprite(signMat)
-    sign.position.set(0, gy + 40, z - 8)
+    sign.position.set(0, gy + 30, z - 6)
     sign.scale.set(30, 7.5, 1)
     this.engine.scene.add(sign)
   }
@@ -859,9 +853,9 @@ export class Game {
     } else {
       this.player.enterVehicle()
       this.vehicles.enter(v)
-      // Mech boot-up moment: name banner, camera shake + an energy/steam burst
-      // so boarding the battle mech reads as a powered-up reward.
-      if (isMech(v.kind)) {
+      // Mech / titan boot-up moment: name banner, camera shake + an energy/steam
+      // burst so boarding a giant reads as a powered-up reward.
+      if (isMech(v.kind) || v.kind === 'titan') {
         this.hud.banner = `${v.name} ONLINE`
         this.bannerTimer = 1.6
         this.camera.shake(1.0)
@@ -1833,8 +1827,8 @@ export class Game {
       const sp = Math.hypot(v.velocity.x, v.velocity.z)
       const inv = sp > 0.1 ? 1 / sp : 0
       return {
-        // Mechs are tall; pull the camera back proportionally to frame them.
-        distanceScale: isMech(v.kind) ? Math.min(9, 1.8 + v.size * 0.55) : 1.8,
+        // Tall walkers (mechs / titans) need the camera pulled back to frame them.
+        distanceScale: isMech(v.kind) || v.kind === 'titan' ? Math.min(9, 1.8 + v.size * 0.55) : 1.8,
         followYaw: v.yaw,
         moveX: v.velocity.x * inv,
         moveZ: v.velocity.z * inv,
@@ -1916,6 +1910,8 @@ export class Game {
       const cur = this.vehicles.current!
       prompt = isMech(cur.kind)
         ? `${cur.name} - Space/J fly, H fire, T transform, G exit`
+        : cur.kind === 'titan'
+        ? `${cur.name} - WASD walk, Space/J rise, G exit`
         : `Press G - Exit ${this.vehicles.currentName}`
     } else if (this.player.mode === 'robot') {
       const near = this.vehicles.nearest(this.player.position)

@@ -168,6 +168,10 @@ export const config = {
     // Colossal: ~50m tall, taller than the surrounding towers. Slow turn, big
     // top speed, and it transforms into a fast jet form.
     mechXL: { accel: 26, maxSpeed: 64, turn: 0.8, hoverHeight: 4, size: 10 },
+    // Pilotable giant "titans": the arcade guardian and the walkers that roam the
+    // outskirts. Big and weighty but controllable; they wander on their own until
+    // you climb in. Drive like the mechs (fly).
+    titan: { accel: 24, maxSpeed: 50, turn: 0.9, hoverHeight: 2.5, size: 7 },
     enterRange: 6,
   },
 
@@ -190,7 +194,7 @@ export const config = {
     fleeRadius: 9, // aliens scatter when the player gets this close
     quadrupeds: 4, // four-legged robot walkers patrolling
     mechs: 2, // big mech walkers patrolling slowly
-    giants: 2, // massive walker war-machines on the outskirts
+    giants: 0, // the outskirts giants are now the pilotable titans (Vehicles), not ambient patrols
     smallShips: 8, // small ships looping between the towers
     bigShipInterval: 20, // seconds between big-ship flyovers
     police: 3, // police cruisers patrolling staggered beats around the plaza
