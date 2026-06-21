@@ -99,6 +99,12 @@ export class Engine {
       antialias: false, // MSAA is done on the composer's HDR target instead
       powerPreference: 'high-performance',
       stencil: false,
+      // A logarithmic depth buffer gives near-uniform precision across the whole
+      // 0.5..900 range, which is what kills the z-fighting/flicker on distant
+      // towers, the road grid and the big fog-immune landmarks. Standard depth
+      // precision is starved here because the near plane is forced very small
+      // (the wall-collision camera tucks to 0.7).
+      logarithmicDepthBuffer: true,
     })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.pixelCap))
     this.renderer.setSize(w, h)
