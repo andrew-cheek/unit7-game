@@ -43,9 +43,10 @@ export class Zones {
   constructor(scene: THREE.Scene) {
     this.scene = scene
 
-    // Flank the arcade row so it all reads as one Portal Plaza in front of spawn.
-    this.earthPortals.push(this.makePortal('mars', config.palette.orange, new THREE.Vector3(-24, 0, 12)))
-    this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(24, 0, 12)))
+    // Well-separated gateways flanking the plaza (clear of the arcade row at
+    // x -33..33) so each portal has breathing room and its own focal point.
+    this.earthPortals.push(this.makePortal('mars', config.palette.orange, new THREE.Vector3(-46, 0, 6)))
+    this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(46, 0, 6)))
     for (const p of this.earthPortals) this.earthPortalGroup.add(p.group)
     // Planet/moon travel is its own thing, separate from the arcade: these ring
     // portals are how you leave Earth for another world.
@@ -121,6 +122,19 @@ export class Zones {
       const cap = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), new THREE.MeshBasicMaterial({ color, fog: false }))
       cap.position.set(sx, 5.1, 0)
       group.add(cap)
+    }
+
+    // A tall gateway arch over the portal so each reads as a distinct entrance
+    // from a distance (unique silhouette), in the destination's accent colour.
+    const archMat = new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: color, emissiveIntensity: 1.4, metalness: 0.5, roughness: 0.5 })
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(4.4, 0.4, 10, 28, Math.PI), archMat)
+    arch.position.y = 0.2
+    group.add(arch)
+    // A short receding tunnel of rings behind the gateway for depth.
+    for (let r = 0; r < 3; r++) {
+      const tube = new THREE.Mesh(new THREE.TorusGeometry(2.6 - r * 0.2, 0.12, 8, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5 - r * 0.12, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      tube.position.set(0, 2.7, -1.2 - r * 1.1)
+      group.add(tube)
     }
 
     // Floating label so the player can read the destination from a distance.

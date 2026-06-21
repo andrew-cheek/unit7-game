@@ -39,6 +39,16 @@ export const OFFICE_ANCHORS: OfficeAnchor[] = [
 const ROT_NONE = new THREE.Quaternion() // identity rotation for instanced transforms
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
+// NeonManager district rule: map a chunk's normalized distance from the city
+// centre to a neon allowance (0..1) so the whole city isn't uniformly noisy.
+//   plaza heart   (<0.18): limited — the plaza hub is the hero, towers stay calm
+//   commercial   (0.18-0.5): full — the bright signage band
+//   residential/industrial (>0.5): mostly ambient, minimal signage
+function districtNeon(distNorm: number): number {
+  if (distNorm < 0.18) return 0.5
+  if (distNorm < 0.5) return 1
+  return 0.25
+}
 const smooth01 = (x: number) => {
   const t = Math.min(1, Math.max(0, x))
   return t * t * (3 - 2 * t)
@@ -204,6 +214,7 @@ export class World {
     this.buildSpaceport(118, 96)
     this.buildHoverTrain()
     this.buildNewsTickers()
+    this.buildSpawnWalkway()
     this.buildRouteTrail()
     this.buildAtmosphere()
     this.buildLights()
@@ -315,7 +326,7 @@ export class World {
     this.group.add(posts, heads)
   }
 
-  private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number) {
+  private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number, neon = 1) {
     // ~40% of towers are dark, matte concrete/metal with NO glowing window grid.
     // This is the main lever for both "less neon" and "more variety": the city
     // becomes lit towers standing among dark ones, instead of every face glowing.
@@ -384,9 +395,9 @@ export class World {
     // discipline so a city block isn't every colour at once.
     const ACCENTS = [config.palette.cyan, config.palette.magenta, config.palette.purple]
     const neonCorner = ACCENTS[Math.floor(hash01(seed * 6.7) * ACCENTS.length)]
-    // Trim on ~35% of lit towers (never on dark ones) at a calm intensity so
-    // neon reads as occasional accent trim, not a glowing crown on every roof.
-    if (!dark && !round && hash01(seed * 5.1) > 0.65) {
+    // Trim chance scales with the district neon allowance (NeonManager rule):
+    // commercial blocks get more, residential/industrial stay calm.
+    if (!dark && !round && hash01(seed * 5.1) > 1 - 0.45 * neon) {
       const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.5))
       trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
       trim.position.set(cx, h + 0.1, cz)
@@ -395,8 +406,8 @@ export class World {
     // Desktop-only decorative neon (extra draw calls). On mobile the window
     // texture carries the sci-fi look, so these are skipped to hold frame rate.
     // Dark towers stay matte (no spines/bands) for value contrast; round towers
-    // skip the box-shaped neon strips that wouldn't wrap a cylinder cleanly.
-    const richFacade = config.tier.name === 'high' && !dark && !round
+    // skip the box-shaped neon strips; low-neon districts skip them entirely.
+    const richFacade = config.tier.name === 'high' && !dark && !round && neon > 0.5
     // A glowing vertical spine on taller towers (front + back faces).
     if (richFacade && h > 46 && hash01(seed * 8.9) > 0.55) {
       const spineMat = this.glow(neonCorner, 1.8)
@@ -509,6 +520,10 @@ export class World {
         if (hash01(seed) < 0.1) continue
         const distNorm = Math.min(1, Math.hypot(i, j) / cells)
         const maxH = 120 * (1 - distNorm) + 20 // taller glowing towers
+        // District neon rule (NeonManager): a tight inner commercial core is the
+        // bright signage band; the plaza heart stays limited (the hub is the
+        // hero), and the residential/industrial outskirts are calm + ambient.
+        const neon = districtNeon(distNorm)
         const usable = config.world.block - config.world.sidewalk * 2
         const n = hash01(seed * 7) < 0.45 ? 2 : 1
         for (let k = 0; k < n; k++) {
@@ -517,7 +532,7 @@ export class World {
           const h = 14 + hash01(seed * 11 + k) * maxH
           const ox = n === 2 ? (k === 0 ? -1 : 1) * (usable * 0.22) : 0
           const oz = n === 2 ? (hash01(seed * 13 + k) - 0.5) * usable * 0.3 : 0
-          this.addBuilding(cx + ox, cz + oz, fx, fz, h, seed * 19 + k)
+          this.addBuilding(cx + ox, cz + oz, fx, fz, h, seed * 19 + k, neon)
         }
       }
     }
@@ -538,7 +553,7 @@ export class World {
       const fx = 8 + hash01(seed) * 8
       const fz = 8 + hash01(seed * 1.7) * 8
       const h = 8 + hash01(seed * 2.3) * 16 // short, neighborhood-scale
-      this.addBuilding(cx, cz, fx, fz, h, seed)
+      this.addBuilding(cx, cz, fx, fz, h, seed, 0.35) // spawn-side blocks stay calm
     }
   }
 
@@ -760,6 +775,43 @@ export class World {
 
   /** One colossal arcology + a space-elevator tether, visible from anywhere as a
    *  scale landmark (fog-immune). */
+  /**
+   * A calm, well-lit walkway at spawn leading toward the plaza — a visually
+   * quiet "start here, head forward" path before the brighter portal plaza, so
+   * the first thing the player sees reads clearly instead of as neon overload.
+   */
+  private buildSpawnWalkway() {
+    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x141821, metalness: 0.35, roughness: 0.75 }))
+    const deck = new THREE.Mesh(this.boxGeo, deckMat)
+    deck.scale.set(9, 0.12, 24)
+    deck.position.set(0, 0.06, 2)
+    deck.receiveShadow = true
+    this.group.add(deck)
+    // Soft (not neon-bright) edge strips guiding the eye toward the plaza (+Z).
+    const edgeMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 0.9, roughness: 0.5 }))
+    for (const sx of [-4.4, 4.4]) {
+      const strip = new THREE.Mesh(this.boxGeo, edgeMat)
+      strip.scale.set(0.3, 0.14, 24)
+      strip.position.set(sx, 0.12, 2)
+      this.group.add(strip)
+    }
+    // A few low guide bollards with soft caps (calm, low intensity).
+    const capMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 1.2, roughness: 0.5 }))
+    const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x222a36, metalness: 0.5, roughness: 0.6 }))
+    for (let z = -6; z <= 10; z += 8) {
+      for (const sx of [-4.8, 4.8]) {
+        const post = new THREE.Mesh(this.boxGeo, postMat)
+        post.scale.set(0.3, 1.1, 0.3)
+        post.position.set(sx, 0.55, z)
+        this.group.add(post)
+        const cap = new THREE.Mesh(this.boxGeo, capMat)
+        cap.scale.set(0.45, 0.16, 0.45)
+        cap.position.set(sx, 1.15, z)
+        this.group.add(cap)
+      }
+    }
+  }
+
   private buildLandmark() {
     const x = -250
     const z = -210
