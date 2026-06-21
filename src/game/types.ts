@@ -84,6 +84,8 @@ export interface ProgressHud {
   duelTierColor: string
   duelStreak: number
   credits: number
+  badges: number // achievements unlocked
+  achievements: string[] // unlocked achievement ids (for the badges view)
   cosmetics: { trail: string; accent: string; owned: string[] }
 }
 
@@ -119,6 +121,7 @@ export interface PlayerProfile {
   level: number // pilot level
   duelTier: string // duel rank tier name (e.g. CLASS B)
   duelTierColor: string
+  badges: number // achievements unlocked
   games: { game: string; played: number; won: number; lost: number; best: number }[]
 }
 

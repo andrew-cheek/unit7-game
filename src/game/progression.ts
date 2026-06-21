@@ -32,6 +32,7 @@ export interface Progression {
   bestDuelStreak: number
   duelWins: number
   duelLosses: number
+  achievements: string[] // unlocked achievement ids
   cosmetics: { trail: string; accent: string; owned: string[] }
 }
 
@@ -83,6 +84,7 @@ function defaults(): Progression {
     bestDuelStreak: 0,
     duelWins: 0,
     duelLosses: 0,
+    achievements: [],
     cosmetics: { trail: 'cyan', accent: 'cyan', owned: ['cyan'] },
   }
 }
@@ -107,6 +109,7 @@ export function loadProgression(): Progression {
       bestDuelStreak: Number(p.bestDuelStreak) || 0,
       duelWins: Number(p.duelWins) || 0,
       duelLosses: Number(p.duelLosses) || 0,
+      achievements: Array.isArray(p.achievements) ? p.achievements.map(String) : [],
       cosmetics: { trail: String(cos.trail || 'cyan'), accent: String(cos.accent || 'cyan'), owned },
     }
   } catch {
@@ -271,4 +274,72 @@ export function equipCosmetic(slot: 'trail' | 'accent', id: string) {
   if (!p.cosmetics.owned.includes(id)) return
   p.cosmetics[slot] = id
   save(p)
+}
+
+// --- achievements ------------------------------------------------------------
+// Milestone badges across every loop. Low-fiction, purely mechanical goals that
+// give long-term targets and show on your profile. Evaluated after relevant
+// events against a context the game assembles.
+
+export interface AchContext {
+  level: number
+  captures: number // lifetime alien captures
+  duelWins: number
+  bestDuelStreak: number
+  duelRating: number
+  loginStreak: number
+  gamesPlayed: number // distinct arcade cabinets played at least once
+  colorsOwned: number
+  dailyCompleted: boolean // a daily objective has been completed (this session or ever)
+}
+
+export interface AchievementDef {
+  id: string
+  name: string
+  desc: string
+  color: string
+  ok: (c: AchContext) => boolean
+}
+
+const BRONZE = '#cd9b62', SILVER = '#cfe0ee', GOLD = '#ffd24a'
+
+export const ACHIEVEMENTS: AchievementDef[] = [
+  { id: 'lvl2', name: 'First Steps', desc: 'Reach Pilot Level 2', color: BRONZE, ok: (c) => c.level >= 2 },
+  { id: 'lvl10', name: 'Rising Star', desc: 'Reach Pilot Level 10', color: SILVER, ok: (c) => c.level >= 10 },
+  { id: 'lvl25', name: 'Veteran', desc: 'Reach Pilot Level 25', color: GOLD, ok: (c) => c.level >= 25 },
+  { id: 'cap10', name: 'Net Positive', desc: 'Capture 10 aliens', color: BRONZE, ok: (c) => c.captures >= 10 },
+  { id: 'cap100', name: 'Sky Sweeper', desc: 'Capture 100 aliens', color: SILVER, ok: (c) => c.captures >= 100 },
+  { id: 'cap500', name: 'Abductor', desc: 'Capture 500 aliens', color: GOLD, ok: (c) => c.captures >= 500 },
+  { id: 'duel1', name: 'First Blood', desc: 'Win a duel', color: BRONZE, ok: (c) => c.duelWins >= 1 },
+  { id: 'duel10', name: 'Duelist', desc: 'Win 10 duels', color: SILVER, ok: (c) => c.duelWins >= 10 },
+  { id: 'duel50', name: 'Gladiator', desc: 'Win 50 duels', color: GOLD, ok: (c) => c.duelWins >= 50 },
+  { id: 'streak3', name: 'On Fire', desc: '3-win duel streak', color: SILVER, ok: (c) => c.bestDuelStreak >= 3 },
+  { id: 'streak7', name: 'Unstoppable', desc: '7-win duel streak', color: GOLD, ok: (c) => c.bestDuelStreak >= 7 },
+  { id: 'rankB', name: 'Ranked', desc: 'Reach duel Class B', color: SILVER, ok: (c) => c.duelRating >= 1300 },
+  { id: 'rankS', name: 'Apex', desc: 'Reach duel Class S', color: GOLD, ok: (c) => c.duelRating >= 1800 },
+  { id: 'day3', name: 'Dedicated', desc: '3-day login streak', color: BRONZE, ok: (c) => c.loginStreak >= 3 },
+  { id: 'day7', name: 'Committed', desc: '7-day login streak', color: SILVER, ok: (c) => c.loginStreak >= 7 },
+  { id: 'day30', name: 'Loyal', desc: '30-day login streak', color: GOLD, ok: (c) => c.loginStreak >= 30 },
+  { id: 'arcade', name: 'Arcade Hopper', desc: 'Play all 8 cabinets', color: GOLD, ok: (c) => c.gamesPlayed >= 8 },
+  { id: 'col4', name: 'Collector', desc: 'Own 4 colors', color: BRONZE, ok: (c) => c.colorsOwned >= 4 },
+  { id: 'colAll', name: 'Fashionista', desc: 'Own every color', color: GOLD, ok: (c) => c.colorsOwned >= 8 },
+  { id: 'daily', name: 'Daily Grind', desc: 'Complete a daily objective', color: SILVER, ok: (c) => c.dailyCompleted },
+]
+
+/** Evaluate all achievements against the context; persist + return newly unlocked. */
+export function evaluateAchievements(ctx: AchContext): AchievementDef[] {
+  const p = loadProgression()
+  const have = new Set(p.achievements)
+  const newly: AchievementDef[] = []
+  for (const a of ACHIEVEMENTS) {
+    if (!have.has(a.id) && a.ok(ctx)) {
+      have.add(a.id)
+      newly.push(a)
+    }
+  }
+  if (newly.length) {
+    p.achievements = [...have]
+    save(p)
+  }
+  return newly
 }

@@ -29,7 +29,7 @@ import { clamp } from './utils'
 import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, recordGameResult, type Profile } from './storage'
 import {
   loadProgression, addXp, noteLogin, noteDaily, recordDuel, levelForXp, levelInfo, tierForRating, cosmeticById,
-  ownCosmetic, equipCosmetic as equipCosmeticStore, type Progression,
+  ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
 } from './progression'
 import type { HudState, MatchView, MinigameKind, PlayerProfile, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
 
@@ -1321,6 +1321,31 @@ export class Game {
   private refreshProgression() {
     this.progression = loadProgression()
     this.profilesDirty = true
+    this.checkAchievements()
+  }
+
+  /** Evaluate achievements against the current state; toast any newly unlocked. */
+  private checkAchievements() {
+    const stats = loadStats()
+    const gamesPlayed = Object.values(stats.games).filter((g) => g.played > 0).length
+    const newly = evaluateAchievements({
+      level: levelForXp(this.progression.xp),
+      captures: this.profile.lifetimeCaptured + this.hud.captured,
+      duelWins: this.progression.duelWins,
+      bestDuelStreak: this.progression.bestDuelStreak,
+      duelRating: this.progression.duelRating,
+      loginStreak: this.progression.streak,
+      gamesPlayed,
+      colorsOwned: this.progression.cosmetics.owned.length,
+      dailyCompleted: this.progression.daily.claimed,
+    })
+    if (newly.length) {
+      this.progression = loadProgression() // pick up the newly persisted ids
+      this.hud.banner = `★ ${newly[0].name.toUpperCase()}`
+      this.bannerTimer = 2.8
+      this.audio.play('objective')
+      vibrate(50)
+    }
   }
 
   /** Banner + sting when a level boundary is crossed. */
@@ -1403,7 +1428,7 @@ export class Game {
     for (const [game, r] of Object.entries(stats.games)) {
       games[game] = [r.played, r.won, r.lost, r.best]
     }
-    this.net.sendProfile(this.profile.lifetimeCaptured + this.hud.captured, games, levelForXp(this.progression.xp), this.progression.duelRating)
+    this.net.sendProfile(this.profile.lifetimeCaptured + this.hud.captured, games, levelForXp(this.progression.xp), this.progression.duelRating, this.progression.achievements.length)
   }
 
   /** Snapshot the gamification state for the HUD (level/streak/daily/rank/cosmetics). */
@@ -1422,6 +1447,8 @@ export class Game {
       duelTierColor: tier.color,
       duelStreak: p.duelStreak,
       credits: this.credits,
+      badges: p.achievements.length,
+      achievements: [...p.achievements],
       cosmetics: { trail: p.cosmetics.trail, accent: p.cosmetics.accent, owned: [...p.cosmetics.owned] },
     }
   }
@@ -1445,6 +1472,7 @@ export class Game {
       level: levelForXp(this.progression.xp),
       duelTier: selfTier.name,
       duelTierColor: selfTier.color,
+      badges: this.progression.achievements.length,
       games: selfGames,
     }
     const others: PlayerProfile[] = this.remoteProfiles
@@ -1459,6 +1487,7 @@ export class Game {
           level: p.level ?? 1,
           duelTier: t.name,
           duelTierColor: t.color,
+          badges: p.badges ?? 0,
           games: Object.entries(p.games).map(([game, tup]) => ({
             game,
             played: tup[0] ?? 0,

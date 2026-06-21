@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import type { BlipKind, HudState, PlayerProfile } from '../game/types'
+import { ACHIEVEMENTS } from '../game/progression'
 
 // Friendly labels for the per-game W/L lines on a profile card.
 const GAME_LABELS: Record<string, string> = {
@@ -184,6 +185,7 @@ export function HUD({
         <div style={profileOverlay} onClick={() => setViewing(null)}>
           <ProfileCard
             profile={viewed}
+            achievements={viewed.self ? hud.progress.achievements : undefined}
             onClose={() => setViewing(null)}
             onChallenge={
               !viewed.self && viewed.id && onChallenge
@@ -201,7 +203,8 @@ export function HUD({
   )
 }
 
-function ProfileCard({ profile, onClose, onChallenge }: { profile: PlayerProfile; onClose: () => void; onChallenge?: () => void }) {
+function ProfileCard({ profile, onClose, onChallenge, achievements }: { profile: PlayerProfile; onClose: () => void; onChallenge?: () => void; achievements?: string[] }) {
+  const [showBadges, setShowBadges] = useState(false)
   const games = [...profile.games].filter((g) => g.played > 0).sort((a, b) => b.played - a.played)
   const totalWon = games.reduce((s, g) => s + g.won, 0)
   const totalLost = games.reduce((s, g) => s + g.lost, 0)
@@ -222,7 +225,26 @@ function ProfileCard({ profile, onClose, onChallenge }: { profile: PlayerProfile
       <div style={statRow}>
         <Stat label="W / L" value={`${totalWon} / ${totalLost}`} color={NEON.lime} />
         <Stat label="WIN RATE" value={`${rate}%`} color={NEON.orange} />
+        <Stat label="BADGES" value={`${profile.badges}/${ACHIEVEMENTS.length}`} color={NEON.purple} />
       </div>
+      {achievements && (
+        <button style={{ ...rosterRow, justifyContent: 'center', marginTop: 10, color: NEON.purple, borderColor: 'rgba(138,92,255,0.4)' }} onClick={() => setShowBadges((v) => !v)}>
+          {showBadges ? 'HIDE BADGES' : 'VIEW BADGES'}
+        </button>
+      )}
+      {achievements && showBadges && (
+        <div style={badgeGrid}>
+          {ACHIEVEMENTS.map((a) => {
+            const got = achievements.includes(a.id)
+            return (
+              <div key={a.id} style={{ ...badgeItem, opacity: got ? 1 : 0.32, borderColor: got ? a.color : 'rgba(255,255,255,0.1)' }} title={a.desc}>
+                <span style={{ color: got ? a.color : NEON.dim, fontWeight: 800, fontSize: 11 }}>{got ? '★' : '☆'} {a.name}</span>
+                <span style={{ color: NEON.dim, fontSize: 9 }}>{a.desc}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <div style={{ ...microLabel, color: NEON.dim, marginTop: 12, marginBottom: 4 }}>BY GAME</div>
       {games.length === 0 && <div style={rosterHint}>No games played yet.</div>}
       {games.map((g) => (
@@ -589,6 +611,26 @@ const swatchGrid: CSSProperties = {
   gridTemplateColumns: '1fr 1fr',
   gap: 6,
   margin: '6px 0',
+}
+const badgeGrid: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 5,
+  maxHeight: '34vh',
+  overflowY: 'auto',
+  marginTop: 8,
+  paddingRight: 2,
+}
+const badgeItem: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '6px 9px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: 8,
+  font: '600 11px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.03em',
 }
 const swatch: CSSProperties = {
   display: 'flex',
