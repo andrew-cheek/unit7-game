@@ -187,9 +187,9 @@ export class Vehicles {
     let bestScore = Infinity
     for (const v of this.list) {
       if (!v.model.group.visible) continue // hidden off-world (cars stay on Earth)
-      // Big mechs get a larger boarding radius (you stand at their feet, far
-      // from the model centre). Compare distance against each vehicle's range.
-      const range = config.vehicle.enterRange + (isMech(v.kind) ? v.size * 1.6 : 0)
+      // Tall walkers (mechs / titans) get a larger boarding radius - you stand at
+      // their feet, far from the model centre. Compare against each one's range.
+      const range = config.vehicle.enterRange + (isWalker(v.kind) ? v.size * 1.8 : 0)
       const d = Math.hypot(v.position.x - pos.x, v.position.z - pos.z)
       if (d < range && d < bestScore) {
         bestScore = d
