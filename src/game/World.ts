@@ -89,12 +89,12 @@ const DAWN = {
   skyTop: new THREE.Color(0x4f86e0),
   skyBot: new THREE.Color(0xbcd2f0),
   fog: new THREE.Color(0x6f8fc0),
-  ambient: new THREE.Color(0x90a6cc),
-  ambientI: 1.95,
-  hemiSky: new THREE.Color(0xbcd4ff),
-  hemiI: 1.5,
-  sun: new THREE.Color(0xffffff),
-  sunI: 3.0,
+  ambient: new THREE.Color(0xaebfde),
+  ambientI: 2.9,
+  hemiSky: new THREE.Color(0xcfe0ff),
+  hemiI: 2.4,
+  sun: new THREE.Color(0xfff4e0),
+  sunI: 3.4,
 }
 // Building window glow is dimmed toward daytime so lit windows don't read at noon.
 // Pulled down hard (1.7 -> 1.25 -> 0.85): lit windows should read as a dim
@@ -173,6 +173,10 @@ export class World {
   /** Day-cycle factor, 0 = night, 1 = full day. Used to time the invasion. */
   get dayFactor() {
     return this.dawn
+  }
+  /** Jump the day/night clock (debug: `?time=` seconds into the 120s cycle). */
+  setDebugTime(t: number) {
+    this.time = t
   }
   // Atmosphere + set dressing.
   private rain?: THREE.Points
