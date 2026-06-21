@@ -35,14 +35,14 @@ const smooth01 = (x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// Earth day/night cycle. A shorter loop so the change actually reads in a play
-// session, with a longer dusk/dawn so sunrise and sunset are visible events
-// rather than instant flips, and a real stretch of neon-lit night for mood.
-const CYCLE = 130
-const DAWN_START = 6
-const DAWN_END = 22 // 16s sunrise: sky warms and the sun climbs
-const DUSK_START = 78
-const DUSK_END = 100 // 22s sunset: long fade down into night
+// Earth day/night cycle. Short loop so you see a sunrise and sunset within a
+// minute of play. The sun comes UP FAST (a quick 6s dawn), holds daylight only
+// briefly, then a longer sunset eases into a real stretch of neon-lit night.
+const CYCLE = 80
+const DAWN_START = 3
+const DAWN_END = 9 // 6s sunrise: sun pops up quickly
+const DUSK_START = 38 // ~29s of daylight, then it starts dropping
+const DUSK_END = 56 // 18s sunset fade into night (~27s of night before dawn)
 function dayCycle(time: number): number {
   const u = time % CYCLE
   if (u < DAWN_START) return 0
@@ -104,6 +104,8 @@ export class World {
 
   private scene: THREE.Scene
   private boxGeo = new THREE.BoxGeometry(1, 1, 1)
+  // Unit cylinder (radius 0.5, height 1) for round-tower silhouette variety.
+  private cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 18)
   // Shared unit roof caps (scaled per tower) for building-silhouette variety.
   private domeGeo = new THREE.SphereGeometry(0.5, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2)
   private spireGeo = new THREE.ConeGeometry(0.5, 1, 10)
@@ -212,7 +214,7 @@ export class World {
       t.anisotropy = config.tier.anisotropy
       this.ownedTex.push(t)
     })
-    this.ownedGeos.push(this.domeGeo, this.spireGeo, this.pyramidGeo, this.crownGeo, this.tankGeo)
+    this.ownedGeos.push(this.domeGeo, this.spireGeo, this.pyramidGeo, this.crownGeo, this.tankGeo, this.cylGeo)
   }
 
   private buildGround() {
@@ -295,16 +297,33 @@ export class World {
   }
 
   private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number) {
-    const facade = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019][Math.floor(hash01(seed * 1.7) * 7)]
-    const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
-    tex.needsUpdate = true
-    tex.anisotropy = config.tier.anisotropy
-    tex.repeat.set(Math.max(2, Math.round(fx / 6)), Math.max(3, Math.round(h / 8)))
-    // Per-building offset so neighbouring towers don't share the same lit pattern.
-    tex.offset.set(hash01(seed * 3.1), hash01(seed * 4.2))
-    this.ownedTex.push(tex)
-    const mat = this.own(
-      new THREE.MeshStandardMaterial({
+    // ~40% of towers are dark, matte concrete/metal with NO glowing window grid.
+    // This is the main lever for both "less neon" and "more variety": the city
+    // becomes lit towers standing among dark ones, instead of every face glowing.
+    const dark = hash01(seed * 1.31) < 0.4
+    // ~16% are cylindrical for silhouette variety against the box towers.
+    const round = hash01(seed * 2.91) < 0.16
+    const bodyGeo = round ? this.cylGeo : this.boxGeo
+
+    let mat: THREE.MeshStandardMaterial
+    if (dark) {
+      const cset = [0x14171e, 0x191c24, 0x10131a, 0x1c2029, 0x21262f]
+      mat = this.own(new THREE.MeshStandardMaterial({
+        color: cset[Math.floor(hash01(seed * 1.7) * cset.length)],
+        metalness: 0.5,
+        roughness: 0.72,
+        envMapIntensity: config.tier.envMapIntensity,
+      }))
+    } else {
+      const facade = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019][Math.floor(hash01(seed * 1.7) * 7)]
+      const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
+      tex.needsUpdate = true
+      tex.anisotropy = config.tier.anisotropy
+      tex.repeat.set(Math.max(2, Math.round(fx / 6)), Math.max(3, Math.round(h / 8)))
+      // Per-building offset so neighbouring towers don't share the same lit pattern.
+      tex.offset.set(hash01(seed * 3.1), hash01(seed * 4.2))
+      this.ownedTex.push(tex)
+      mat = this.own(new THREE.MeshStandardMaterial({
         color: facade,
         metalness: 0.35,
         roughness: 0.55,
@@ -312,10 +331,10 @@ export class World {
         emissiveMap: tex,
         emissiveIntensity: WINDOW_NIGHT_I,
         envMapIntensity: config.tier.envMapIntensity,
-      }),
-    )
-    this.facadeMats.push(mat)
-    const mesh = new THREE.Mesh(this.boxGeo, mat)
+      }))
+      this.facadeMats.push(mat) // only lit towers dim with the day cycle
+    }
+    const mesh = new THREE.Mesh(bodyGeo, mat)
     mesh.scale.set(fx, h, fz)
     mesh.position.set(cx, h / 2, cz)
     mesh.castShadow = config.tier.buildingShadows // off on mobile (perf)
@@ -330,9 +349,9 @@ export class World {
     // discipline so a city block isn't every colour at once.
     const ACCENTS = [config.palette.cyan, config.palette.magenta, config.palette.purple]
     const neonCorner = ACCENTS[Math.floor(hash01(seed * 6.7) * ACCENTS.length)]
-    // Trim on ~35% of towers (was ~80%) at a calm intensity (was 3.2) so neon
-    // reads as occasional accent trim, not a glowing crown on every roof.
-    if (hash01(seed * 5.1) > 0.65) {
+    // Trim on ~35% of lit towers (never on dark ones) at a calm intensity so
+    // neon reads as occasional accent trim, not a glowing crown on every roof.
+    if (!dark && !round && hash01(seed * 5.1) > 0.65) {
       const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.5))
       trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
       trim.position.set(cx, h + 0.1, cz)
@@ -340,7 +359,9 @@ export class World {
     }
     // Desktop-only decorative neon (extra draw calls). On mobile the window
     // texture carries the sci-fi look, so these are skipped to hold frame rate.
-    const richFacade = config.tier.name === 'high'
+    // Dark towers stay matte (no spines/bands) for value contrast; round towers
+    // skip the box-shaped neon strips that wouldn't wrap a cylinder cleanly.
+    const richFacade = config.tier.name === 'high' && !dark && !round
     // A glowing vertical spine on taller towers (front + back faces).
     if (richFacade && h > 46 && hash01(seed * 8.9) > 0.55) {
       const spineMat = this.glow(neonCorner, 1.8)
@@ -372,8 +393,8 @@ export class World {
       dome.position.set(cx, h, cz)
       this.group.add(dome)
     } else if (roof < 0.28) {
-      // Spire cap (glowing).
-      const spire = new THREE.Mesh(this.spireGeo, this.glow(config.palette.cyan, 2.4))
+      // Spire cap (glowing on lit towers, matte on dark ones).
+      const spire = new THREE.Mesh(this.spireGeo, dark ? mat : this.glow(config.palette.cyan, 2.4))
       const sh = 6 + hash01(seed * 4.9) * 10
       spire.scale.set(fx * 0.5, sh, fz * 0.5)
       spire.position.set(cx, h + sh / 2, cz)
@@ -393,15 +414,15 @@ export class World {
       }
     } else if (roof < 0.54) {
       // Pyramid / tapered crystal cap (4-sided cone).
-      const pyr = new THREE.Mesh(this.pyramidGeo, hash01(seed * 7.3) > 0.5 ? this.glow(neonPick, 2.0) : mat)
+      const pyr = new THREE.Mesh(this.pyramidGeo, (!dark && hash01(seed * 7.3) > 0.5) ? this.glow(neonPick, 2.0) : mat)
       const ph = Math.min(fx, fz) * (0.7 + hash01(seed * 5.5) * 0.8)
       pyr.rotation.y = Math.PI / 4
       pyr.scale.set(fx * 0.72, ph, fz * 0.72)
       pyr.position.set(cx, h + ph / 2, cz)
       this.group.add(pyr)
     } else if (roof < 0.64) {
-      // Glowing crown ring around the roofline.
-      const crown = new THREE.Mesh(this.crownGeo, this.glow(neonPick, 2.8))
+      // Crown ring around the roofline (matte on dark towers).
+      const crown = new THREE.Mesh(this.crownGeo, dark ? mat : this.glow(neonPick, 2.8))
       crown.rotation.x = Math.PI / 2
       crown.scale.set(fx * 0.6, fz * 0.6, Math.max(fx, fz) * 0.18)
       crown.position.set(cx, h + 0.6, cz)
