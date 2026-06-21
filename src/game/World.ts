@@ -76,10 +76,11 @@ const DAWN = {
   sunI: 3.0,
 }
 // Building window glow is dimmed toward daytime so lit windows don't read at noon.
-// Night intensity pulled down (1.7 -> 1.25) on feedback that the city was a wall
-// of glow; windows should read as lit, not as light sources.
-const WINDOW_NIGHT_I = 1.25
-const WINDOW_DAY_I = 0.3
+// Pulled down hard (1.7 -> 1.25 -> 0.85): lit windows should read as a dim
+// minority accent on a dark facade, not as light sources. The dark-city value
+// contrast depends on this staying low.
+const WINDOW_NIGHT_I = 0.85
+const WINDOW_DAY_I = 0.16
 
 /**
  * The futuristic district + its atmosphere. Stage 5 art pass turns the gray test
@@ -294,7 +295,7 @@ export class World {
   }
 
   private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number) {
-    const facade = [0x12151f, 0x171b27, 0x1d2230, 0x10131c, 0x222a38, 0x0d1a22, 0x241a2e][Math.floor(hash01(seed * 1.7) * 7)]
+    const facade = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019][Math.floor(hash01(seed * 1.7) * 7)]
     const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
     tex.needsUpdate = true
     tex.anisotropy = config.tier.anisotropy
@@ -324,13 +325,15 @@ export class World {
     this.landmarks.push({ x: cx, z: cz })
     this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - fx / 2, 0, cz - fz / 2), new THREE.Vector3(cx + fx / 2, h, cz + fz / 2)))
 
-    // Neon roofline trim on most towers + a vertical neon spine up tall ones.
-    const neonCorner = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime][Math.floor(hash01(seed * 6.7) * 5)]
-    // Roofline trim on a little over half of towers (was ~80%), at a calmer
-    // intensity (was 3.2) so neon reads as accent trim, not a glowing crown on
-    // every roof. The dominant accent hue per tower keeps blocks coherent.
-    if (hash01(seed * 5.1) > 0.45) {
-      const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.9))
+    // Neon roofline trim on a minority of towers + a vertical spine up tall ones.
+    // Restricted to the 3-hue accent set (cyan / magenta / violet) for palette
+    // discipline so a city block isn't every colour at once.
+    const ACCENTS = [config.palette.cyan, config.palette.magenta, config.palette.purple]
+    const neonCorner = ACCENTS[Math.floor(hash01(seed * 6.7) * ACCENTS.length)]
+    // Trim on ~35% of towers (was ~80%) at a calm intensity (was 3.2) so neon
+    // reads as occasional accent trim, not a glowing crown on every roof.
+    if (hash01(seed * 5.1) > 0.65) {
+      const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.5))
       trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
       trim.position.set(cx, h + 0.1, cz)
       this.group.add(trim)
@@ -361,7 +364,7 @@ export class World {
     }
     // Roof-shape variety so the skyline isn't all flat boxes.
     const roof = hash01(seed * 4.4)
-    const neonPick = [config.palette.cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime][Math.floor(hash01(seed * 6.1) * 5)]
+    const neonPick = ACCENTS[Math.floor(hash01(seed * 6.1) * ACCENTS.length)]
     if (roof < 0.14) {
       // Domed cap.
       const dome = new THREE.Mesh(this.domeGeo, mat)

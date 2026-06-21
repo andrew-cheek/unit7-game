@@ -13,12 +13,12 @@ export const config = {
   render: {
     pixelRatioCap: 2,
     exposure: 0.98,
-    // Toned down on feedback that the neon was too bright: lower strength + a
-    // higher threshold so only genuinely bright sources bloom, not everything.
-    // Threshold raised again (0.85 -> 0.92) so dim/mid neon and sub-pixel glints
-    // on distant geometry stay below the bloom floor and don't shimmer; only the
-    // hero-bright signs blow out. Bloom also runs at half res (see Engine).
-    bloom: { strength: 0.5, radius: 0.5, threshold: 0.92 },
+    // Bloom is reserved for genuinely bright emitters, not every lit window.
+    // High threshold (0.96) so only hero signs/cores bloom, with a tighter
+    // radius and lower strength so the whole city doesn't haze up. Runs at
+    // half res (see Engine). The dark-city look comes from cutting emissive
+    // coverage (procedural/World), not from cranking bloom.
+    bloom: { strength: 0.42, radius: 0.4, threshold: 0.96 },
     shadowMapSize: 2048,
     // Frame dt is clamped to this so a backgrounded tab can't fling entities.
     maxFrameDelta: 0.05,
@@ -46,8 +46,8 @@ export const config = {
     orange: 0xff8a1e,
     lime: 0x9bff4d,
     deepBlue: 0x0a1030,
-    asphalt: 0x14161d,
-    concrete: 0x2a2d39,
+    asphalt: 0x0b0c12, // darker road so wet neon reflections have value to pop against
+    concrete: 0x1c1f29,
     glass: 0x0f2233,
     robot: 0xc9d4e3,
     robotTrim: 0x27e7ff,

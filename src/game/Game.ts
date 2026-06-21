@@ -322,10 +322,10 @@ export class Game {
     const gy = this.physics.sampleGround(cx, cz, 40)?.y ?? 0
     g.position.set(cx, gy, cz)
     // Big vertical hero ring.
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, fog: false })))
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: 0x1aa6c4, fog: false })))
     ring.position.y = 7
     g.add(ring)
-    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, fog: false })))
+    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xc41f9e, fog: false })))
     ring2.position.y = 7
     g.add(ring2)
     // Tall sky beam, visible from across the map.
@@ -380,11 +380,11 @@ export class Game {
     const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
     const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.arcadeGeos.push(geo); return geo }
 
-    const pad = new THREE.Mesh(ownG(new THREE.CylinderGeometry(3.4, 3.8, 0.2, 32)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 1.8, roughness: 0.4 })))
+    const pad = new THREE.Mesh(ownG(new THREE.CylinderGeometry(3.4, 3.8, 0.2, 32)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 1.4, roughness: 0.4 })))
     pad.position.y = 0.1
     g.add(pad)
 
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(3.0, 0.28, 16, 48)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 2.0, roughness: 0.4 })))
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(3.0, 0.28, 16, 48)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 1.5, roughness: 0.4 })))
     ring.position.y = 3.1
     g.add(ring)
 

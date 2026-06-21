@@ -120,7 +120,7 @@ export class Sky {
       })
       const rail = new THREE.Mesh(
         ownG(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPts, true), S, 0.6, 6, true)),
-        ownM(new THREE.MeshBasicMaterial({ color: off < 0 ? 0x27e7ff : 0xff2bd0, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
+        ownM(new THREE.MeshBasicMaterial({ color: off < 0 ? 0x27e7ff : 0xff2bd0, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
       )
       this.group.add(rail)
     }

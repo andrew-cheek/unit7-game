@@ -59,6 +59,11 @@ export class Engine {
   onUpdate: ((dt: number, elapsed: number) => void) | null = null
   /** Smoothed real render frame rate (the sim now always steps at a fixed dt). */
   fps = 60
+  // Per-frame render stats, cached once at the end of each frame so a console
+  // read (window.__UNIT7__) gets stable numbers instead of catching the counter
+  // mid-accumulation or after a 1-triangle post-processing pass.
+  drawCalls = 0
+  triangles = 0
 
   private clock = new THREE.Clock()
   private elapsed = 0
@@ -98,6 +103,10 @@ export class Engine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.pixelCap))
     this.renderer.setSize(w, h)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    // Manual reset: the counter accumulates across the whole frame (scene +
+    // every composer pass) and we snapshot it after composer.render, so the
+    // exposed stat is the real per-frame total, not whatever the last pass left.
+    this.renderer.info.autoReset = false
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = config.render.exposure
     this.renderer.shadowMap.enabled = tier.shadows
@@ -183,9 +192,11 @@ export class Engine {
     this.resizeObserver.observe(container)
 
     // Debug handle for inspecting live render stats from the console:
-    //   __UNIT7__.fps                 smoothed render FPS
-    //   __UNIT7__.renderer.info       draw calls / triangles / memory
-    //   __UNIT7__.renderScale         current adaptive-resolution scale
+    //   __UNIT7__.fps                     smoothed render FPS
+    //   __UNIT7__.drawCalls               per-frame draw calls (stable snapshot)
+    //   __UNIT7__.triangles               per-frame triangles (stable snapshot)
+    //   __UNIT7__.renderer.info.memory    geometries / textures
+    //   __UNIT7__.renderScale             current adaptive-resolution scale
     // Read-only; cleared on dispose. No effect on gameplay.
     if (typeof window !== 'undefined') {
       ;(window as unknown as { __UNIT7__?: unknown }).__UNIT7__ = this
@@ -245,7 +256,11 @@ export class Engine {
     if (steps === maxSteps) this.accumulator = 0
 
     this.adapt(frame)
+    this.renderer.info.reset()
     this.composer.render()
+    // Snapshot the accumulated per-frame totals (scene draw + post passes).
+    this.drawCalls = this.renderer.info.render.calls
+    this.triangles = this.renderer.info.render.triangles
   }
 
   /**
