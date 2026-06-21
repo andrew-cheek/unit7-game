@@ -85,6 +85,17 @@ export class DawnShow {
     if (zone !== 'earth') this.clearWalkers()
   }
 
+  /** Re-sync the dawn/dusk detector after the world clock is jumped, so it
+   *  doesn't mistake the jump for a crossing and mis-fire a sequence. */
+  resetClock() {
+    this.prevDay = -1
+    this.mode = 'idle'
+    this.seqT = 0
+    this.arriveSpawned = false
+    this.clearWalkers()
+    this.shuttle.group.visible = false
+  }
+
   update(dt: number, dayFactor: number) {
     // Bloom: props are fully risen at full sun, fully sunk in the dark.
     const bloom = smooth((dayFactor - 0.2) / 0.6)

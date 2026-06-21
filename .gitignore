@@ -4,6 +4,7 @@ dist-ssr
 *.local
 .DS_Store
 .vite
+.smoke
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
