@@ -86,6 +86,16 @@ export const config = {
     fuelMinToFly: 4,
   },
 
+  // Summonable hover skateboard (C / mobile BOARD): the robot rides it visibly
+  // with a fast, glidey, carving feel and leans into turns.
+  hoverboard: {
+    speedMul: 1.85, // top speed multiplier over running
+    accel: 34,
+    decel: 14, // low so you keep momentum / glide
+    turnLerp: 7, // looser turn for wide carves
+    lean: 0.5, // max roll into a turn (radians)
+  },
+
   parachute: {
     terminalVelocity: -3, // m/s, never falls faster than this while deployed
     horizontalDrift: 7,

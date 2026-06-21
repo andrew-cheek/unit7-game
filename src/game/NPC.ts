@@ -21,6 +21,14 @@ interface Agent {
   kind: AgentKind
   flee: boolean // aliens scatter when the player closes in
   value: number // score for catching this one
+  // Bubble-gun state: floatT>0 = trapped + rising/floating; then it pops and the
+  // agent falls back down before resuming normal wandering.
+  floatT: number
+  falling: boolean
+  fallV: number
+  driftX: number
+  driftZ: number
+  bubble: THREE.Mesh | null
 }
 
 const NPC_RADIUS = 0.4
@@ -42,6 +50,9 @@ export class NPCManager {
   // scratch
   private sep = new THREE.Vector3()
   private desired = new THREE.Vector3()
+  // Shared bubble visuals (one geometry/material reused by every bubbled agent).
+  private bubbleGeo = new THREE.SphereGeometry(1.15, 16, 12)
+  private bubbleMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
 
   constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], count = config.npc.count) {
     this.scene = scene
@@ -110,6 +121,12 @@ export class NPCManager {
       kind,
       flee: kind === 'alien',
       value,
+      floatT: 0,
+      falling: false,
+      fallV: 0,
+      driftX: 0,
+      driftZ: 0,
+      bubble: null,
       cap: {
         position: pos,
         alive: true,
@@ -128,7 +145,72 @@ export class NPCManager {
   /** Earth-only crowd: hide + freeze when off-world. */
   setVisible(v: boolean) {
     this.visible = v
+    if (!v) for (const a of this.agents) this.popBubble(a) // clear floats when leaving Earth
     for (const a of this.agents) a.model.group.visible = v && a.alive
+  }
+
+  /**
+   * Bubble gun: trap every live crowd agent within `radius` of `center` in a
+   * bubble. They rise, float, then the bubble pops and they fall back down.
+   * Returns true if anyone was caught.
+   */
+  bubbleArea(center: THREE.Vector3, radius: number): boolean {
+    let any = false
+    const r2 = radius * radius
+    for (const a of this.agents) {
+      if (!a.alive || a.floatT > 0 || a.falling) continue
+      const dx = a.pos.x - center.x
+      const dz = a.pos.z - center.z
+      if (dx * dx + dz * dz > r2) continue
+      a.floatT = 5
+      a.driftX = randRange(-1.2, 1.2)
+      a.driftZ = randRange(-1.2, 1.2)
+      const b = new THREE.Mesh(this.bubbleGeo, this.bubbleMat)
+      b.position.set(a.pos.x, a.pos.y + 0.9, a.pos.z)
+      this.scene.add(b)
+      a.bubble = b
+      any = true
+    }
+    return any
+  }
+
+  private popBubble(a: Agent) {
+    if (a.bubble) { this.scene.remove(a.bubble); a.bubble = null }
+    a.floatT = 0
+    a.falling = false
+    a.fallV = 0
+  }
+
+  private updateBubbled(a: Agent, dt: number) {
+    const g = this.physics.sampleGround(a.pos.x, a.pos.z, a.pos.y + 4)
+    const groundY = g ? g.y : 0
+    if (a.floatT > 0) {
+      a.floatT -= dt
+      a.pos.x += a.driftX * dt
+      a.pos.z += a.driftZ * dt
+      const targetY = groundY + 6
+      a.pos.y += (targetY - a.pos.y) * Math.min(1, dt * 3) // ease upward
+      a.yaw += dt * 1.5
+      a.model.group.rotation.y = a.yaw
+      if (a.floatT <= 0) {
+        if (a.bubble) { this.scene.remove(a.bubble); a.bubble = null }
+        a.falling = true
+        a.fallV = 0
+      }
+    } else {
+      a.fallV -= 20 * dt
+      a.pos.y += a.fallV * dt
+      if (a.pos.y <= groundY) {
+        a.pos.y = groundY
+        a.falling = false
+        a.fallV = 0
+        a.vel.set(0, 0, 0)
+      }
+    }
+    a.model.group.position.copy(a.pos)
+    a.model.group.visible = this.visible
+    if (a.bubble) a.bubble.position.set(a.pos.x, a.pos.y + 0.9, a.pos.z)
+    a.model.update(dt, 0, true)
   }
 
   update(dt: number, playerPos?: THREE.Vector3) {
@@ -140,6 +222,11 @@ export class NPCManager {
       if (!a.alive) {
         a.respawn -= dt
         if (a.respawn <= 0) this.respawn(a)
+        continue
+      }
+      // Bubbled agents float/fall under their own handling, skipping normal AI.
+      if (a.floatT > 0 || a.falling) {
+        this.updateBubbled(a, dt)
         continue
       }
 
@@ -221,9 +308,12 @@ export class NPCManager {
 
   dispose() {
     for (const a of this.agents) {
+      this.popBubble(a)
       this.scene.remove(a.model.group)
       a.model.dispose()
     }
+    this.bubbleGeo.dispose()
+    this.bubbleMat.dispose()
     this.agents.length = 0
   }
 }

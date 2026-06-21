@@ -33,6 +33,9 @@ export class Player {
   shield = false // shield powerup
   dancing = false // robot-dance emote (set by Game from the dance floor / key)
   private danceT = 0
+  boarding = false // riding the summonable hover skateboard
+  private board: THREE.Group
+  private boardLean = 0
 
   private model: RobotModel
   private moveDir = new THREE.Vector3()
@@ -60,7 +63,49 @@ export class Player {
     this.canopy.visible = false
     this.object.add(this.canopy)
 
+    this.board = this.buildBoard()
+    this.board.visible = false
+    this.object.add(this.board)
+
     scene.add(this.object)
+  }
+
+  private buildBoard(): THREE.Group {
+    const g = new THREE.Group()
+    const deck = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 0.12, 2.6),
+      new THREE.MeshStandardMaterial({ color: 0x12151f, metalness: 0.7, roughness: 0.4 }),
+    )
+    deck.position.y = 0.14
+    g.add(deck)
+    const edge = new THREE.Mesh(
+      new THREE.BoxGeometry(1.1, 0.06, 2.7),
+      new THREE.MeshBasicMaterial({ color: config.palette.cyan }),
+    )
+    edge.position.y = 0.08
+    g.add(edge)
+    // Twin thruster glows under the deck.
+    for (const sz of [-0.8, 0.8]) {
+      const jet = new THREE.Mesh(
+        new THREE.ConeGeometry(0.22, 0.7, 10, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }),
+      )
+      jet.rotation.x = Math.PI
+      jet.position.set(0, -0.1, sz)
+      g.add(jet)
+    }
+    return g
+  }
+
+  /** Summon / stow the hover skateboard (the robot rides it visibly). */
+  setBoard(v: boolean) {
+    if (v === this.boarding) return
+    this.boarding = v
+    this.board.visible = v
+    if (!v) {
+      this.boardLean = 0
+      this.object.rotation.z = 0
+    }
   }
 
   get position() {
@@ -161,8 +206,19 @@ export class Player {
       this.object.rotation.x = damp(this.object.rotation.x, clamp(-this.velocity.y * 0.03, -0.5, 0.5), 6, dt)
     } else if (moving && this.mode === 'robot') {
       const targetYaw = Math.atan2(this.moveDir.x, this.moveDir.z)
-      this.yaw = dampAngle(this.yaw, targetYaw, config.player.turnLerp, dt)
-      this.object.rotation.set(0, this.yaw, 0)
+      const prevYaw = this.yaw
+      const lerp = this.boarding ? config.hoverboard.turnLerp : config.player.turnLerp
+      this.yaw = dampAngle(this.yaw, targetYaw, lerp, dt)
+      if (this.boarding) {
+        // Lean into the turn based on how hard we're carving.
+        const want = clamp((-(this.yaw - prevYaw) / Math.max(dt, 1e-3)) * 0.12, -config.hoverboard.lean, config.hoverboard.lean)
+        this.boardLean = damp(this.boardLean, want, 8, dt)
+      }
+      this.object.rotation.set(0, this.yaw, this.boarding ? this.boardLean : 0)
+    } else if (this.boarding && this.mode === 'robot') {
+      // Standing still on the board: ease the lean back to flat.
+      this.boardLean = damp(this.boardLean, 0, 8, dt)
+      this.object.rotation.set(0, this.yaw, this.boardLean)
     } else if (this.mode === 'parachute') {
       this.object.rotation.set(0, this.yaw, 0)
     }
@@ -209,8 +265,11 @@ export class Player {
       0,
       config.player.staminaMax,
     )
-    const maxSpeed = (wantSprint ? config.player.runSpeed : config.player.walkSpeed) * this.speedMul
-    const rate = (intent > 0.1 ? config.player.accel : config.player.decel) * (this.grounded ? 1 : config.player.airControl)
+    const board = this.boarding
+    const maxSpeed = (board ? config.player.runSpeed * config.hoverboard.speedMul : wantSprint ? config.player.runSpeed : config.player.walkSpeed) * this.speedMul
+    const accelV = board ? config.hoverboard.accel : config.player.accel
+    const decelV = board ? config.hoverboard.decel : config.player.decel
+    const rate = (intent > 0.1 ? accelV : decelV) * (this.grounded ? 1 : config.player.airControl)
     this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
     this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
 

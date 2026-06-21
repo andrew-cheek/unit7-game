@@ -148,6 +148,10 @@ export class Game {
   // Transient steam puffs for the mech boot-up burst.
   private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
   private bootGeo = new THREE.SphereGeometry(1, 10, 8)
+  // Bubble-gun projectiles that burst into the crowd-floating effect.
+  private bubbleShots: { mesh: THREE.Mesh; vel: THREE.Vector3; t: number }[] = []
+  private bubbleShotGeo = new THREE.SphereGeometry(0.5, 12, 10)
+  private bubbleShotMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
   private netAccum = 0
   private online = 1 // players in the world incl. self (1 = solo)
   private leaderboard: ScoreRow[] = []
@@ -1193,6 +1197,37 @@ export class Game {
     }
   }
 
+  /** Fire a bubble-gun shot forward; it arcs out and bursts into floating bubbles. */
+  private fireBubble() {
+    const yaw = this.input.yaw
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw))
+    const mesh = new THREE.Mesh(this.bubbleShotGeo, this.bubbleShotMat)
+    mesh.position.set(this.player.position.x + fwd.x * 1.2, this.player.position.y + 1.4, this.player.position.z + fwd.z * 1.2)
+    this.engine.scene.add(mesh)
+    const vel = new THREE.Vector3(fwd.x * 42, 6, fwd.z * 42)
+    this.bubbleShots.push({ mesh, vel, t: 0 })
+    this.audio.play('ui')
+  }
+
+  private updateBubbleShots(dt: number) {
+    for (let i = this.bubbleShots.length - 1; i >= 0; i--) {
+      const s = this.bubbleShots[i]
+      s.t += dt
+      s.vel.y -= 16 * dt // arc
+      s.mesh.position.addScaledVector(s.vel, dt)
+      const gy = this.physics.sampleGround(s.mesh.position.x, s.mesh.position.z, s.mesh.position.y + 3)?.y ?? 0
+      if (s.mesh.position.y <= gy + 0.3 || s.t > 2.5) {
+        // Burst: trap the crowd around the impact in bubbles.
+        if (this.zone === 'earth') this.npcs.bubbleArea(s.mesh.position, 7)
+        this.missiles.shockwave({ x: s.mesh.position.x, y: gy + 0.5, z: s.mesh.position.z }, 0x9fe8ff, 5, 0.5)
+        this.audio.play('soak')
+        vibrate(20)
+        this.engine.scene.remove(s.mesh)
+        this.bubbleShots.splice(i, 1)
+      }
+    }
+  }
+
   /** Push the local player's transform to the server (throttled by the caller). */
   private sendNetState() {
     if (!this.net) return
@@ -1287,6 +1322,9 @@ export class Game {
       if (this.input.consumeEdge('dance')) this.danceToggle = !this.danceToggle
       const onFloor = this.playground.onDanceFloor(this.zone, this.player.position.x, this.player.position.z)
       this.player.setDancing(this.danceToggle || onFloor)
+      // Hover skateboard (C / BOARD) and bubble gun (V / BUBBLE).
+      if (this.input.consumeEdge('board')) this.player.setBoard(!this.player.boarding)
+      if (this.input.consumeEdge('bubble')) this.fireBubble()
       // Trampoline bounce pads fling you skyward.
       if (this.player.grounded) {
         const s = this.playground.bouncePadAt(this.zone, this.player.position.x, this.player.position.z)
@@ -1333,6 +1371,7 @@ export class Game {
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
     this.updateBootPuffs(dt)
+    this.updateBubbleShots(dt)
     if (this.net) {
       this.netAccum += dt
       if (this.netAccum >= 1 / 12) {
@@ -1533,6 +1572,10 @@ export class Game {
     for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
     this.bootPuffs = []
     this.bootGeo.dispose()
+    for (const s of this.bubbleShots) this.engine.scene.remove(s.mesh)
+    this.bubbleShots = []
+    this.bubbleShotGeo.dispose()
+    this.bubbleShotMat.dispose()
     this.objBeaconMats.forEach((m) => m.dispose())
     this.input.dispose()
     this.player.dispose()
