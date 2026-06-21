@@ -334,7 +334,8 @@ export class World {
         envMapIntensity: config.tier.envMapIntensity,
       }))
     } else {
-      const facade = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019][Math.floor(hash01(seed * 1.7) * 7)]
+      const fpal = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019, 0x0a1a1f, 0x161021, 0x1a1410, 0x101a16]
+      const facade = fpal[Math.floor(hash01(seed * 1.7) * fpal.length)]
       const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
       tex.needsUpdate = true
       tex.anisotropy = config.tier.anisotropy
@@ -363,6 +364,21 @@ export class World {
     this.landmarks.push({ x: cx, z: cz })
     this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - fx / 2, 0, cz - fz / 2), new THREE.Vector3(cx + fx / 2, h, cz + fz / 2)))
 
+    // Silhouette variety: a wider podium base on some tall box towers, giving a
+    // stepped/setback profile so the skyline isn't all identical slabs. The base
+    // gets its own collider so you can't walk through it either.
+    if (!round && h > 34 && hash01(seed * 9.1) < 0.42) {
+      const bh = Math.min(h * 0.28, 15)
+      const bw = fx * 1.5
+      const bd = fz * 1.5
+      const base = new THREE.Mesh(this.boxGeo, mat)
+      base.scale.set(bw, bh, bd)
+      base.position.set(cx, bh / 2, cz)
+      base.castShadow = config.tier.buildingShadows
+      base.receiveShadow = true
+      this.group.add(base)
+      this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - bw / 2, 0, cz - bd / 2), new THREE.Vector3(cx + bw / 2, bh, cz + bd / 2)))
+    }
     // Neon roofline trim on a minority of towers + a vertical spine up tall ones.
     // Restricted to the 3-hue accent set (cyan / magenta / violet) for palette
     // discipline so a city block isn't every colour at once.
