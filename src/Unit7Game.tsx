@@ -18,6 +18,7 @@ const Snake = lazy(() => import('./ui/Snake').then((m) => ({ default: m.Snake })
 const RaceLoop = lazy(() => import('./ui/RaceLoop').then((m) => ({ default: m.RaceLoop })))
 const MechArena = lazy(() => import('./ui/MechArena').then((m) => ({ default: m.MechArena })))
 const DriveMad = lazy(() => import('./ui/DriveMad').then((m) => ({ default: m.DriveMad })))
+const BeamWarsLive = lazy(() => import('./ui/BeamWarsLive').then((m) => ({ default: m.BeamWarsLive })))
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -106,10 +107,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{err}</pre>
         </div>
       )}
-      {hud && !hud.intro && !hud.minigame && (
-        <HUD hud={hud} touch={touch} onRestart={() => controlsRef.current?.restartIntro()} onToggleMute={() => controlsRef.current?.toggleMute()} />
+      {hud && !hud.intro && !hud.minigame && !hud.match && (
+        <HUD
+          hud={hud}
+          touch={touch}
+          onRestart={() => controlsRef.current?.restartIntro()}
+          onToggleMute={() => controlsRef.current?.toggleMute()}
+          onChallenge={(id) => controlsRef.current?.challengePilot(id)}
+        />
       )}
-      {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
+      {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}
       {multiplayer && !mpJoined && hud && !hud.intro && (
@@ -166,6 +173,52 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           <DriveMad touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
+      {hud?.match && controlsRef.current && (
+        <Suspense fallback={null}>
+          <BeamWarsLive
+            match={hud.match}
+            touch={touch}
+            onDir={(dx, dy) => controlsRef.current?.matchDir(dx, dy)}
+            onQuit={() => controlsRef.current?.quitMatch()}
+          />
+        </Suspense>
+      )}
+      {hud?.challenge && !hud.match && !hud.minigame && controlsRef.current && (
+        <ChallengePopup
+          name={hud.challenge.name}
+          onAccept={() => controlsRef.current?.acceptChallenge()}
+          onDecline={() => controlsRef.current?.declineChallenge()}
+        />
+      )}
+    </div>
+  )
+}
+
+function ChallengePopup({ name, onAccept, onDecline }: { name: string; onAccept: () => void; onDecline: () => void }) {
+  // Keyboard accept/decline so it works even while the mouse pointer is locked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') { onAccept(); e.preventDefault() }
+      else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') { onDecline(); e.preventDefault() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onAccept, onDecline])
+  return (
+    <div style={challengeWrap}>
+      <div style={challengeCard}>
+        <div style={{ color: '#ff2bd0', font: '800 14px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.2em', marginBottom: 8 }}>DUEL CHALLENGE</div>
+        <div style={{ color: '#dff0ff', font: '700 16px/1.4 ui-monospace, Menlo, monospace', marginBottom: 16 }}>
+          <span style={{ color: '#27e7ff' }}>{name}</span> wants to face you in Beam Wars
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button style={challengeAccept} onClick={onAccept}>ACCEPT ▸</button>
+          <button style={challengeDecline} onClick={onDecline}>DECLINE</button>
+        </div>
+        <div style={{ marginTop: 10, color: 'rgba(223,238,255,0.45)', font: '600 10px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.12em' }}>
+          press Y to accept · N to decline
+        </div>
+      </div>
     </div>
   )
 }
@@ -360,6 +413,46 @@ const boardBox: CSSProperties = {
   border: '1px solid rgba(39,231,255,0.3)',
   borderRadius: 10,
   pointerEvents: 'none',
+}
+const challengeWrap: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: 90,
+  transform: 'translateX(-50%)',
+  zIndex: 42,
+  pointerEvents: 'auto',
+}
+const challengeCard: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  textAlign: 'center',
+  padding: '18px 24px',
+  maxWidth: '88vw',
+  borderRadius: 14,
+  background: 'rgba(8,12,24,0.94)',
+  border: '1px solid rgba(255,43,208,0.5)',
+  boxShadow: '0 0 30px rgba(255,43,208,0.25)',
+}
+const challengeAccept: CSSProperties = {
+  cursor: 'pointer',
+  padding: '10px 20px',
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: '#04121a',
+  background: 'linear-gradient(180deg,#5cf0ff,#27e7ff)',
+  border: 'none',
+  borderRadius: 10,
+}
+const challengeDecline: CSSProperties = {
+  cursor: 'pointer',
+  padding: '10px 18px',
+  font: '700 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  color: 'rgba(223,238,255,0.8)',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderRadius: 10,
 }
 const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}`
 const errStyle: CSSProperties = {

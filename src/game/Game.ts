@@ -26,8 +26,8 @@ import { DawnShow } from './DawnShow'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
-import type { HudState, MinigameKind, PlayerProfile, RadarBlip, Unit7Config, Zone } from './types'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, recordGameResult, type Profile } from './storage'
+import type { HudState, MatchView, MinigameKind, PlayerProfile, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
 export interface Capturable {
@@ -164,6 +164,8 @@ export class Game {
   private hudProfiles: PlayerProfile[] = [] // built roster (self + others) for the HUD
   private profilesDirty = true // rebuild hudProfiles only when stats/roster change
   private username = '' // callsign we joined the shared world under (empty when solo)
+  private incomingChallenge: { fromId: string; name: string } | null = null
+  private matchView: MatchView | null = null // live Beam Wars duel state (null when not dueling)
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -286,6 +288,19 @@ export class Game {
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
       cycleNeon: () => this.cycleNeon(),
+      challengePilot: (id: string) => this.net?.sendChallenge(id),
+      acceptChallenge: () => {
+        if (!this.incomingChallenge) return
+        this.net?.sendAccept(this.incomingChallenge.fromId)
+        this.incomingChallenge = null
+      },
+      declineChallenge: () => {
+        if (!this.incomingChallenge) return
+        this.net?.sendDecline(this.incomingChallenge.fromId)
+        this.incomingChallenge = null
+      },
+      matchDir: (dx: number, dy: number) => this.net?.sendMatchDir(dx, dy),
+      quitMatch: () => this.leaveMatch(),
     }
 
     this.hud = {
@@ -302,6 +317,8 @@ export class Game {
       leaderboard: [],
       neon: this.neonLevel,
       profiles: [],
+      challenge: null,
+      match: null,
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -667,6 +684,15 @@ export class Game {
     this.hudListener({ ...this.hud, radar: this.radar })
     // A minigame may have changed our W/L record; refresh the shared profile.
     this.publishProfile()
+  }
+
+  /** Leave the live duel view: forfeit if still running, then return to the city. */
+  private leaveMatch() {
+    if (!this.matchView) return
+    if (this.matchView.status !== 'over') this.net?.sendMatchQuit()
+    this.matchView = null
+    this.input.consumePause() // drop any Escape pressed inside the duel view
+    this.input.setLockEnabled(true)
   }
 
   // --- zone travel ---------------------------------------------------------
@@ -1203,6 +1229,42 @@ export class Game {
           this.remoteProfiles = list
           this.profilesDirty = true
         },
+        onChallenged: (fromId, name) => {
+          // Ignore a new offer if one is already pending or we're mid-duel.
+          if (this.incomingChallenge || this.matchView) return
+          this.incomingChallenge = { fromId, name }
+          this.audio.play('ui')
+          vibrate(30)
+        },
+        onChallengeDeclined: (name) => {
+          this.hud.banner = `${name} DECLINED`
+          this.bannerTimer = 2
+        },
+        onChallengeBusy: (name) => {
+          this.hud.banner = `${name} IS BUSY`
+          this.bannerTimer = 2
+        },
+        onMatchStart: (side, opp, cols, rows, a, b, _startIn) => {
+          this.incomingChallenge = null
+          this.matchView = { side, opp, cols, rows, a, b, aAlive: true, bAlive: true, status: 'ready', winner: null, seq: 0 }
+          this.input.setLockEnabled(false)
+          this.audio.play('ui')
+        },
+        onMatchTick: (a, b, aAlive, bAlive) => {
+          if (!this.matchView) return
+          const m = this.matchView
+          m.a = a; m.b = b; m.aAlive = aAlive; m.bAlive = bAlive
+          if (m.status === 'ready') m.status = 'play'
+          m.seq += 1
+        },
+        onMatchEnd: (winner) => {
+          const m = this.matchView
+          if (!m) return
+          m.status = 'over'
+          m.winner = winner
+          if (winner !== 'draw') recordGameResult('beamwars', winner === m.side ? 'win' : 'loss')
+          this.publishProfile() // duel changed our W/L; refresh the shared profile
+        },
       },
       { host },
     )
@@ -1393,6 +1455,12 @@ export class Game {
       this.world.update(dt, this.introFocus)
       this.hud.fade = this.intro.fade // cinematic drives the black overlay
       if (this.intro.done) this.finishIntro()
+      this.pushHud(dt)
+      return
+    }
+
+    // A live duel owns the screen (overlay UI); freeze the city cheaply behind it.
+    if (this.matchView) {
       this.pushHud(dt)
       return
     }
@@ -1702,6 +1770,8 @@ export class Game {
       this.profilesDirty = false
     }
     this.hud.profiles = this.hudProfiles
+    this.hud.challenge = this.incomingChallenge
+    this.hud.match = this.matchView ? { ...this.matchView } : null
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }

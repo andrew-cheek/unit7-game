@@ -67,6 +67,23 @@ export interface HudState {
   leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
   neon: 'low' | 'med' | 'high' // neon density / quality setting
   profiles: PlayerProfile[] // roster of viewable pilot profiles (self first; networked others follow)
+  challenge: { fromId: string; name: string } | null // incoming duel offer awaiting accept/decline
+  match: MatchView | null // non-null while a live Beam Wars duel is on screen
+}
+
+/** Live duel state the HUD/PvP view renders, driven by the server. */
+export interface MatchView {
+  side: 'a' | 'b' // which beam is ours
+  opp: string // opponent callsign
+  cols: number
+  rows: number
+  a: [number, number] // beam A head cell
+  b: [number, number] // beam B head cell
+  aAlive: boolean
+  bAlive: boolean
+  status: 'ready' | 'play' | 'over'
+  winner: 'a' | 'b' | 'draw' | null
+  seq: number // increments each server tick (so the view appends trail cells)
 }
 
 /**
@@ -97,6 +114,12 @@ export interface GameControls {
   restartIntro(): void // replay the opening cinematic from the start
   toggleMute(): void // toggle game audio
   cycleNeon(): void // cycle neon density: low -> med -> high
+  // Challenges + live Beam Wars duels.
+  challengePilot(id: string): void // invite another online pilot to a duel
+  acceptChallenge(): void // accept the pending incoming duel offer
+  declineChallenge(): void // decline the pending incoming duel offer
+  matchDir(dx: number, dy: number): void // steer our beam in the active duel
+  quitMatch(): void // leave / forfeit the active duel
 }
 
 export type GameAction =

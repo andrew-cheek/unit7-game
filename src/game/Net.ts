@@ -58,7 +58,16 @@ export interface NetHandlers {
   onAlienGone(id: number, by: string, award: number): void
   onScores(board: ScoreRow[]): void
   onProfiles(list: NetProfile[]): void
+  // Challenges + live Beam Wars duels.
+  onChallenged(fromId: string, name: string): void
+  onChallengeDeclined(name: string): void
+  onChallengeBusy(name: string): void
+  onMatchStart(side: MatchSide, opp: string, cols: number, rows: number, a: [number, number], b: [number, number], startIn: number): void
+  onMatchTick(a: [number, number], b: [number, number], aAlive: boolean, bAlive: boolean): void
+  onMatchEnd(winner: MatchSide | 'draw'): void
 }
+
+export type MatchSide = 'a' | 'b'
 
 /**
  * Resolve the realtime host. Priority: explicit arg, then `?mp=` query override
@@ -175,6 +184,32 @@ export class Net {
       case 'profiles':
         this.handlers.onProfiles((msg.list as NetProfile[]) ?? [])
         break
+      case 'challenged':
+        this.handlers.onChallenged(msg.from as string, (msg.name as string) ?? 'PILOT')
+        break
+      case 'challengeDeclined':
+        this.handlers.onChallengeDeclined((msg.name as string) ?? 'PILOT')
+        break
+      case 'challengeBusy':
+        this.handlers.onChallengeBusy((msg.name as string) ?? 'PILOT')
+        break
+      case 'matchStart':
+        this.handlers.onMatchStart(
+          msg.side as MatchSide,
+          (msg.opp as string) ?? 'PILOT',
+          (msg.cols as number) ?? 64,
+          (msg.rows as number) ?? 40,
+          (msg.a as [number, number]) ?? [0, 0],
+          (msg.b as [number, number]) ?? [0, 0],
+          (msg.startIn as number) ?? 1600,
+        )
+        break
+      case 'matchTick':
+        this.handlers.onMatchTick(msg.a as [number, number], msg.b as [number, number], !!msg.aAlive, !!msg.bAlive)
+        break
+      case 'matchEnd':
+        this.handlers.onMatchEnd(msg.winner as MatchSide | 'draw')
+        break
       case 'join':
         this.handlers.onJoin(msg.id as string, msg.name as string)
         break
@@ -215,6 +250,30 @@ export class Net {
   /** Publish our profile (lifetime captures + per-game W/L) to the room. */
   sendProfile(aliens: number, games: WireGames) {
     this.send({ t: 'profile', aliens, games })
+  }
+
+  /** Challenge another pilot (by connection id) to a live Beam Wars duel. */
+  sendChallenge(to: string) {
+    this.send({ t: 'challenge', to })
+  }
+
+  /** Accept / decline a duel offer from challenger `fromId`. */
+  sendAccept(fromId: string) {
+    this.send({ t: 'accept', from: fromId })
+  }
+
+  sendDecline(fromId: string) {
+    this.send({ t: 'decline', from: fromId })
+  }
+
+  /** Steer our beam in the active duel. */
+  sendMatchDir(dx: number, dy: number) {
+    this.send({ t: 'matchDir', dir: [dx, dy] })
+  }
+
+  /** Forfeit / leave the active duel. */
+  sendMatchQuit() {
+    this.send({ t: 'matchQuit' })
   }
 
   get connected(): boolean {

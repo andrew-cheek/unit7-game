@@ -34,7 +34,19 @@ const BLIP_COLOR: Record<BlipKind, string> = {
   objective: NEON.lime,
 }
 
-export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; touch: boolean; onRestart: () => void; onToggleMute: () => void }) {
+export function HUD({
+  hud,
+  touch,
+  onRestart,
+  onToggleMute,
+  onChallenge,
+}: {
+  hud: HudState
+  touch: boolean
+  onRestart: () => void
+  onToggleMute: () => void
+  onChallenge?: (id: string) => void
+}) {
   const [rosterOpen, setRosterOpen] = useState(false)
   const [viewing, setViewing] = useState<string | null>(null)
   const profiles = hud.profiles ?? []
@@ -148,14 +160,26 @@ export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; to
       )}
       {viewed && (
         <div style={profileOverlay} onClick={() => setViewing(null)}>
-          <ProfileCard profile={viewed} onClose={() => setViewing(null)} />
+          <ProfileCard
+            profile={viewed}
+            onClose={() => setViewing(null)}
+            onChallenge={
+              !viewed.self && viewed.id && onChallenge
+                ? () => {
+                    onChallenge(viewed.id)
+                    setViewing(null)
+                    setRosterOpen(false)
+                  }
+                : undefined
+            }
+          />
         </div>
       )}
     </div>
   )
 }
 
-function ProfileCard({ profile, onClose }: { profile: PlayerProfile; onClose: () => void }) {
+function ProfileCard({ profile, onClose, onChallenge }: { profile: PlayerProfile; onClose: () => void; onChallenge?: () => void }) {
   const games = [...profile.games].filter((g) => g.played > 0).sort((a, b) => b.played - a.played)
   const totalWon = games.reduce((s, g) => s + g.won, 0)
   const totalLost = games.reduce((s, g) => s + g.lost, 0)
@@ -183,6 +207,11 @@ function ProfileCard({ profile, onClose }: { profile: PlayerProfile; onClose: ()
           </span>
         </div>
       ))}
+      {onChallenge && (
+        <button style={challengeBtn} onClick={onChallenge}>
+          ⚔ CHALLENGE TO BEAM WARS
+        </button>
+      )}
     </div>
   )
 }
@@ -521,4 +550,18 @@ const profileGameRow: CSSProperties = {
   borderBottom: '1px solid rgba(255,255,255,0.06)',
   font: '600 11px/1.2 ui-monospace, Menlo, monospace',
   letterSpacing: '0.04em',
+}
+const challengeBtn: CSSProperties = {
+  marginTop: 16,
+  width: '100%',
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '11px 0',
+  background: 'linear-gradient(180deg,#ff5cc6,#ff2bd0)',
+  border: 'none',
+  borderRadius: 10,
+  color: '#100410',
+  font: '800 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  boxShadow: '0 0 18px rgba(255,43,208,0.35)',
 }

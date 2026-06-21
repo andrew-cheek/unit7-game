@@ -51,18 +51,43 @@ interface Profile {
   games: WireGames
 }
 
+type Dir = [number, number]
+
+/** A live, server-authoritative Beam Wars duel between two pilots. */
+interface Match {
+  id: string
+  a: string // challenger connection id (side 'a')
+  b: string // opponent connection id (side 'b')
+  an: string // names (for the result toast)
+  bn: string
+  grid: Uint8Array // COLS*ROWS, 0 empty / 1 a-trail / 2 b-trail
+  ax: number; ay: number; adx: number; ady: number; aAlive: boolean; aq: Dir | null
+  bx: number; by: number; bdx: number; bdy: number; bAlive: boolean; bq: Dir | null
+  loop: ReturnType<typeof setInterval> | null
+}
+
 type ClientMsg =
   | { t: 'join'; name: string }
   | ({ t: 'state' } & Omit<PlayerSnapshot, 'id' | 'name'>)
   | { t: 'capture'; p: Vec3; award: number }
   | { t: 'claim'; id: number }
   | { t: 'profile'; aliens: number; games: WireGames }
+  | { t: 'challenge'; to: string }
+  | { t: 'accept'; from: string }
+  | { t: 'decline'; from: string }
+  | { t: 'matchDir'; dir: Dir }
+  | { t: 'matchQuit' }
 
 export default class WorldServer implements Party.Server {
   static readonly MAX_PLAYERS = 60
   static readonly ALIEN_CAP = 14
   static readonly AREA = 150 // aliens wander within +/- this on x/z
   static readonly TICK_MS = 150 // ~6.7Hz simulation broadcast
+  // Live Beam Wars duel arena.
+  static readonly BW_COLS = 64
+  static readonly BW_ROWS = 40
+  static readonly BW_TICK_MS = 92 // beam step (a touch slower than solo for the network)
+  static readonly BW_START_MS = 1600 // "get ready" beat before beams start moving
 
   private players = new Map<string, PlayerSnapshot>()
   private aliens = new Map<number, Alien>()
@@ -70,12 +95,20 @@ export default class WorldServer implements Party.Server {
   private profiles = new Map<string, Profile>()
   private nextAlienId = 1
   private tick: ReturnType<typeof setInterval> | null = null
+  // Challenge handshakes (challengerId -> targetId) and live matches by id.
+  private challenges = new Map<string, string>()
+  private matches = new Map<string, Match>()
+  private inMatch = new Map<string, string>() // connId -> matchId (busy guard)
 
   constructor(readonly room: Party.Room) {}
 
   onClose(conn: Party.Connection) {
     this.players.delete(conn.id)
     this.profiles.delete(conn.id)
+    this.challenges.delete(conn.id)
+    // If they were mid-duel, the opponent wins by forfeit.
+    const mid = this.inMatch.get(conn.id)
+    if (mid) this.endMatch(mid, conn.id === this.matches.get(mid)?.a ? 'b' : 'a')
     if (this.scores.delete(conn.id)) {
       this.broadcastScores()
     }
@@ -130,6 +163,60 @@ export default class WorldServer implements Party.Server {
       if (!this.players.has(sender.id)) return
       this.profiles.set(sender.id, { aliens: Math.max(0, msg.aliens | 0), games: sanitizeGames(msg.games) })
       this.broadcastProfiles()
+      return
+    }
+
+    if (msg.t === 'challenge') {
+      const target = this.players.get(msg.to)
+      const me = this.players.get(sender.id)
+      // Reject if target is gone, is yourself, or either side is busy.
+      if (!target || !me || msg.to === sender.id) return
+      if (this.inMatch.has(sender.id) || this.inMatch.has(msg.to)) {
+        sender.send(JSON.stringify({ t: 'challengeBusy', name: target.name }))
+        return
+      }
+      this.challenges.set(sender.id, msg.to)
+      const conn = this.room.getConnection(msg.to)
+      conn?.send(JSON.stringify({ t: 'challenged', from: sender.id, name: me.name }))
+      return
+    }
+
+    if (msg.t === 'decline') {
+      // `from` is the challenger; tell them it was declined and drop the offer.
+      if (this.challenges.get(msg.from) === sender.id) {
+        this.challenges.delete(msg.from)
+        const me = this.players.get(sender.id)
+        this.room.getConnection(msg.from)?.send(JSON.stringify({ t: 'challengeDeclined', name: me?.name ?? 'PILOT' }))
+      }
+      return
+    }
+
+    if (msg.t === 'accept') {
+      // `from` is the challenger; the sender is the target accepting.
+      if (this.challenges.get(msg.from) !== sender.id) return
+      this.challenges.delete(msg.from)
+      if (this.inMatch.has(msg.from) || this.inMatch.has(sender.id)) return
+      this.startMatch(msg.from, sender.id)
+      return
+    }
+
+    if (msg.t === 'matchDir') {
+      const mid = this.inMatch.get(sender.id)
+      if (!mid) return
+      const m = this.matches.get(mid)
+      if (!m) return
+      const dir: Dir = [Math.sign(msg.dir?.[0] ?? 0), Math.sign(msg.dir?.[1] ?? 0)]
+      if ((dir[0] === 0) === (dir[1] === 0)) return // exactly one axis must be set
+      if (sender.id === m.a) m.aq = dir
+      else if (sender.id === m.b) m.bq = dir
+      return
+    }
+
+    if (msg.t === 'matchQuit') {
+      const mid = this.inMatch.get(sender.id)
+      if (!mid) return
+      const m = this.matches.get(mid)
+      if (m) this.endMatch(mid, sender.id === m.a ? 'b' : 'a')
       return
     }
 
@@ -226,6 +313,82 @@ export default class WorldServer implements Party.Server {
 
   private broadcastScores() {
     this.room.broadcast(JSON.stringify({ t: 'scores', board: this.boardArray() }))
+  }
+
+  // --- live Beam Wars duels ----------------------------------------------------
+
+  private startMatch(aId: string, bId: string) {
+    const C = WorldServer.BW_COLS
+    const R = WorldServer.BW_ROWS
+    const grid = new Uint8Array(C * R)
+    const ax = Math.floor(C * 0.22), ay = Math.floor(R / 2)
+    const bx = Math.floor(C * 0.78), by = Math.floor(R / 2)
+    grid[ay * C + ax] = 1
+    grid[by * C + bx] = 2
+    const id = `m${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
+    const m: Match = {
+      id, a: aId, b: bId,
+      an: this.players.get(aId)?.name ?? 'PILOT',
+      bn: this.players.get(bId)?.name ?? 'PILOT',
+      grid,
+      ax, ay, adx: 1, ady: 0, aAlive: true, aq: null,
+      bx, by, bdx: -1, bdy: 0, bAlive: true, bq: null,
+      loop: null,
+    }
+    this.matches.set(id, m)
+    this.inMatch.set(aId, id)
+    this.inMatch.set(bId, id)
+    // Each side learns which beam is theirs, who they face, and both start cells.
+    const base = { cols: C, rows: R, a: [ax, ay], b: [bx, by], startIn: WorldServer.BW_START_MS }
+    this.room.getConnection(aId)?.send(JSON.stringify({ t: 'matchStart', side: 'a', opp: m.bn, ...base }))
+    this.room.getConnection(bId)?.send(JSON.stringify({ t: 'matchStart', side: 'b', opp: m.an, ...base }))
+    // Begin stepping after the "get ready" beat.
+    setTimeout(() => {
+      if (this.matches.get(id) !== m) return
+      m.loop = setInterval(() => this.stepMatch(m), WorldServer.BW_TICK_MS)
+    }, WorldServer.BW_START_MS)
+  }
+
+  private stepMatch(m: Match) {
+    const C = WorldServer.BW_COLS
+    const R = WorldServer.BW_ROWS
+    // Apply queued turns (no reversing straight back into your own trail).
+    if (m.aq && !(m.aq[0] === -m.adx && m.aq[1] === -m.ady)) { m.adx = m.aq[0]; m.ady = m.aq[1] }
+    if (m.bq && !(m.bq[0] === -m.bdx && m.bq[1] === -m.bdy)) { m.bdx = m.bq[0]; m.bdy = m.bq[1] }
+    m.aq = null; m.bq = null
+    const anx = m.ax + m.adx, any = m.ay + m.ady
+    const bnx = m.bx + m.bdx, bny = m.by + m.bdy
+    const aHit = anx < 0 || anx >= C || any < 0 || any >= R || m.grid[any * C + anx] !== 0
+    const bHit = bnx < 0 || bnx >= C || bny < 0 || bny >= R || m.grid[bny * C + bnx] !== 0
+    const headOn = anx === bnx && any === bny
+    let aDead = aHit || headOn
+    let bDead = bHit || headOn
+    if (!aDead) { m.grid[any * C + anx] = 1; m.ax = anx; m.ay = any }
+    if (!bDead) { m.grid[bny * C + bnx] = 2; m.bx = bnx; m.by = bny }
+    m.aAlive = !aDead
+    m.bAlive = !bDead
+    this.matchTick(m)
+    if (aDead || bDead) {
+      this.endMatch(m.id, aDead && bDead ? 'draw' : aDead ? 'b' : 'a')
+    }
+  }
+
+  private matchTick(m: Match) {
+    const payload = JSON.stringify({ t: 'matchTick', a: [m.ax, m.ay], b: [m.bx, m.by], aAlive: m.aAlive, bAlive: m.bAlive })
+    this.room.getConnection(m.a)?.send(payload)
+    this.room.getConnection(m.b)?.send(payload)
+  }
+
+  private endMatch(id: string, winner: 'a' | 'b' | 'draw') {
+    const m = this.matches.get(id)
+    if (!m) return
+    if (m.loop) clearInterval(m.loop)
+    this.matches.delete(id)
+    this.inMatch.delete(m.a)
+    this.inMatch.delete(m.b)
+    const payload = JSON.stringify({ t: 'matchEnd', winner })
+    this.room.getConnection(m.a)?.send(payload)
+    this.room.getConnection(m.b)?.send(payload)
   }
 
   private profileArray(): { id: string; name: string; aliens: number; games: WireGames }[] {
