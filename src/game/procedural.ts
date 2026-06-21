@@ -982,46 +982,107 @@ export function createSpaceship(): VehicleModel {
 export function createRocket(): VehicleModel {
   const group = new THREE.Group()
   const mats: THREE.Material[] = []
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.7, roughness: 0.35 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: 0xb33b3b, metalness: 0.6, roughness: 0.4 })
-  mats.push(bodyMat, accentMat)
+  const TAU = Math.PI * 2
+  const hull = new THREE.MeshStandardMaterial({ color: 0xc7cfdb, metalness: 0.82, roughness: 0.3 })
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a3340, metalness: 0.85, roughness: 0.42 })
+  const accent = new THREE.MeshStandardMaterial({ color: 0xb33b3b, metalness: 0.6, roughness: 0.4 })
+  mats.push(hull, dark, accent)
+  const cyan = config.palette.cyan
+  const orange = config.palette.orange
+  const pulseMats: THREE.MeshStandardMaterial[] = []
 
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.0, 6, 24), bodyMat)
-  body.position.y = 3.2
+  // Flared engine skirt + a ring of three thrusters with glowing throats.
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.55, 1.3, 24), dark)
+  skirt.position.y = 0.95
+  group.add(skirt)
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * TAU
+    const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.3, 0.8, 14), dark)
+    noz.position.set(Math.cos(a) * 0.6, 0.1, Math.sin(a) * 0.6)
+    group.add(noz)
+    const eg = glowMat(mats, orange, 2)
+    pulseMats.push(eg as THREE.MeshStandardMaterial)
+    const flame = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), eg)
+    flame.position.set(Math.cos(a) * 0.6, -0.1, Math.sin(a) * 0.6)
+    flame.scale.y = 0.5
+    group.add(flame)
+  }
+
+  // Tapered main hull with raised panel lines + two neon accent rings.
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.15, 4.6, 24), hull)
+  body.position.y = 3.9
   group.add(body)
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.92, 0.8, 24), accentMat)
-  band.position.y = 4.6
-  group.add(band)
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.9, 2.2, 24), accentMat)
-  nose.position.y = 7.3
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU
+    const panel = box(0.06, 4.0, 0.45, dark)
+    panel.position.set(Math.cos(a) * 1.03, 3.9, Math.sin(a) * 1.03)
+    panel.rotation.y = -a
+    group.add(panel)
+  }
+  for (const y of [2.3, 5.3]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.08, 8, 28), glowMat(mats, cyan, 2.6))
+    ring.rotation.x = Math.PI / 2
+    ring.position.y = y
+    group.add(ring)
+  }
+
+  // Cockpit collar with a wrap-around glowing window.
+  const cab = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.02, 1.1, 24), dark)
+  cab.position.y = 6.45
+  group.add(cab)
+  const win = new THREE.Mesh(new THREE.CylinderGeometry(1.04, 1.04, 0.55, 24, 1, true), glowMat(mats, cyan, 3))
+  win.position.y = 6.6
+  group.add(win)
+
+  // Ogive nose + sensor spire with a blinking beacon.
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.1, 24), hull)
+  nose.position.y = 8.05
   group.add(nose)
-  const windows = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.5, 24), glowMat(mats, 0x27e7ff, 3))
-  windows.position.y = 5.6
-  group.add(windows)
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.1, 12), accent)
+  spire.position.y = 9.55
+  group.add(spire)
+  const beaconMat = glowMat(mats, orange, 3)
+  pulseMats.push(beaconMat as THREE.MeshStandardMaterial)
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), beaconMat)
+  beacon.position.y = 10.15
+  group.add(beacon)
+
+  // Four swept fins with glowing leading edges.
   for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2
-    const fin = box(0.12, 1.6, 1.3, accentMat)
-    fin.position.set(Math.cos(a) * 0.95, 0.9, Math.sin(a) * 0.95)
+    const a = (i / 4) * TAU
+    const fin = box(0.16, 2.3, 1.5, accent)
+    fin.position.set(Math.cos(a) * 1.15, 1.7, Math.sin(a) * 1.15)
     fin.rotation.y = -a
     group.add(fin)
+    const edge = box(0.2, 2.3, 0.14, glowMat(mats, cyan, 2.2))
+    edge.position.set(Math.cos(a) * 1.15, 1.7, Math.sin(a) * 1.15 + 0.0)
+    edge.rotation.y = -a
+    edge.translateZ(0.72)
+    group.add(edge)
   }
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 0.7, 0.7, 20), new THREE.MeshStandardMaterial({ color: 0x2a2f3a, metalness: 0.8, roughness: 0.5 }))
-  nozzle.position.y = -0.1
-  group.add(nozzle)
-  mats.push(nozzle.material as THREE.Material)
-  const engineGlow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), glowMat(mats, 0xff8a1e, 2))
-  engineGlow.position.y = -0.2
-  engineGlow.scale.y = 0.5
-  group.add(engineGlow)
+
+  // Splayed landing legs (deployed lander stance).
+  for (let i = 0; i < 4; i++) {
+    const legG = new THREE.Group()
+    legG.rotation.y = (i / 4) * TAU + Math.PI / 4
+    group.add(legG)
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 2.9, 8), dark)
+    strut.position.set(1.25, 0.95, 0)
+    strut.rotation.z = -0.5
+    legG.add(strut)
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.16, 12), dark)
+    foot.position.set(2.0, 0.06, 0)
+    legG.add(foot)
+  }
 
   shadowAll(group)
   let t = 0
-  const glowMatRef = engineGlow.material as THREE.MeshStandardMaterial
   return {
     group,
     update: (dt) => {
       t += dt
-      glowMatRef.emissiveIntensity = 1.6 + Math.sin(t * 6) * 0.8
+      const e = 1.6 + Math.sin(t * 6) * 0.8
+      for (const m of pulseMats) m.emissiveIntensity = e
     },
     dispose: () => disposeGroup(group, mats),
   }

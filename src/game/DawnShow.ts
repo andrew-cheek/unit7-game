@@ -41,9 +41,11 @@ interface Walker {
 // Landing pads laid out in front of spawn (player faces +Z) so the morning
 // arrival fleet touches down right where you're looking.
 const PADS = [
-  { p: new THREE.Vector3(-22, 0, 32), kind: 'ship', delay: 0.0 },
-  { p: new THREE.Vector3(22, 0, 32), kind: 'ship', delay: 2.2 },
-  { p: new THREE.Vector3(0, 0, 50), kind: 'rocket', delay: 1.0 },
+  { p: new THREE.Vector3(28, 0, 34), kind: 'ship', delay: 0.0 },
+  { p: new THREE.Vector3(-30, 0, 36), kind: 'ship', delay: 2.4 },
+  // Rocket pad pulled well off the central plaza-beam axis so it stays fully in
+  // view (towering to the left), not hidden behind the beam.
+  { p: new THREE.Vector3(-24, 0, 60), kind: 'rocket', delay: 1.0 },
 ] as const
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const smooth = (x: number) => { const t = clamp01(x); return t * t * (3 - 2 * t) }
