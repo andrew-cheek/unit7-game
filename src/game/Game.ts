@@ -5,6 +5,7 @@ import { Input } from './Input'
 import { Player } from './Player'
 import { Physics } from './Physics'
 import { Vehicles, isMech } from './Vehicles'
+import { createMechSuit, type VehicleModel } from './procedural'
 import { Missiles } from './Missiles'
 import { AudioManager } from './Audio'
 import { NPCManager } from './NPC'
@@ -113,7 +114,14 @@ export class Game {
   private scratchFwd = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
-  private arcadePortals: { kind: MinigameKind; pos: THREE.Vector3; group: THREE.Group; disc: THREE.Mesh; beam: THREE.Mesh }[] = []
+  private arcadePortals: { kind: MinigameKind; pos: THREE.Vector3; group: THREE.Group; screenMat: THREE.MeshStandardMaterial }[] = []
+  // Cabinets that travel to a planet zone instead of a 2D minigame.
+  private zoneCabinets: { zone: Zone; pos: THREE.Vector3; group: THREE.Group; screenMat: THREE.MeshStandardMaterial }[] = []
+  // The colossal Unit-7 robot presiding over the arcade (the hub centerpiece).
+  private arcadeRobot: VehicleModel | null = null
+  // A short "conveyed in" transport beat played when you step onto a cabinet,
+  // before the actual minigame/zone entry fires.
+  private pendingEntry: { kind?: MinigameKind; zone?: Zone; pos: THREE.Vector3; t: number; beam: THREE.Mesh } | null = null
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -253,6 +261,8 @@ export class Game {
       this.patrols.setVisible(false)
       this.sky.setVisible(false)
       for (const p of this.arcadePortals) p.group.visible = false
+      for (const c of this.zoneCabinets) c.group.visible = false
+      if (this.arcadeRobot) this.arcadeRobot.group.visible = false
     }
   }
 
@@ -270,6 +280,8 @@ export class Game {
     this.patrols.setVisible(false)
     this.sky.setVisible(false)
     for (const p of this.arcadePortals) p.group.visible = false
+    for (const c of this.zoneCabinets) c.group.visible = false
+    if (this.arcadeRobot) this.arcadeRobot.group.visible = false
     this.hudListener({ ...this.hud, radar: this.radar })
   }
 
@@ -296,17 +308,119 @@ export class Game {
   // --- Arcade portals ------------------------------------------------------
 
   private buildArcadePortals() {
-    // A neon arcade row of doorways in an arc just ahead of spawn.
-    this.arcadePortals.push(this.buildPortal('beamwars', 0x27e7ff, 0x8a5cff, 'BEAM WARS', new THREE.Vector3(-15, 0, 10)))
-    this.arcadePortals.push(this.buildPortal('digduel', 0xff8a1e, 0x9bff4d, 'DIG DUEL', new THREE.Vector3(-7.5, 0, 14)))
-    this.arcadePortals.push(this.buildPortal('merge2048', 0xff2bd0, 0x27e7ff, '2048', new THREE.Vector3(0, 0, 16)))
-    this.arcadePortals.push(this.buildPortal('invaders', 0x9bff4d, 0xff2bd0, 'INVADERS', new THREE.Vector3(7.5, 0, 14)))
-    this.arcadePortals.push(this.buildPortal('snake', 0x8a5cff, 0x9bff4d, 'SNAKE', new THREE.Vector3(15, 0, 10)))
-    // Two new attractions flank the row (outside the Mars/Moon portals).
-    this.arcadePortals.push(this.buildPortal('raceloop', 0xff2bd0, 0x27e7ff, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
-    this.arcadePortals.push(this.buildPortal('mecharena', 0xff8a1e, 0x27e7ff, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
+    // The arcade is a row of cabinets in front of a colossal Unit-7 robot that
+    // presides over the whole hub. Stepping onto a cabinet "conveys" you in (a
+    // transport beam) and drops you into its game - a 2D cabinet game, or a
+    // planet (Mars / Moon) reskinned as just another cabinet.
+    const A = config.palette
+    this.arcadePortals.push(this.buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-15, 0, 10)))
+    this.arcadePortals.push(this.buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-7.5, 0, 14)))
+    this.arcadePortals.push(this.buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(0, 0, 16)))
+    this.arcadePortals.push(this.buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(7.5, 0, 14)))
+    this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(15, 0, 10)))
+    this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
+    this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
+    // Planet cabinets flank the row: same fixture, but they travel to a zone.
+    // Aligned with the (now-hidden) Zones earth-portal positions so the mission
+    // beacon / radar that point at those still line up with the cabinets.
+    this.zoneCabinets.push(this.buildZoneCabinet('mars', A.orange, 'MARS', new THREE.Vector3(-24, 0, 16)))
+    this.zoneCabinets.push(this.buildZoneCabinet('moon', 0xbfd2ff, 'MOON', new THREE.Vector3(24, 0, 16)))
+    this.buildArcadeRobot()
     this.buildPlazaHub()
     this.buildRocketGate()
+  }
+
+  /** One arcade cabinet bound to a 2D minigame. */
+  private buildCabinet(kind: MinigameKind, color: number, label: string, pos: THREE.Vector3) {
+    const { group, screenMat } = this.makeCabinet(color, label, pos)
+    return { kind, pos: pos.clone(), group, screenMat }
+  }
+
+  /** One arcade cabinet bound to a planet-zone trip. */
+  private buildZoneCabinet(zone: Zone, color: number, label: string, pos: THREE.Vector3) {
+    const { group, screenMat } = this.makeCabinet(color, label, pos)
+    return { zone, pos: pos.clone(), group, screenMat }
+  }
+
+  /**
+   * Builds the cabinet fixture: a dark body with a glowing screen and marquee
+   * facing the approaching player (toward -Z / the spawn), a control lip, and a
+   * faint stand-here floor pad. Returns the group and the screen material so the
+   * update loop can pulse it. Replaces the old glowing-ring portal look.
+   */
+  private makeCabinet(color: number, label: string, pos: THREE.Vector3) {
+    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
+    const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.arcadeGeos.push(geo); return geo }
+    const gy = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
+    pos.y = gy
+    const g = new THREE.Group()
+    g.position.set(pos.x, gy, pos.z)
+    // Face the player approaching from spawn (south, -Z): screen on the -Z face.
+    const bodyMat = own(new THREE.MeshStandardMaterial({ color: 0x0b0e16, metalness: 0.5, roughness: 0.5 }))
+    const trimMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 1.6, roughness: 0.4 }))
+    const screenMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 1.5, roughness: 0.3 }))
+
+    const body = new THREE.Mesh(ownG(new THREE.BoxGeometry(3.2, 4.2, 1.8)), bodyMat)
+    body.position.y = 2.1
+    g.add(body)
+    // Glowing screen, tilted back slightly, on the front (-Z) face.
+    const tex = this.makeLabelTexture(label, color)
+    this.arcadeTex.push(tex)
+    const screenFace = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.4, roughness: 0.3 }))
+    const screen = new THREE.Mesh(ownG(new THREE.PlaneGeometry(2.5, 1.6)), screenFace)
+    screen.position.set(0, 2.6, -0.92)
+    screen.rotation.x = 0.12
+    g.add(screen)
+    // Marquee header strip.
+    const marquee = new THREE.Mesh(ownG(new THREE.BoxGeometry(3.0, 0.5, 0.2)), trimMat)
+    marquee.position.set(0, 4.0, -0.85)
+    g.add(marquee)
+    // Side neon trim.
+    for (const sx of [-1.55, 1.55]) {
+      const strip = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.12, 3.6, 0.12)), trimMat)
+      strip.position.set(sx, 2.2, -0.86)
+      g.add(strip)
+    }
+    // Stand-here floor pad.
+    const pad = new THREE.Mesh(ownG(new THREE.RingGeometry(1.4, 1.8, 28)), own(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    pad.rotation.x = -Math.PI / 2
+    pad.position.set(0, 0.06, -2.2)
+    g.add(pad)
+    // Keep the body from being walked through.
+    this.physics.colliders.push(new THREE.Box3(
+      new THREE.Vector3(pos.x - 1.6, 0, pos.z - 0.9),
+      new THREE.Vector3(pos.x + 1.6, 4.2, pos.z + 0.9),
+    ))
+    this.engine.scene.add(g)
+    return { group: g, screenMat }
+  }
+
+  /**
+   * The colossal Unit-7 robot at the back of the arcade, presiding over the
+   * cabinet row. Reuses the battle-mech model at hub scale (~70m), turned to
+   * face the player, with a big ARCADE marquee. Prototype: it's the landmark /
+   * "the arcade is a giant robot" read; the cabinets are the working portals.
+   */
+  private buildArcadeRobot() {
+    const SCALE = 13
+    const robot = createMechSuit({ scale: SCALE, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff })
+    const x = 0, z = 44
+    const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
+    // The model's feet sit ~0.3 below its origin; lift by that x scale so the
+    // colossus stands on the ground rather than sinking into it.
+    robot.group.position.set(x, gy + 0.3 * SCALE, z)
+    robot.group.rotation.y = Math.PI // face -Z, toward the player / cabinets
+    this.engine.scene.add(robot.group)
+    this.arcadeRobot = robot
+    // ARCADE marquee floating in front of the robot's chest.
+    const tex = this.makeLabelTexture('ARCADE', config.palette.cyan)
+    this.arcadeTex.push(tex)
+    const signMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
+    this.arcadeMats.push(signMat)
+    const sign = new THREE.Sprite(signMat)
+    sign.position.set(0, gy + 40, z - 8)
+    sign.scale.set(30, 7.5, 1)
+    this.engine.scene.add(sign)
   }
 
   /**
@@ -371,47 +485,6 @@ export class Game {
     this.rocketGate = g
   }
 
-  private buildPortal(kind: MinigameKind, ringColor: number, discColor: number, label: string, pos: THREE.Vector3) {
-    const g = new THREE.Group()
-    const gy = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
-    pos.y = gy
-    g.position.set(pos.x, gy, pos.z)
-
-    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
-    const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.arcadeGeos.push(geo); return geo }
-
-    const pad = new THREE.Mesh(ownG(new THREE.CylinderGeometry(3.4, 3.8, 0.2, 32)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 1.4, roughness: 0.4 })))
-    pad.position.y = 0.1
-    g.add(pad)
-
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(3.0, 0.28, 16, 48)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: ringColor, emissiveIntensity: 1.5, roughness: 0.4 })))
-    ring.position.y = 3.1
-    g.add(ring)
-
-    // Portal face: single translucent disc (was blowing out to a white sphere
-    // through bloom when stacked over the bright emissive ring/pad).
-    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(2.85, 48)), own(new THREE.MeshBasicMaterial({ color: discColor, transparent: true, opacity: 0.32, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })))
-    disc.position.y = 3.1
-    disc.renderOrder = 3
-    g.add(disc)
-
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.2, 2.2, 90, 18, 1, true)), own(new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    beam.position.y = 45
-    // Stable sort slot for the additive column (see plaza beam note).
-    beam.renderOrder = 4
-    g.add(beam)
-
-    const tex = this.makeLabelTexture(label, ringColor)
-    this.arcadeTex.push(tex)
-    const sprite = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })))
-    sprite.position.set(0, 6.6, 0)
-    sprite.scale.set(6.5, 1.6, 1)
-    g.add(sprite)
-
-    this.engine.scene.add(g)
-    return { kind, pos: pos.clone(), group: g, disc, beam }
-  }
-
   /** A neon text label baked to a canvas texture for a billboard sprite. */
   private makeLabelTexture(text: string, color = 0x27e7ff): THREE.CanvasTexture {
     const cv = document.createElement('canvas')
@@ -439,14 +512,60 @@ export class Game {
   }
 
   private checkArcadePortals() {
-    if (this.inMinigame || this.arcadeCooldown > 0 || this.player.mode !== 'robot') return
+    if (this.inMinigame || this.pendingEntry || this.arcadeCooldown > 0 || this.player.mode !== 'robot') return
+    if (this.trans.phase !== 'none') return
+    // The stand-here pad is in front of the cabinet (toward -Z), so trigger on
+    // proximity to the pad point, not the cabinet body.
     for (const p of this.arcadePortals) {
-      const dx = this.player.position.x - p.pos.x
-      const dz = this.player.position.z - p.pos.z
-      if (dx * dx + dz * dz < 3.4 * 3.4) {
-        this.enterMinigame(p.kind, p.pos)
-        return
-      }
+      if (this.nearCabinetPad(p.pos)) { this.startTransport(p.pos, { kind: p.kind }); return }
+    }
+    for (const c of this.zoneCabinets) {
+      if (c.zone === this.zone) continue // already there
+      if (this.nearCabinetPad(c.pos)) { this.startTransport(c.pos, { zone: c.zone }); return }
+    }
+  }
+
+  private nearCabinetPad(pos: THREE.Vector3) {
+    const dx = this.player.position.x - pos.x
+    const dz = this.player.position.z - (pos.z - 2.2) // pad sits 2.2 in front (-Z)
+    return dx * dx + dz * dz < 2.2 * 2.2
+  }
+
+  /**
+   * Begins the "conveyed in" transport: spawns a bright beam column at the
+   * cabinet pad. When the short beat elapses (in update), the real entry
+   * (minigame or zone trip) fires. This animation IS the portal. The pending
+   * flag blocks re-triggering other cabinets meanwhile.
+   */
+  private startTransport(pos: THREE.Vector3, target: { kind?: MinigameKind; zone?: Zone }) {
+    const padZ = pos.z - 2.2
+    const geo = new THREE.CylinderGeometry(1.5, 1.5, 16, 20, 1, true)
+    this.arcadeGeos.push(geo)
+    const mat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    this.arcadeMats.push(mat)
+    const beam = new THREE.Mesh(geo, mat)
+    beam.position.set(pos.x, 8, padZ)
+    beam.renderOrder = 5
+    this.engine.scene.add(beam)
+    this.audio.play('portal')
+    this.pendingEntry = { ...target, pos: pos.clone(), t: 0, beam }
+  }
+
+  /** Advances the transport beat; fires the real entry when it completes. */
+  private updateTransport(dt: number) {
+    const e = this.pendingEntry
+    if (!e) return
+    e.t += dt
+    const k = Math.min(1, e.t / 0.7)
+    const mat = e.beam.material as THREE.MeshBasicMaterial
+    mat.opacity = Math.sin(k * Math.PI) * 0.7 // fade in then out
+    e.beam.scale.set(1 + k * 0.6, 1, 1 + k * 0.6)
+    e.beam.rotation.y += dt * 6
+    if (e.t >= 0.7) {
+      this.engine.scene.remove(e.beam)
+      this.pendingEntry = null
+      if (e.kind) this.enterMinigame(e.kind, e.pos)
+      else if (e.zone) this.requestTravel(e.zone)
     }
   }
 
@@ -924,6 +1043,9 @@ export class Game {
   }
 
   private checkPortals() {
+    // Earth departures are handled by the arcade MARS/MOON cabinets; here we
+    // only handle the return portals on Mars/Moon.
+    if (this.zone === 'earth') return
     const px = this.player.position.x
     const pz = this.player.position.z
     for (const p of this.zones.portalsFor(this.zone)) {
@@ -1036,13 +1158,21 @@ export class Game {
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
     this.world.update(dt, this.focus)
 
-    // Animate the arcade portals (Earth only).
+    // Animate the arcade cabinets: pulse their screens (Earth only). Zone
+    // cabinets glow even off-world so you can find your way back.
+    this.updateTransport(dt)
     for (const p of this.arcadePortals) {
       p.group.visible = onEarth
       if (!onEarth) continue
-      p.disc.rotation.z += dt * 1.6
-      ;(p.disc.material as THREE.MeshBasicMaterial).opacity = 0.26 + Math.sin(_elapsed * 3) * 0.1
-      ;(p.beam.material as THREE.MeshBasicMaterial).opacity = 0.22 + Math.sin(_elapsed * 2) * 0.06
+      p.screenMat.emissiveIntensity = 1.3 + Math.sin(_elapsed * 3 + p.pos.x) * 0.35
+    }
+    for (const c of this.zoneCabinets) {
+      c.group.visible = onEarth
+      if (onEarth) c.screenMat.emissiveIntensity = 1.3 + Math.sin(_elapsed * 2.4 + c.pos.x) * 0.35
+    }
+    if (this.arcadeRobot) {
+      this.arcadeRobot.group.visible = onEarth
+      if (onEarth) this.arcadeRobot.update(dt, 0) // subtle idle sway
     }
     if (this.rocketGate) this.rocketGate.visible = onEarth
     // Plaza hero hub: spin the rings, pulse the sky beam.
@@ -1230,6 +1360,7 @@ export class Game {
     this.arcadeGeos.forEach((g) => g.dispose())
     this.arcadeMats.forEach((mm) => mm.dispose())
     this.arcadeTex.forEach((t) => t.dispose())
+    this.arcadeRobot?.dispose()
     this.audio.dispose()
     this.engine.dispose()
     this.world.dispose()
