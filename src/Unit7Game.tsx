@@ -14,6 +14,8 @@ const DigDuel = lazy(() => import('./ui/DigDuel').then((m) => ({ default: m.DigD
 const Game2048 = lazy(() => import('./ui/Game2048').then((m) => ({ default: m.Game2048 })))
 const Invaders = lazy(() => import('./ui/Invaders').then((m) => ({ default: m.Invaders })))
 const Snake = lazy(() => import('./ui/Snake').then((m) => ({ default: m.Snake })))
+const RaceLoop = lazy(() => import('./ui/RaceLoop').then((m) => ({ default: m.RaceLoop })))
+const MechArena = lazy(() => import('./ui/MechArena').then((m) => ({ default: m.MechArena })))
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -100,7 +102,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
         </div>
       )}
       {hud && !hud.intro && !hud.minigame && (
-        <HUD hud={hud} touch={touch} onRestart={() => controlsRef.current?.restartIntro()} />
+        <HUD hud={hud} touch={touch} onRestart={() => controlsRef.current?.restartIntro()} onToggleMute={() => controlsRef.current?.toggleMute()} />
       )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} hud={hud} />
@@ -130,6 +132,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {hud?.minigame === 'snake' && controlsRef.current && (
         <Suspense fallback={null}>
           <Snake touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.minigame === 'raceloop' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <RaceLoop touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.minigame === 'mecharena' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <MechArena touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
     </div>

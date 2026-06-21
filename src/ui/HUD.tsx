@@ -21,11 +21,12 @@ const BLIP_COLOR: Record<BlipKind, string> = {
   ship: '#ffffff',
 }
 
-export function HUD({ hud, touch, onRestart }: { hud: HudState; touch: boolean; onRestart: () => void }) {
+export function HUD({ hud, touch, onRestart, onToggleMute }: { hud: HudState; touch: boolean; onRestart: () => void; onToggleMute: () => void }) {
   return (
     <div style={wrap}>
       {/* top-left restart (replays the opening cinematic) */}
       <button style={restartBtn} onClick={onRestart}>RESTART ↺</button>
+      <button style={muteBtn} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
 
       {/* top-left meters */}
       <div style={{ ...panel, top: 52, left: 14 }}>
@@ -186,6 +187,21 @@ const restartBtn: CSSProperties = {
   font: '700 10px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.14em',
   boxShadow: '0 0 14px rgba(39,231,255,0.25)',
+}
+const muteBtn: CSSProperties = {
+  position: 'absolute',
+  top: 14,
+  left: 110,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '6px 12px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(138,92,255,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  boxShadow: '0 0 14px rgba(138,92,255,0.2)',
 }
 const chip: CSSProperties = {
   marginTop: 4,

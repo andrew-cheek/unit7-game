@@ -552,3 +552,15 @@ Replaced the single Titan with three sized, flyable mechs and a missile system.
 - Performance: object pooling for the ring/shockwave effects (no per-event
   alloc), and distance culling for NPCs (135m) + ambient drones/traffic/commuters
   (150m) - far actors skip both render and animation.
+
+## Audio + Race Loop + Mech Arena
+
+- Audio (Audio.ts): synthesized WebAudio engine (no asset files) - ambient pad +
+  one-shot SFX for capture, missile fire, explosion, mech online, footstep/land,
+  splash, portal/zone, objective. Unlocks on first gesture; mute toggle persisted;
+  SOUND ON/OFF button in HUD.
+- Race Loop minigame (RaceLoop.tsx): top-down neon oval lap racer, auto-throttle
+  + steer, boost arrows, 60s time attack, best-laps persisted.
+- Mech Arena minigame (MechArena.tsx): top-down arena, drag/WASD move, auto-fire
+  at nearest drone, escalating waves, 3 lives, score persisted.
+- Two new labeled portals flank the plaza row; both lazy-loaded chunks.

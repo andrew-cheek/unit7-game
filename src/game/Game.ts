@@ -6,6 +6,7 @@ import { Player } from './Player'
 import { Physics } from './Physics'
 import { Vehicles, isMech } from './Vehicles'
 import { Missiles } from './Missiles'
+import { AudioManager } from './Audio'
 import { NPCManager } from './NPC'
 import { Patrols } from './Patrols'
 import { Sky } from './Sky'
@@ -50,6 +51,7 @@ export class Game {
   readonly player: Player
   readonly vehicles: Vehicles
   readonly missiles: Missiles
+  readonly audio = new AudioManager()
   readonly npcs: NPCManager
   readonly patrols: Patrols
   readonly sky: Sky
@@ -146,6 +148,7 @@ export class Game {
       this.hud.banner = 'SPLASH!'
       this.bannerTimer = 0.45 // brief, fades fast (it's a side gag now)
       vibrate(30)
+      this.audio.play('soak')
     }
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
@@ -153,6 +156,17 @@ export class Game {
     this.camera.snap(this.player.position)
 
     this.buildArcadePortals()
+
+    // Unlock WebAudio on the first user gesture (mobile browsers require it).
+    const unlockAudio = () => {
+      this.audio.unlock()
+      window.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('keydown', unlockAudio)
+      window.removeEventListener('touchstart', unlockAudio)
+    }
+    window.addEventListener('pointerdown', unlockAudio)
+    window.addEventListener('keydown', unlockAudio)
+    window.addEventListener('touchstart', unlockAudio)
 
     this.vehicles.onEnterRocket = () => this.startRocketLaunch()
 
@@ -186,6 +200,7 @@ export class Game {
       requestPointerLock: () => this.input.requestLock(),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
+      toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
     }
 
     this.hud = {
@@ -194,6 +209,7 @@ export class Game {
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
       objective: config.missions[0]?.title ?? null,
+      muted: this.audio.isMuted,
       minigame: null,
     }
 
@@ -265,6 +281,9 @@ export class Game {
     this.arcadePortals.push(this.buildPortal('merge2048', 0xff2bd0, 0x27e7ff, '2048', new THREE.Vector3(0, 0, 16)))
     this.arcadePortals.push(this.buildPortal('invaders', 0x9bff4d, 0xff2bd0, 'INVADERS', new THREE.Vector3(7.5, 0, 14)))
     this.arcadePortals.push(this.buildPortal('snake', 0x8a5cff, 0x9bff4d, 'SNAKE', new THREE.Vector3(15, 0, 10)))
+    // Two new attractions flank the row (outside the Mars/Moon portals).
+    this.arcadePortals.push(this.buildPortal('raceloop', 0xff2bd0, 0x27e7ff, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
+    this.arcadePortals.push(this.buildPortal('mecharena', 0xff8a1e, 0x27e7ff, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
   }
 
   private buildPortal(kind: MinigameKind, ringColor: number, discColor: number, label: string, pos: THREE.Vector3) {
@@ -337,6 +356,7 @@ export class Game {
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
     this.minigamePlayed = true
+    this.audio.play('portal')
     this.hud.minigame = kind
     this.activePortal.copy(pos)
     this.input.setLockEnabled(false)
@@ -404,6 +424,7 @@ export class Game {
     this.camera.snap(this.player.position)
     this.hud.banner = `ENTERING ${zone.toUpperCase()}`
     this.bannerTimer = 2.6
+    this.audio.play('portal')
   }
 
   private startRocketLaunch() {
@@ -465,6 +486,7 @@ export class Game {
         this.bannerTimer = 1.6
         this.camera.shake(0.9)
         vibrate(40)
+        this.audio.play('mechOnline')
       }
     }
   }
@@ -515,6 +537,7 @@ export class Game {
       this.hud.score += Math.round(award * this.scoreMul)
       this.hud.captured += 1
       vibrate(25)
+      this.audio.play('capture')
     }
   }
 
@@ -544,6 +567,7 @@ export class Game {
     }
     this.hud.banner = 'MISSILES AWAY'
     this.bannerTimer = 0.8
+    this.audio.play('fire')
   }
 
   /**
@@ -578,6 +602,7 @@ export class Game {
       this.hud.banner = 'OBJECTIVE COMPLETE'
       this.bannerTimer = 1.4
       vibrate(40)
+      this.audio.play('objective')
       const nextM = list[this.missionIdx]
       if (nextM?.type === 'capture') this.captureBase = this.hud.captured
       this.hud.objective = nextM?.title ?? 'Free roam: explore the world!'
@@ -602,6 +627,7 @@ export class Game {
       this.missiles.shockwave({ x: v.position.x, y: gy, z: v.position.z }, 0xbfe6ff, 7 + v.size * 1.6, 0.6)
       this.camera.shake(0.6)
       vibrate(50)
+      this.audio.play('land')
     }
     this.mechAirborne = !grounded
     // Footsteps while striding low and moving.
@@ -616,6 +642,7 @@ export class Game {
         const fz = v.position.z - Math.sin(v.yaw) * s
         this.missiles.shockwave({ x: fx, y: gy, z: fz }, 0x9fb4d8, 1.6 + v.size * 0.4, 0.4)
         this.camera.shake(0.05 + v.size * 0.01)
+        this.audio.play('step')
       }
     }
   }
@@ -635,6 +662,7 @@ export class Game {
       hits++
     }
     if (hits > 0) vibrate(40)
+    this.audio.play('explosion')
   }
 
   private updateTransition(dt: number) {
@@ -970,6 +998,7 @@ export class Game {
     this.arcadeGeos.forEach((g) => g.dispose())
     this.arcadeMats.forEach((mm) => mm.dispose())
     this.arcadeTex.forEach((t) => t.dispose())
+    this.audio.dispose()
     this.engine.dispose()
     this.world.dispose()
   }
