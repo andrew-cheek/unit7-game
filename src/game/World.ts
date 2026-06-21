@@ -44,14 +44,15 @@ const smooth01 = (x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// Earth day/night cycle. Short loop so you see a sunrise and sunset within a
-// minute of play. The sun comes UP FAST (a quick 6s dawn), holds daylight only
-// briefly, then a longer sunset eases into a real stretch of neon-lit night.
-const CYCLE = 80
-const DAWN_START = 3
-const DAWN_END = 9 // 6s sunrise: sun pops up quickly
-const DUSK_START = 38 // ~29s of daylight, then it starts dropping
-const DUSK_END = 56 // 18s sunset fade into night (~27s of night before dawn)
+// Day/night cycle, 2-minute loop. Sun starts rising at 5s, is full by 15s,
+// holds, then starts setting at 35s and eases down into a long neon night
+// before the next dawn at the 120s mark. The phase markers (full day, full
+// night) drive the city's rising/folding props + worker arrivals/departures.
+const CYCLE = 120
+const DAWN_START = 5
+const DAWN_END = 15 // full sun by 15s
+const DUSK_START = 35 // sun starts to set at 35s
+const DUSK_END = 55 // 20s sunset, then night until the next cycle
 function dayCycle(time: number): number {
   const u = time % CYCLE
   if (u < DAWN_START) return 0

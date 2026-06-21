@@ -105,6 +105,7 @@ export class Events {
   private traffic: Traffic[] = []
   private police: Police[] = []
   private buses: Bus[] = []
+  private busVel = new THREE.Vector3() // scratch for bus wall-collision
   private commuters: Commuter[] = []
   private busRoute: BusWaypoint[] = []
   private ownedMats: THREE.Material[] = []
@@ -404,8 +405,13 @@ export class Events {
             b.wp = (b.wp + 1) % this.busRoute.length
           }
         } else {
-          b.pos.x += (dx / d) * b.speed * dt
-          b.pos.z += (dz / d) * b.speed * dt
+          const vx = (dx / d) * b.speed
+          const vz = (dz / d) * b.speed
+          b.pos.x += vx * dt
+          b.pos.z += vz * dt
+          // Keep buses out of building walls (treat the bus as a fat circle).
+          this.busVel.set(vx, 0, vz)
+          this.physics.resolveHorizontal(b.pos, this.busVel, 2.4, 3)
           b.yaw = dampAngle(b.yaw, Math.atan2(dx, dz), 5, dt)
         }
       }

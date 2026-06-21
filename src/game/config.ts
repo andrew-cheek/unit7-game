@@ -174,8 +174,8 @@ export const config = {
   npc: {
     count: 64,
     walkSpeed: 1.7,
-    separationRadius: 2.2,
-    separationForce: 4.0,
+    separationRadius: 2.4,
+    separationForce: 6.0, // firmer so the crowd doesn't visibly walk through itself
     wanderRadius: 76, // tighter so the crowd concentrates around the player area
   },
 
