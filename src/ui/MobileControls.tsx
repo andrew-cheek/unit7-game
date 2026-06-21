@@ -22,6 +22,7 @@ const EXIT: BtnDef = { label: 'EXIT', action: 'enter', type: 'tap', color: '#ff2
 const CHUTE: BtnDef = { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' }
 const FIRE: BtnDef = { label: 'FIRE', action: 'net', type: 'tap', color: '#ff8a1e' }
 const TRANSFORM: BtnDef = { label: 'TRANSFORM', action: 'morph', type: 'tap', color: '#8a5cff' }
+const DANCE: BtnDef = { label: 'DANCE', action: 'dance', type: 'tap', color: '#ff2bd0' }
 
 /**
  * Touch controls: a left thumb-stick for movement, a right-side drag area for
@@ -49,7 +50,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     buttons = inMech ? [EXIT, FIRE, TRANSFORM, JET, BOOST] : [EXIT, BOOST, JET]
   } else {
     // On foot: core buttons, plus contextual ones only when useful.
-    buttons = [RUN, JET, MORPH]
+    buttons = [RUN, JET, MORPH, DANCE]
     if (nearVehicle) buttons.unshift(ENTER)
     if (hud.canCapture) buttons.push(CAPTURE) // only when a target is in range
     if (airborne) buttons.push(BOOST, CHUTE) // boost/chute matter when flying

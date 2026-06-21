@@ -22,6 +22,7 @@ import { SharedAliens } from './SharedAliens'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
+import { DawnShow } from './DawnShow'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -142,6 +143,7 @@ export class Game {
   private worldEvents!: WorldEvents
   private exploration!: ExplorationPoints
   private playground!: Playground
+  private dawnShow!: DawnShow
   private danceToggle = false // 'B' key toggle for the robot dance emote
   // Transient steam puffs for the mech boot-up burst.
   private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
@@ -205,6 +207,8 @@ export class Game {
     })
     // Interactive toys: trampoline bounce pads (all zones) + a city dance floor.
     this.playground = new Playground(this.engine.scene)
+    // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
+    this.dawnShow = new DawnShow(this.engine.scene)
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -642,6 +646,7 @@ export class Game {
     this.worldEvents.setZone(zone)
     this.exploration.setActive(zone)
     this.playground.setActive(zone)
+    this.dawnShow.setActive(zone === 'earth')
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -1326,6 +1331,7 @@ export class Game {
     this.worldEvents.update(dt, this.focus)
     this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
     this.playground.update(dt)
+    this.dawnShow.update(dt, this.world.dayFactor)
     this.updateBootPuffs(dt)
     if (this.net) {
       this.netAccum += dt
@@ -1523,6 +1529,7 @@ export class Game {
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()
+    this.dawnShow.dispose()
     for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
     this.bootPuffs = []
     this.bootGeo.dispose()
