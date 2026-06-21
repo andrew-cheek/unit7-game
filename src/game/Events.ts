@@ -253,15 +253,20 @@ export class Events {
    */
   private spawnBuses() {
     const mk = (x: number, z: number, stopIdx: number): BusWaypoint => ({ p: new THREE.Vector3(x, 0, z), stopIdx })
-    this.busRoute = [
-      mk(38, 38, -1),
-      mk(OFFICE_ANCHORS[1].stop.x, OFFICE_ANCHORS[1].stop.z, 1),
-      mk(-38, 38, -1),
-      mk(OFFICE_ANCHORS[2].stop.x, OFFICE_ANCHORS[2].stop.z, 2),
-      mk(-38, -38, -1),
-      mk(38, -38, -1),
-      mk(OFFICE_ANCHORS[0].stop.x, OFFICE_ANCHORS[0].stop.z, 0),
-    ]
+    // Loop the avenues visiting every office stop, ordered around the plaza so
+    // the route doesn't criss-cross. Generalizes to however many OFFICE_ANCHORS
+    // exist: each stop gets an approach corner just outside it.
+    const ordered = OFFICE_ANCHORS.map((a, i) => ({ i, a })).sort(
+      (p, q) => Math.atan2(p.a.stop.z, p.a.stop.x) - Math.atan2(q.a.stop.z, q.a.stop.x),
+    )
+    this.busRoute = []
+    for (const { i, a } of ordered) {
+      const sx = a.stop.x
+      const sz = a.stop.z
+      const len = Math.hypot(sx, sz) || 1
+      this.busRoute.push(mk((sx / len) * (len + 14), (sz / len) * (len + 14), -1)) // approach corner
+      this.busRoute.push(mk(sx, sz, i)) // the office stop
+    }
     const n = config.tier.name === 'high' ? 2 : 1
     for (let i = 0; i < n; i++) {
       const model = createBus()
