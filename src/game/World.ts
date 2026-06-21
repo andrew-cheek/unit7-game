@@ -124,6 +124,9 @@ export class World {
   private elevatorClimbers: { mesh: THREE.Mesh; t: number; speed: number }[] = []
   private elevatorRing?: THREE.Object3D
   private hangarBots: { mesh: THREE.Mesh; baseY: number; phase: number }[] = []
+  // Hangar ambience: a pulsing energy ring on the pad + rising steam vents.
+  private hangarRingMat: THREE.MeshStandardMaterial | null = null
+  private hangarSteam: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number; baseY: number }[] = []
   private spaceportBeacon?: THREE.Object3D
   private spaceportWarn: THREE.MeshStandardMaterial[] = []
   private launchShip?: { mesh: THREE.Mesh; state: 'parked' | 'rising'; timer: number; vy: number; baseY: number }
@@ -182,6 +185,7 @@ export class World {
     this.buildExtras()
     this.buildSkyline()
     this.buildLandmark()
+    this.buildColossusStatue()
     this.buildSpaceElevator()
     this.buildMarket()
     this.buildSetPieces()
@@ -753,6 +757,54 @@ export class World {
   }
 
   /**
+   * A colossal Unit-7 robot statue towering over the city — the game's mascot as
+   * a giant landmark you can see from across the map. Built from cheap blocky
+   * parts with fog-immune materials (so it reads from a distance) and a glowing
+   * visor + chest reactor. Static (no per-frame cost); base is solid + on radar.
+   */
+  private buildColossusStatue() {
+    const x = 210
+    const z = -150
+    const armor = this.own(new THREE.MeshStandardMaterial({ color: 0x2c3b4a, metalness: 0.85, roughness: 0.35, fog: false }))
+    const dark = this.own(new THREE.MeshStandardMaterial({ color: 0x141a26, metalness: 0.7, roughness: 0.5, fog: false }))
+    const visor = this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+    const core = this.own(new THREE.MeshBasicMaterial({ color: config.palette.magenta, fog: false }))
+    const g = new THREE.Group()
+    g.position.set(x, 0, z)
+    const part = (mat: THREE.Material, sx: number, sy: number, sz: number, px: number, py: number, pz: number) => {
+      const m = new THREE.Mesh(this.boxGeo, mat)
+      m.scale.set(sx, sy, sz)
+      m.position.set(px, py, pz)
+      g.add(m)
+      return m
+    }
+    // Legs (feet at y=0), torso, shoulders, arms, head — total ~64m tall.
+    for (const lx of [-5, 5]) {
+      part(dark, 6, 26, 7, lx, 13, 0) // thigh+shin
+      part(armor, 8, 4, 10, lx, 1.5, 1) // foot
+      part(armor, 7, 6, 8, lx, 27, 0) // hip pad
+    }
+    part(dark, 16, 4, 11, 0, 30, 0) // pelvis
+    part(armor, 20, 20, 13, 0, 42, 0) // torso
+    const reactor = part(core, 6, 6, 1.5, 0, 44, 6.6) // chest reactor
+    reactor.scale.z = 2
+    for (const sx of [-13, 13]) {
+      part(armor, 7, 7, 9, sx, 50, 0) // shoulder
+      part(dark, 5, 22, 5, sx, 38, 0) // arm
+      part(armor, 5.5, 5, 5.5, sx, 26, 0) // fist
+    }
+    part(dark, 9, 3, 9, 0, 53.5, 0) // neck base
+    part(armor, 11, 9, 10, 0, 59, 0) // head
+    const eye = part(visor, 8, 1.6, 1, 0, 60, 5.2) // glowing visor
+    void eye
+    // A beacon spike on the crown so it pings on the skyline.
+    part(visor, 1.2, 7, 1.2, 0, 67, 0)
+    this.group.add(g)
+    this.landmarks.push({ x, z })
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(x - 12, 0, z - 8), new THREE.Vector3(x + 12, 30, z + 8)))
+  }
+
+  /**
    * The centerpiece: a colossal space elevator near the middle of the map. A
    * tapering megastructure base rises to a thick tether climbing far into the
    * sky, capped by a slowly rotating orbital ring + station. Climber cars ride
@@ -874,6 +926,23 @@ export class World {
     const back = new THREE.Mesh(this.boxGeo, steel)
     back.scale.set(W, 16, 2); back.position.set(0, 8, -D + 3); back.castShadow = config.tier.buildingShadows
     g.add(back)
+
+    // Energy ring inset in the launch pad (pulses in update).
+    this.hangarRingMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 2.4, roughness: 0.4 }))
+    const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(9, 0.5, 10, 36)), this.hangarRingMat)
+    ring.rotation.x = Math.PI / 2; ring.position.set(0, 0.5, -D / 2 + 4)
+    g.add(ring)
+    // Steam/energy vents rising off the pad (additive, fog-immune; animated).
+    const ventGeo = this.ownG(new THREE.CylinderGeometry(0.6, 1.6, 8, 10, 1, true))
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2
+      const mat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const vent = new THREE.Mesh(ventGeo, mat)
+      const baseY = 3
+      vent.position.set(Math.cos(a) * 7, baseY, -D / 2 + 4 + Math.sin(a) * 6)
+      g.add(vent)
+      this.hangarSteam.push({ mesh: vent, mat, phase: a, baseY })
+    }
     this.group.add(g)
 
     // Bobbing repair bots near the pad (world space, animated in update).
@@ -1522,6 +1591,14 @@ export class World {
     for (const b of this.hangarBots) {
       b.mesh.position.y = b.baseY + Math.sin(this.time * 1.6 + b.phase) * 0.5
       b.mesh.rotation.y += dt * 0.8
+    }
+    // Hangar energy ring pulse + steam vents rising and fading on a loop.
+    if (this.hangarRingMat) this.hangarRingMat.emissiveIntensity = 1.8 + Math.sin(this.time * 2.5) * 1.2
+    for (const s of this.hangarSteam) {
+      const cyc = (this.time * 0.5 + s.phase) % 1
+      s.mesh.position.y = s.baseY + cyc * 6
+      s.mesh.scale.setScalar(0.6 + cyc * 1.4)
+      s.mat.opacity = 0.16 * (1 - cyc)
     }
 
     // Spaceport: sweeping beacon, pulsing warning lights, periodic ship launch.

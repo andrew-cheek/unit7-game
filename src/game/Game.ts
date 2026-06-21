@@ -19,6 +19,8 @@ import { CameraController } from './Camera'
 import { Net, type NetState, type ScoreRow } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
+import { WorldEvents } from './WorldEvents'
+import { ExplorationPoints } from './ExplorationPoints'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -136,6 +138,11 @@ export class Game {
   private net: Net | null = null
   private remotePlayers!: RemotePlayers
   private sharedAliens!: SharedAliens
+  private worldEvents!: WorldEvents
+  private exploration!: ExplorationPoints
+  // Transient steam puffs for the mech boot-up burst.
+  private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
+  private bootGeo = new THREE.SphereGeometry(1, 10, 8)
   private netAccum = 0
   private online = 1 // players in the world incl. self (1 = solo)
   private leaderboard: ScoreRow[] = []
@@ -180,6 +187,19 @@ export class Game {
     this.zones.setActive('earth')
     this.remotePlayers = new RemotePlayers(this.engine.scene)
     this.sharedAliens = new SharedAliens(this.engine.scene)
+    // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
+    // and off-path exploration rewards (discoveries + collectible energy cores).
+    this.worldEvents = new WorldEvents(this.engine.scene)
+    this.worldEvents.onEvent = (label) => {
+      if (this.bannerTimer <= 0) { this.hud.banner = label; this.bannerTimer = 1.8 }
+    }
+    this.exploration = new ExplorationPoints(this.engine.scene, (credits, label) => {
+      this.addCredits(credits)
+      this.hud.banner = `${label} +${credits}`
+      this.bannerTimer = 1.8
+      this.audio.play('capture')
+      vibrate(20)
+    })
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -614,6 +634,8 @@ export class Game {
     this.zones.setActive(zone)
     this.world.cityVisible(zone === 'earth')
     this.world.applyZone(zone)
+    this.worldEvents.setZone(zone)
+    this.exploration.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -715,13 +737,15 @@ export class Game {
     } else {
       this.player.enterVehicle()
       this.vehicles.enter(v)
-      // Mech boot-up moment: name banner + a quick camera shake.
+      // Mech boot-up moment: name banner, camera shake + an energy/steam burst
+      // so boarding the battle mech reads as a powered-up reward.
       if (isMech(v.kind)) {
         this.hud.banner = `${v.name} ONLINE`
         this.bannerTimer = 1.6
-        this.camera.shake(0.9)
+        this.camera.shake(1.0)
         vibrate(40)
         this.audio.play('mechOnline')
+        this.spawnMechBoot(v.position)
       }
     }
   }
@@ -1125,6 +1149,39 @@ export class Game {
     )
   }
 
+  /**
+   * Mech boot-up burst: layered energy shockwave rings + rising steam puffs at
+   * the mech's feet. Tier-scaled puff count; puffs fade and self-dispose.
+   */
+  private spawnMechBoot(pos: THREE.Vector3) {
+    this.missiles.shockwave({ x: pos.x, y: pos.y + 0.4, z: pos.z }, 0x27e7ff, 7, 0.7)
+    this.missiles.shockwave({ x: pos.x, y: pos.y + 0.4, z: pos.z }, 0xff8a1e, 11, 0.95)
+    const n = Math.round(6 * config.tier.fxScale) + 3
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.5, depthWrite: false, fog: false })
+      const m = new THREE.Mesh(this.bootGeo, mat)
+      m.position.set(pos.x + (Math.random() * 2 - 1) * 3.5, pos.y + 0.6 + Math.random() * 1.5, pos.z + (Math.random() * 2 - 1) * 3.5)
+      m.scale.setScalar(1.2 + Math.random() * 1.5)
+      this.engine.scene.add(m)
+      this.bootPuffs.push({ mesh: m, vy: 2.2 + Math.random() * 2, t: 0, ttl: 1.1 + Math.random() * 0.7, mat })
+    }
+  }
+
+  private updateBootPuffs(dt: number) {
+    for (let i = this.bootPuffs.length - 1; i >= 0; i--) {
+      const p = this.bootPuffs[i]
+      p.t += dt
+      p.mesh.position.y += p.vy * dt
+      p.mesh.scale.multiplyScalar(1 + dt * 0.9)
+      p.mat.opacity = 0.5 * Math.max(0, 1 - p.t / p.ttl)
+      if (p.t >= p.ttl) {
+        this.engine.scene.remove(p.mesh)
+        p.mat.dispose()
+        this.bootPuffs.splice(i, 1)
+      }
+    }
+  }
+
   /** Push the local player's transform to the server (throttled by the caller). */
   private sendNetState() {
     if (!this.net) return
@@ -1250,6 +1307,10 @@ export class Game {
     this.remotePlayers.update(dt)
     this.sharedAliens.setVisible(this.zone === 'earth')
     this.sharedAliens.update(dt)
+    // Ambient events + exploration rewards run in every zone.
+    this.worldEvents.update(dt, this.focus)
+    this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
+    this.updateBootPuffs(dt)
     if (this.net) {
       this.netAccum += dt
       if (this.netAccum >= 1 / 12) {
@@ -1443,6 +1504,11 @@ export class Game {
     this.net?.close()
     this.remotePlayers.dispose()
     this.sharedAliens.dispose()
+    this.worldEvents.dispose()
+    this.exploration.dispose()
+    for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
+    this.bootPuffs = []
+    this.bootGeo.dispose()
     this.objBeaconMats.forEach((m) => m.dispose())
     this.input.dispose()
     this.player.dispose()

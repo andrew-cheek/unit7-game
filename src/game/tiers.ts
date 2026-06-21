@@ -54,6 +54,10 @@ export interface QualityTier {
   // --- materials ---
   /** Env-map intensity multiplier; desktop reflects neon harder. */
   envMapIntensity: number
+
+  // --- ambient FX (world events, exploration sparkle, extra background motion) ---
+  /** Multiplier on particle/event element counts. Scaled down on weaker tiers. */
+  fxScale: number
 }
 
 export const TIERS: Record<AssetQuality, QualityTier> = {
@@ -76,6 +80,29 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     anisotropy: 8,
     drawDistance: 320,
     envMapIntensity: 1.15,
+    fxScale: 1,
+  },
+  // Mid preset for capable laptops / tablets: desktop look, lighter post + density.
+  medium: {
+    name: 'medium',
+    pixelRatioCap: 1.5,
+    msaaSamples: 0,
+    bloom: true,
+    ssao: false,
+    dof: false,
+    smaa: true, // cheap AA in place of MSAA
+    shadows: true,
+    shadowMapSize: 1536,
+    softShadows: true,
+    buildingShadows: false,
+    maxSubSteps: 3,
+    densityScale: 0.7,
+    accentLights: true,
+    starCount: 1100,
+    anisotropy: 4,
+    drawDistance: 280,
+    envMapIntensity: 1.08,
+    fxScale: 0.65,
   },
   low: {
     name: 'low',
@@ -96,6 +123,7 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     anisotropy: 2,
     drawDistance: 220,
     envMapIntensity: 1.0,
+    fxScale: 0.4,
   },
 }
 
@@ -113,7 +141,7 @@ export function detectTier(override?: AssetQuality): AssetQuality {
   // URL override for testing on any device: ?tier=low / ?tier=high
   if (typeof location !== 'undefined') {
     const q = new URLSearchParams(location.search).get('tier')
-    if (q === 'low' || q === 'high') return q
+    if (q === 'low' || q === 'medium' || q === 'high') return q
   }
 
   if (isTouchDevice()) return 'low'

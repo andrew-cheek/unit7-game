@@ -94,10 +94,39 @@ export class Zones {
     pad.position.y = 0.1
     group.add(pad)
 
+    // Swirling interior: a second disc counter-rotating behind the first plus a
+    // faint vertical energy column rising through the ring.
+    const swirlMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const swirl = new THREE.Mesh(new THREE.RingGeometry(0.4, 2.2, 24, 1), swirlMat)
+    swirl.position.y = 2.7
+    group.add(swirl)
+    const columnMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 9, 16, 1, true), columnMat)
+    column.position.y = 4.5
+    group.add(column)
+
+    // Colored light spill on the ground around the pad.
+    const spillMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const spill = new THREE.Mesh(new THREE.CircleGeometry(5.5, 32), spillMat)
+    spill.rotation.x = -Math.PI / 2
+    spill.position.y = 0.06
+    group.add(spill)
+
+    // Surrounding machinery: glowing pylons flanking the gateway.
+    const pylonMat = new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: color, emissiveIntensity: 1.6, metalness: 0.5, roughness: 0.5 })
+    for (const sx of [-3.1, 3.1]) {
+      const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, 5, 8), pylonMat)
+      pylon.position.set(sx, 2.5, 0)
+      group.add(pylon)
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), new THREE.MeshBasicMaterial({ color, fog: false }))
+      cap.position.set(sx, 5.1, 0)
+      group.add(cap)
+    }
+
     // Floating label so the player can read the destination from a distance.
     const label = target === 'mars' ? 'MARS PORTAL' : target === 'moon' ? 'MOON PORTAL' : 'CITY RETURN'
     const sprite = this.labelSprite(label, color)
-    sprite.position.set(0, 6.0, 0)
+    sprite.position.set(0, 6.4, 0)
     group.add(sprite)
 
     let t = 0
@@ -109,8 +138,15 @@ export class Zones {
       update: (dt) => {
         t += dt
         disc.rotation.z += dt * 0.7
-        ringMat.emissiveIntensity = 1.8 + Math.sin(t * 3) * 0.5
+        swirl.rotation.z -= dt * 1.6 // swirl counter-spins
+        ring.rotation.z += dt * 0.5 // the gateway ring slowly turns
+        column.rotation.y += dt * 0.8
+        const pulse = Math.sin(t * 3)
+        ringMat.emissiveIntensity = 1.8 + pulse * 0.5
         discMat.opacity = 0.22 + Math.sin(t * 2) * 0.1
+        swirlMat.opacity = 0.16 + pulse * 0.08
+        spillMat.opacity = 0.3 + pulse * 0.12
+        padMat.emissiveIntensity = 1.8 + pulse * 0.5
       },
     }
   }
