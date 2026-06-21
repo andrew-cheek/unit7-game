@@ -47,10 +47,9 @@ export class Zones {
     this.earthPortals.push(this.makePortal('mars', config.palette.orange, new THREE.Vector3(-24, 0, 12)))
     this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(24, 0, 12)))
     for (const p of this.earthPortals) this.earthPortalGroup.add(p.group)
-    // Earth->planet departures are now fronted by the arcade's MARS/MOON
-    // cabinets (built in Game), so the old ring-portals are not added to the
-    // scene. The Portal data is still kept for the objective beacon + radar; the
-    // return portals on Mars/Moon are separate and unaffected.
+    // Planet/moon travel is its own thing, separate from the arcade: these ring
+    // portals are how you leave Earth for another world.
+    scene.add(this.earthPortalGroup)
 
     this.mars = this.buildMars()
     this.moon = this.buildMoon()

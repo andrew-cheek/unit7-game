@@ -115,13 +115,11 @@ export class Game {
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
   private arcadePortals: { kind: MinigameKind; pos: THREE.Vector3; group: THREE.Group; screenMat: THREE.MeshStandardMaterial }[] = []
-  // Cabinets that travel to a planet zone instead of a 2D minigame.
-  private zoneCabinets: { zone: Zone; pos: THREE.Vector3; group: THREE.Group; screenMat: THREE.MeshStandardMaterial }[] = []
   // The colossal Unit-7 robot presiding over the arcade (the hub centerpiece).
   private arcadeRobot: VehicleModel | null = null
   // A short "conveyed in" transport beat played when you step onto a cabinet,
-  // before the actual minigame/zone entry fires.
-  private pendingEntry: { kind?: MinigameKind; zone?: Zone; pos: THREE.Vector3; t: number; beam: THREE.Mesh } | null = null
+  // before the minigame entry fires.
+  private pendingEntry: { kind: MinigameKind; pos: THREE.Vector3; t: number; beam: THREE.Mesh } | null = null
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -261,7 +259,6 @@ export class Game {
       this.patrols.setVisible(false)
       this.sky.setVisible(false)
       for (const p of this.arcadePortals) p.group.visible = false
-      for (const c of this.zoneCabinets) c.group.visible = false
       if (this.arcadeRobot) this.arcadeRobot.group.visible = false
     }
   }
@@ -280,7 +277,6 @@ export class Game {
     this.patrols.setVisible(false)
     this.sky.setVisible(false)
     for (const p of this.arcadePortals) p.group.visible = false
-    for (const c of this.zoneCabinets) c.group.visible = false
     if (this.arcadeRobot) this.arcadeRobot.group.visible = false
     this.hudListener({ ...this.hud, radar: this.radar })
   }
@@ -320,11 +316,9 @@ export class Game {
     this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(15, 0, 10)))
     this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
     this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
-    // Planet cabinets flank the row: same fixture, but they travel to a zone.
-    // Aligned with the (now-hidden) Zones earth-portal positions so the mission
-    // beacon / radar that point at those still line up with the cabinets.
-    this.zoneCabinets.push(this.buildZoneCabinet('mars', A.orange, 'MARS', new THREE.Vector3(-24, 0, 16)))
-    this.zoneCabinets.push(this.buildZoneCabinet('moon', 0xbfd2ff, 'MOON', new THREE.Vector3(24, 0, 16)))
+    // Planet/moon travel stays as its own separate ring-portals (built in Zones),
+    // NOT arcade cabinets: the arcade takes you to the mini-games, the portals
+    // take you to other worlds.
     this.buildArcadeRobot()
     this.buildPlazaHub()
     this.buildRocketGate()
@@ -334,12 +328,6 @@ export class Game {
   private buildCabinet(kind: MinigameKind, color: number, label: string, pos: THREE.Vector3) {
     const { group, screenMat } = this.makeCabinet(color, label, pos)
     return { kind, pos: pos.clone(), group, screenMat }
-  }
-
-  /** One arcade cabinet bound to a planet-zone trip. */
-  private buildZoneCabinet(zone: Zone, color: number, label: string, pos: THREE.Vector3) {
-    const { group, screenMat } = this.makeCabinet(color, label, pos)
-    return { zone, pos: pos.clone(), group, screenMat }
   }
 
   /**
@@ -517,11 +505,7 @@ export class Game {
     // The stand-here pad is in front of the cabinet (toward -Z), so trigger on
     // proximity to the pad point, not the cabinet body.
     for (const p of this.arcadePortals) {
-      if (this.nearCabinetPad(p.pos)) { this.startTransport(p.pos, { kind: p.kind }); return }
-    }
-    for (const c of this.zoneCabinets) {
-      if (c.zone === this.zone) continue // already there
-      if (this.nearCabinetPad(c.pos)) { this.startTransport(c.pos, { zone: c.zone }); return }
+      if (this.nearCabinetPad(p.pos)) { this.startTransport(p.pos, p.kind); return }
     }
   }
 
@@ -533,11 +517,11 @@ export class Game {
 
   /**
    * Begins the "conveyed in" transport: spawns a bright beam column at the
-   * cabinet pad. When the short beat elapses (in update), the real entry
-   * (minigame or zone trip) fires. This animation IS the portal. The pending
-   * flag blocks re-triggering other cabinets meanwhile.
+   * cabinet pad. When the short beat elapses (in update), the minigame entry
+   * fires. This animation IS the portal. The pending flag blocks re-triggering
+   * other cabinets meanwhile.
    */
-  private startTransport(pos: THREE.Vector3, target: { kind?: MinigameKind; zone?: Zone }) {
+  private startTransport(pos: THREE.Vector3, kind: MinigameKind) {
     const padZ = pos.z - 2.2
     const geo = new THREE.CylinderGeometry(1.5, 1.5, 16, 20, 1, true)
     this.arcadeGeos.push(geo)
@@ -548,10 +532,10 @@ export class Game {
     beam.renderOrder = 5
     this.engine.scene.add(beam)
     this.audio.play('portal')
-    this.pendingEntry = { ...target, pos: pos.clone(), t: 0, beam }
+    this.pendingEntry = { kind, pos: pos.clone(), t: 0, beam }
   }
 
-  /** Advances the transport beat; fires the real entry when it completes. */
+  /** Advances the transport beat; enters the minigame when it completes. */
   private updateTransport(dt: number) {
     const e = this.pendingEntry
     if (!e) return
@@ -564,8 +548,7 @@ export class Game {
     if (e.t >= 0.7) {
       this.engine.scene.remove(e.beam)
       this.pendingEntry = null
-      if (e.kind) this.enterMinigame(e.kind, e.pos)
-      else if (e.zone) this.requestTravel(e.zone)
+      this.enterMinigame(e.kind, e.pos)
     }
   }
 
@@ -1043,9 +1026,6 @@ export class Game {
   }
 
   private checkPortals() {
-    // Earth departures are handled by the arcade MARS/MOON cabinets; here we
-    // only handle the return portals on Mars/Moon.
-    if (this.zone === 'earth') return
     const px = this.player.position.x
     const pz = this.player.position.z
     for (const p of this.zones.portalsFor(this.zone)) {
@@ -1165,10 +1145,6 @@ export class Game {
       p.group.visible = onEarth
       if (!onEarth) continue
       p.screenMat.emissiveIntensity = 1.3 + Math.sin(_elapsed * 3 + p.pos.x) * 0.35
-    }
-    for (const c of this.zoneCabinets) {
-      c.group.visible = onEarth
-      if (onEarth) c.screenMat.emissiveIntensity = 1.3 + Math.sin(_elapsed * 2.4 + c.pos.x) * 0.35
     }
     if (this.arcadeRobot) {
       this.arcadeRobot.group.visible = onEarth
