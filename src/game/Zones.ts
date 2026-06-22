@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { config } from './config'
 import { createMech, createDrone } from './procedural'
 import { randRange } from './utils'
+import { trackEvent } from '../lib/analytics'
 import type { Zone } from './types'
 
 export interface Portal {
@@ -39,6 +40,9 @@ export class Zones {
 
   private scene: THREE.Scene
   private earthPortalGroup = new THREE.Group()
+  // The zone the world is currently showing. Seeded to the constructor default so
+  // the initial setActive('earth') is a no-op and never emits a transition event.
+  private activeZone: Zone = 'earth'
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -70,6 +74,12 @@ export class Zones {
     this.earthPortalGroup.visible = zone === 'earth'
     this.mars.group.visible = zone === 'mars'
     this.moon.group.visible = zone === 'moon'
+    // Every Earth/Mars/Moon transition (portals and rocket both route through
+    // here) emits one zone_change. Guarded so re-applying the same zone is silent.
+    if (zone !== this.activeZone) {
+      trackEvent('zone_change', { from: this.activeZone, to: zone })
+      this.activeZone = zone
+    }
   }
 
   update(dt: number, zone: Zone) {

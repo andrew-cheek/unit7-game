@@ -145,7 +145,10 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
             gameRef.current?.connectMultiplayer(name, config?.multiplayerHost)
             setMpJoined(true)
           }}
-          onSolo={() => setMpJoined(true)}
+          onSolo={() => {
+            gameRef.current?.startSolo()
+            setMpJoined(true)
+          }}
         />
       )}
       {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
