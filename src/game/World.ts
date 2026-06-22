@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { config, type ZoneCfg } from './config'
 import { hash01 } from './utils'
 import { createSky, createWindowTexture, type SkyModel } from './procedural'
@@ -146,6 +147,16 @@ export class World {
   private ownedMats: THREE.Material[] = []
   private ownedTex: THREE.Texture[] = []
   private ownedGeos: THREE.BufferGeometry[] = []
+  // Pooled dark-tower materials (by colour) so dark bodies sharing a colour can
+  // batch into one merged mesh, the same way lit facades already pool.
+  private darkPool = new Map<number, THREE.MeshStandardMaterial>()
+  // Static building bodies are accumulated per spatial chunk + material, then
+  // merged into one mesh per bucket. That collapses hundreds of per-building
+  // body draw calls into a few dozen, while chunking keeps coarse frustum
+  // culling (a whole chunk behind you is skipped) - the win the earlier
+  // merge-everything instancing experiment lost.
+  private mergeBuckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; shadow: boolean }>()
+  private static readonly MERGE_CHUNK = 120 // metres per merge chunk
   private billboards: Billboard[] = []
   private facadeMats: THREE.MeshStandardMaterial[] = [] // window-lit tower facades (dimmed by day)
   private accentLights: THREE.PointLight[] = []
@@ -221,6 +232,7 @@ export class World {
     this.buildStreetProps()
     this.buildCity()
     this.buildNearbyBuildings()
+    this.finalizeBuildingMerge()
     this.buildElevatedPlatform()
     this.buildDriveHighway()
     this.buildExtras()
@@ -254,6 +266,43 @@ export class World {
   }
   private glow(color: number, intensity = 3) {
     return this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: intensity, roughness: 0.4 }))
+  }
+
+  /** Queue a static body/base for chunked merging instead of adding it as its own
+   *  mesh. The transform (scale + position) is baked into a cloned geometry and
+   *  bucketed by chunk + material; finalizeBuildingMerge stitches each bucket. */
+  private mergeBody(baseGeo: THREE.BufferGeometry, mat: THREE.Material, cx: number, cz: number, sx: number, sy: number, sz: number, py: number, shadow: boolean) {
+    const C = World.MERGE_CHUNK
+    const key = `${Math.floor(cx / C)}_${Math.floor(cz / C)}|${mat.uuid}`
+    let b = this.mergeBuckets.get(key)
+    if (!b) { b = { mat, geos: [], shadow: false }; this.mergeBuckets.set(key, b) }
+    const g = baseGeo.clone()
+    this.scratchMat.compose(this.scratchPos.set(cx, py, cz), this.scratchQuat, this.scratchScale.set(sx, sy, sz))
+    g.applyMatrix4(this.scratchMat)
+    b.geos.push(g)
+    if (shadow) b.shadow = true
+  }
+
+  private scratchMat = new THREE.Matrix4()
+  private scratchPos = new THREE.Vector3()
+  private scratchQuat = new THREE.Quaternion()
+  private scratchScale = new THREE.Vector3()
+
+  /** Merge every queued bucket into one mesh per (chunk, material). */
+  private finalizeBuildingMerge() {
+    for (const b of this.mergeBuckets.values()) {
+      if (b.geos.length === 0) continue
+      const merged = BufferGeometryUtils.mergeGeometries(b.geos, false)
+      for (const g of b.geos) g.dispose() // temp clones, no longer needed
+      if (!merged) continue
+      this.ownedGeos.push(merged)
+      const mesh = new THREE.Mesh(merged, b.mat)
+      mesh.castShadow = b.shadow
+      mesh.receiveShadow = true
+      this.group.add(mesh)
+      this.solidMeshes.push(mesh) // camera collision raycasts the merged shell
+    }
+    this.mergeBuckets.clear()
   }
   /** Add a decorative neon mesh to the scene + register it with the NeonManager
    *  (so the density dial + distance LOD can thin it). */
@@ -371,12 +420,13 @@ export class World {
     let mat: THREE.MeshStandardMaterial
     if (dark) {
       const cset = [0x14171e, 0x191c24, 0x10131a, 0x1c2029, 0x21262f]
-      mat = this.own(new THREE.MeshStandardMaterial({
-        color: cset[Math.floor(hash01(seed * 1.7) * cset.length)],
-        metalness: 0.5,
-        roughness: 0.72,
-        envMapIntensity: config.tier.envMapIntensity,
-      }))
+      const dcolor = cset[Math.floor(hash01(seed * 1.7) * cset.length)]
+      let dm = this.darkPool.get(dcolor)
+      if (!dm) {
+        dm = this.own(new THREE.MeshStandardMaterial({ color: dcolor, metalness: 0.5, roughness: 0.72, envMapIntensity: config.tier.envMapIntensity }))
+        this.darkPool.set(dcolor, dm)
+      }
+      mat = dm
     } else {
       const fpal = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019, 0x0a1a1f, 0x161021, 0x1a1410, 0x101a16]
       const facade = fpal[Math.floor(hash01(seed * 1.7) * fpal.length)]
@@ -415,16 +465,11 @@ export class World {
       }
       mat = lm
     }
-    const mesh = new THREE.Mesh(bodyGeo, mat)
-    mesh.scale.set(fx, h, fz)
-    mesh.position.set(cx, h / 2, cz)
     // Only the inner-core towers cast shadows: distant sprawl shadows aren't
     // visible but would bloat the shadow pass in the now-much-larger world.
     const castsShadow = config.tier.buildingShadows && Math.hypot(cx, cz) < 150
-    mesh.castShadow = castsShadow
-    mesh.receiveShadow = true
-    this.group.add(mesh)
-    this.solidMeshes.push(mesh)
+    // Body is queued for chunked merging rather than added as its own mesh.
+    this.mergeBody(bodyGeo, mat, cx, cz, fx, h, fz, h / 2, castsShadow)
     this.landmarks.push({ x: cx, z: cz })
     this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - fx / 2, 0, cz - fz / 2), new THREE.Vector3(cx + fx / 2, h, cz + fz / 2)))
 
@@ -435,12 +480,7 @@ export class World {
       const bh = Math.min(h * 0.28, 15)
       const bw = fx * 1.5
       const bd = fz * 1.5
-      const base = new THREE.Mesh(this.boxGeo, mat)
-      base.scale.set(bw, bh, bd)
-      base.position.set(cx, bh / 2, cz)
-      base.castShadow = castsShadow
-      base.receiveShadow = true
-      this.group.add(base)
+      this.mergeBody(this.boxGeo, mat, cx, cz, bw, bh, bd, bh / 2, castsShadow)
       this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - bw / 2, 0, cz - bd / 2), new THREE.Vector3(cx + bw / 2, bh, cz + bd / 2)))
     }
     // Neon roofline trim on a minority of towers + a vertical spine up tall ones.
