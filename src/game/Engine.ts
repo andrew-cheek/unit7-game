@@ -87,7 +87,8 @@ export class Engine {
   private static readonly SCALE_FLOOR = 0.6
   // Bloom render-target scale relative to the frame. Half-res = soft, cheap,
   // and free of the sub-pixel shimmer full-res bloom amplifies on far neon.
-  private static readonly BLOOM_SCALE = 0.5
+  // Mobile (low) drops to 0.4 for a cheaper blur that still reads as neon glow.
+  private bloomScale = 0.5
 
   constructor(container: HTMLElement, tier: QualityTier) {
     this.container = container
@@ -105,7 +106,13 @@ export class Engine {
       // towers, the road grid and the big fog-immune landmarks. Standard depth
       // precision is starved here because the near plane is forced very small
       // (the wall-collision camera tucks to 0.7).
-      logarithmicDepthBuffer: true,
+      //
+      // Off on mobile (low): a logarithmic depth buffer writes gl_FragDepth in
+      // the fragment shader, which disables early-Z / hierarchical-Z on the
+      // tile-based GPUs phones use - a real fill-rate cost. The low tier's short
+      // draw distance (~220m) + heavy fog hide the distant surfaces that would
+      // otherwise z-fight, so standard depth is the better trade there.
+      logarithmicDepthBuffer: tier.name !== 'low',
     })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.pixelCap))
     this.renderer.setSize(w, h)
@@ -167,9 +174,10 @@ export class Engine {
     // hit is invisible, but the downsample low-pass-filters the high-frequency
     // sub-pixel glints on distant neon that full-res bloom was turning into
     // crawling shimmer. Cheaper too.
-    this.baseBloom = config.render.bloom.strength * (tier.name === 'high' ? 1 : 0.85)
+    this.bloomScale = tier.name === 'low' ? 0.4 : 0.5
+    this.baseBloom = config.render.bloom.strength * (tier.name === 'high' ? 1 : tier.name === 'low' ? 0.72 : 0.85)
     this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE)),
+      new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
       this.baseBloom,
       config.render.bloom.radius,
       config.render.bloom.threshold,
@@ -314,7 +322,7 @@ export class Engine {
     this.renderer.setSize(w, h)
     this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
-    this.bloomPass.setSize(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE))
+    this.bloomPass.setSize(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale))
     this.saoPass?.setSize(w, h)
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }
@@ -353,7 +361,7 @@ export class Engine {
     this.renderer.setSize(w, h)
     this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
-    this.bloomPass.setSize(Math.max(1, w * Engine.BLOOM_SCALE), Math.max(1, h * Engine.BLOOM_SCALE))
+    this.bloomPass.setSize(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale))
     this.saoPass?.setSize(w, h)
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }

@@ -117,7 +117,7 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     dof: false,
     smaa: false, // skip the extra full-screen AA pass on mobile
     shadows: true,
-    shadowMapSize: 1024,
+    shadowMapSize: 512, // small contact-shadow map; only the player/vehicles cast
     softShadows: false,
     buildingShadows: false, // only the player/vehicles cast shadows on mobile
     maxSubSteps: 2,
