@@ -9,7 +9,7 @@ import type { Zone } from './types'
 export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL' | 'titan'
 type DriveMode = 'hover' | 'fly' | 'rocket'
 
-interface Vehicle {
+export interface Vehicle {
   kind: VehicleKind
   name: string
   model: VehicleModel
@@ -53,7 +53,7 @@ const UP = new THREE.Vector3(0, 1, 0)
 export class Vehicles {
   readonly list: Vehicle[] = []
   current: Vehicle | null = null
-  onEnterRocket: (() => void) | null = null
+  onEnterRocket: ((rocket: Vehicle) => void) | null = null
 
   private scene: THREE.Scene
   private physics: Physics
@@ -74,10 +74,12 @@ export class Vehicles {
     // A speeder bike parked just the other side of the spawn for fast travel.
     this.spawn('speeder', createSpeederBike(), new THREE.Vector3(-6, 0, 8), config.vehicle.speeder.hoverHeight, 1.1, 'hover')
     this.spawn('spaceship', createSpaceship(), new THREE.Vector3(-22, 0, 20), config.vehicle.spaceship.hoverHeight, 2.8, 'fly')
-    // Scaled up so it reads as a launch vehicle / destination, not a prop.
-    const rocket = createRocket()
-    rocket.group.scale.setScalar(1.9)
-    this.spawn('rocket', rocket, new THREE.Vector3(2, 0, -20), 0, 2.6, 'rocket')
+    // A little spaceport: three rideable rockets of different size + shape lined
+    // up behind spawn. Board any one (G) to ride it to the next world; on arrival
+    // it self-lands SpaceX-style on the pad. They're present on every world.
+    this.spawn('rocket', createRocket({ scale: 2.4, flaps: true, hull: 0xd8dee8, accent: 0x27e7ff }), new THREE.Vector3(-14, 0, -24), 0, 3.0, 'rocket', 1.2)
+    this.spawn('rocket', createRocket({ scale: 3.0, hull: 0xb8c0cc, accent: config.palette.orange }), new THREE.Vector3(2, 0, -26), 0, 3.6, 'rocket', 1.5)
+    this.spawn('rocket', createRocket({ scale: 1.7, hull: 0xc8ccd6, accent: 0xff4d6d }), new THREE.Vector3(16, 0, -24), 0, 2.4, 'rocket', 0.9)
     // Drivable cars sitting up on the elevated highway (deck at z=-36, y~9).
     // sampleGround in spawn() lands them on the deck surface.
     this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
@@ -148,16 +150,27 @@ export class Vehicles {
   setZone(zone: Zone, spawn: THREE.Vector3) {
     const earth = zone === 'earth'
     this.current = null
+    // Off-world rocket pad: rockets line up just in front of the spawn so you can
+    // always find a ride onward. Spread by rocket index.
+    const ROCKET_OFF = [new THREE.Vector3(-14, 0, 18), new THREE.Vector3(2, 0, 22), new THREE.Vector3(16, 0, 18)]
+    let rocketIdx = 0
     for (const v of this.list) {
-      const visible = earth || isMech(v.kind)
+      // Mechs follow you off-world; rockets are everywhere (the spaceport); the
+      // rest stay parked on Earth.
+      const isRocket = v.kind === 'rocket'
+      const visible = earth || isMech(v.kind) || isRocket
       v.model.group.visible = visible
       if (!visible) continue
       if (earth) {
         v.position.copy(v.home)
+      } else if (isRocket) {
+        const off = ROCKET_OFF[rocketIdx % ROCKET_OFF.length]
+        v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
       } else {
         const off = OFFWORLD_MECH_OFFSET[v.kind] ?? new THREE.Vector3()
         v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
       }
+      if (isRocket) rocketIdx++
       const gy = this.physics.sampleGround(v.position.x, v.position.z, 200)?.y ?? 0
       v.position.y = gy + (isWalker(v.kind) ? 0 : v.hoverHeight)
       v.yaw = 0
@@ -202,7 +215,7 @@ export class Vehicles {
   enter(v: Vehicle) {
     this.current = v
     this.speed01 = 0
-    if (v.drive === 'rocket') this.onEnterRocket?.()
+    if (v.drive === 'rocket') this.onEnterRocket?.(v)
   }
 
   /** Exit the current vehicle; returns a ground-snapped spot beside it. */

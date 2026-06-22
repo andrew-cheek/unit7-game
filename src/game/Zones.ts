@@ -474,9 +474,113 @@ export class Zones {
     this.addBoundary(env.colliders)
     this.scatterRocks(group, env, displace, 0x55555c, 22)
     const base = this.buildMoonBase(group, env, displace, 44, 30)
+    const dc = this.buildMoonDataCenter(group, env, displace, 0, 34)
     const baseUpdate = env.update
-    env.update = (dt) => { baseUpdate(dt); base(dt) }
+    env.update = (dt) => { baseUpdate(dt); base(dt); dc(dt) }
     return env
+  }
+
+  /**
+   * Moon data-centre construction site: rows of server racks (some finished and
+   * humming, some still under scaffolding), a sliding gantry crane, and builder
+   * robots welding away. This is where the robots are "building data centres" -
+   * and the spaceport rockets nearby carry on to Mars. Returns an animate fn.
+   */
+  private buildMoonDataCenter(group: THREE.Group, env: PlanetEnv, displace: (x: number, z: number) => number, cx: number, cz: number): (dt: number) => void {
+    const by = displace(cx, cz)
+    const site = new THREE.Group()
+    site.position.set(cx, by, cz)
+    group.add(site)
+    const slabMat = new THREE.MeshStandardMaterial({ color: 0x23262e, metalness: 0.5, roughness: 0.7 })
+    const rackMat = new THREE.MeshStandardMaterial({ color: 0x161a22, metalness: 0.7, roughness: 0.4 })
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xffb14a, metalness: 0.5, roughness: 0.5 }) // scaffold
+    const lit = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x49f2c0, emissiveIntensity: 2.4, roughness: 0.4 })
+    const rackLights: THREE.MeshStandardMaterial[] = []
+
+    // Foundation slab.
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(46, 0.6, 34), slabMat)
+    slab.position.set(0, 0.3, 0); slab.receiveShadow = true
+    site.add(slab)
+    env.colliders.push(new THREE.Box3(new THREE.Vector3(cx - 23, by - 1, cz - 17), new THREE.Vector3(cx + 23, by + 0.9, cz + 17)))
+
+    // Grid of server racks. Front rows finished + humming; the back row is still
+    // going up (shorter, wrapped in scaffolding).
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 5; col++) {
+        const rx = -18 + col * 9
+        const rz = -11 + row * 11
+        const building = row === 2 // back row under construction
+        const h = building ? 1.6 + (col % 3) * 0.7 : 5.5
+        const rack = new THREE.Mesh(new THREE.BoxGeometry(4, h, 6), rackMat)
+        rack.position.set(rx, 0.6 + h / 2, rz); rack.castShadow = true
+        site.add(rack)
+        if (!building) {
+          // Glowing indicator columns on the finished racks.
+          for (const sx of [-1.2, 1.2]) {
+            const strip = new THREE.Mesh(new THREE.BoxGeometry(0.4, h * 0.86, 0.2), lit.clone())
+            strip.position.set(rx + sx, 0.6 + h / 2, rz + 3.05)
+            site.add(strip)
+            rackLights.push(strip.material as THREE.MeshStandardMaterial)
+          }
+        } else {
+          // Scaffold cage around the half-built rack.
+          for (const sx of [-2.2, 2.2]) for (const sz of [-3.2, 3.2]) {
+            const post = new THREE.Mesh(new THREE.BoxGeometry(0.2, 6, 0.2), frameMat)
+            post.position.set(rx + sx, 3.6, rz + sz); site.add(post)
+          }
+          for (const yy of [2.4, 5.2]) {
+            const bar = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.15, 0.15), frameMat)
+            bar.position.set(rx, 0.6 + yy, rz + 3.2); site.add(bar)
+          }
+        }
+      }
+    }
+
+    // Gantry crane spanning the build row, hook sliding back and forth.
+    for (const sx of [-22, 22]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.8, 13, 0.8), slabMat)
+      leg.position.set(sx, 7, 11); site.add(leg)
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(46, 0.8, 1), slabMat)
+    beam.position.set(0, 13, 11); site.add(beam)
+    const hook = new THREE.Group()
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 5, 6), frameMat)
+    cable.position.y = -2.5; hook.add(cable)
+    const load = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 3), rackMat)
+    load.position.y = -5.5; hook.add(load)
+    hook.position.set(0, 13, 11); site.add(hook)
+
+    // Builder robots welding at the construction row (torso + head + spark).
+    const builders: { g: THREE.Group; spark: THREE.MeshStandardMaterial; phase: number; baseY: number }[] = []
+    const botMat = new THREE.MeshStandardMaterial({ color: config.palette.robot, metalness: 0.7, roughness: 0.4 })
+    for (let i = 0; i < 6; i++) {
+      const g = new THREE.Group()
+      const rx = -18 + (i % 5) * 9 + 3
+      const baseY = 0.6
+      g.position.set(rx, baseY, 6.5)
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.5), botMat)
+      torso.position.y = 0.9; torso.castShadow = true; g.add(torso)
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), botMat)
+      head.position.y = 1.6; g.add(head)
+      const sparkMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xfff0b0, emissiveIntensity: 0 })
+      const spark = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), sparkMat)
+      spark.position.set(0, 1.0, 0.6); g.add(spark)
+      site.add(g)
+      builders.push({ g, spark: sparkMat, phase: Math.random() * 6, baseY })
+    }
+
+    let t = 0
+    return (dt: number) => {
+      t += dt
+      for (let i = 0; i < rackLights.length; i++) rackLights[i].emissiveIntensity = 1.6 + Math.sin(t * 4 + i * 0.7) * 1.0
+      hook.position.x = Math.sin(t * 0.4) * 16
+      load.position.y = -5.5 + Math.sin(t * 0.9) * 0.6
+      for (const b of builders) {
+        // Crouch/weld bob + a flickering torch spark.
+        b.g.position.y = b.baseY + Math.abs(Math.sin(t * 4 + b.phase)) * 0.12
+        b.spark.emissiveIntensity = Math.random() < 0.5 ? 2.6 + Math.random() * 2 : 0
+      }
+    }
   }
 
   /**

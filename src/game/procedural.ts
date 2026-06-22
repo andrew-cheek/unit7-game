@@ -1028,13 +1028,20 @@ export function createSpaceship(): VehicleModel {
 }
 
 /** Tall rocket (origin at the base, y=0). Used for Mars/Moon travel in Stage 6. */
-export function createRocket(): VehicleModel {
+export interface RocketOpts {
+  scale?: number // overall size multiplier (1 = base)
+  hull?: number // hull colour
+  accent?: number // fin / spire colour
+  flaps?: boolean // Starship-style forward + aft control flaps
+}
+
+export function createRocket(opts: RocketOpts = {}): VehicleModel {
   const group = new THREE.Group()
   const mats: THREE.Material[] = []
   const TAU = Math.PI * 2
-  const hull = new THREE.MeshStandardMaterial({ color: 0xc7cfdb, metalness: 0.82, roughness: 0.3 })
+  const hull = new THREE.MeshStandardMaterial({ color: opts.hull ?? 0xc7cfdb, metalness: 0.82, roughness: 0.3 })
   const dark = new THREE.MeshStandardMaterial({ color: 0x2a3340, metalness: 0.85, roughness: 0.42 })
-  const accent = new THREE.MeshStandardMaterial({ color: 0xb33b3b, metalness: 0.6, roughness: 0.4 })
+  const accent = new THREE.MeshStandardMaterial({ color: opts.accent ?? 0xb33b3b, metalness: 0.6, roughness: 0.4 })
   mats.push(hull, dark, accent)
   const cyan = config.palette.cyan
   const orange = config.palette.orange
@@ -1124,6 +1131,22 @@ export function createRocket(): VehicleModel {
     legG.add(foot)
   }
 
+  // Starship-style control flaps: two forward (near the nose) + two aft.
+  if (opts.flaps) {
+    for (const [fy, len] of [[7.0, 1.8], [2.4, 2.0]] as const) {
+      for (const s of [-1, 1]) {
+        const flap = box(0.18, len, 1.3, dark)
+        flap.position.set(s * 1.02, fy, -0.25)
+        flap.rotation.z = s * 0.1
+        group.add(flap)
+        const fe = box(0.22, len, 0.12, glowMat(mats, cyan, 2.0))
+        fe.position.set(s * 1.02, fy, -0.9)
+        group.add(fe)
+      }
+    }
+  }
+
+  if (opts.scale && opts.scale !== 1) group.scale.setScalar(opts.scale)
   shadowAll(group)
   let t = 0
   return {

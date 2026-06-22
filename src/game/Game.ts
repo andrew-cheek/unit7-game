@@ -4,7 +4,7 @@ import { World } from './World'
 import { Input } from './Input'
 import { Player } from './Player'
 import { Physics } from './Physics'
-import { Vehicles, isMech } from './Vehicles'
+import { Vehicles, isMech, type Vehicle } from './Vehicles'
 import { type VehicleModel } from './procedural'
 import { WARP_FORMS, createWarpForm, isWarpForm, hoverOffset, type WarpFormModel } from './WarpForms'
 import { Missiles } from './Missiles'
@@ -88,7 +88,7 @@ export class Game {
 
   // zone transition (fade out -> swap -> fade in) + rocket launch sequence
   private trans: { phase: 'none' | 'out' | 'in'; t: number; target: Zone } = { phase: 'none', t: 0, target: 'earth' }
-  private launch = { active: false, t: 0, target: 'earth' as Zone }
+  private launch = { active: false, phase: 'ascend' as 'ascend' | 'descend', t: 0, target: 'earth' as Zone, rocket: null as Vehicle | null, land: new THREE.Vector3() }
   private travelCooldown = 0
   private bannerTimer = 0
   // Lightweight objective chain (config.missions). One active at a time.
@@ -199,10 +199,14 @@ export class Game {
 
     this.engine = new Engine(container, tier)
     this.world = new World(this.engine.scene, this.zone)
-    // Debug: jump the day/night clock with ?time=<seconds into the 120s cycle>.
+    // Debug: jump the day/night clock with ?time=<seconds into the 120s cycle>,
+    // and start on another world with ?zone=moon|mars.
     if (typeof location !== 'undefined') {
-      const t = new URLSearchParams(location.search).get('time')
+      const q = new URLSearchParams(location.search)
+      const t = q.get('time')
       if (t != null && !Number.isNaN(Number(t))) { this.world.setDebugTime(Number(t)); this.timeFromQuery = true }
+      const z = q.get('zone')
+      if (z === 'moon' || z === 'mars' || z === 'earth') this.zone = z
     }
     this.input = new Input(this.engine.renderer.domElement)
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
@@ -268,7 +272,7 @@ export class Game {
     window.addEventListener('keydown', unlockAudio)
     window.addEventListener('touchstart', unlockAudio)
 
-    this.vehicles.onEnterRocket = () => this.startRocketLaunch()
+    this.vehicles.onEnterRocket = (rocket) => this.startRocketLaunch(rocket)
 
     // Load real CC0 assets if present; otherwise the procedural world stays.
     this.assets = new AssetLoader()
@@ -867,14 +871,16 @@ export class Game {
     if (zone !== 'earth') this.world.pushHeadline(`UNIT 7 PILOT TOUCHES DOWN ON ${zone.toUpperCase()}`)
   }
 
-  private startRocketLaunch() {
+  private startRocketLaunch(rocket: Vehicle) {
     if (this.launch.active || this.trans.phase !== 'none') return
-    const order: Zone[] = ['earth', 'mars', 'moon']
+    // Earth -> Moon -> Mars -> Earth, matching the journey out and back.
+    const order: Zone[] = ['earth', 'moon', 'mars']
     const next = order[(order.indexOf(this.zone) + 1) % order.length]
-    this.launch = { active: true, t: 0, target: next }
+    this.launch = { active: true, phase: 'ascend', t: 0, target: next, rocket, land: new THREE.Vector3() }
     this.player.enterVehicle() // hide player; "boards" the rocket
-    this.hud.banner = 'LAUNCH SEQUENCE'
+    this.hud.banner = `LAUNCH · ${next.toUpperCase()}`
     this.bannerTimer = 3
+    this.audio.play('portal')
   }
 
   start() {
@@ -936,7 +942,8 @@ export class Game {
       return
     }
     if (v.kind === 'rocket') {
-      this.vehicles.onEnterRocket?.()
+      this.warpRevert()
+      this.vehicles.onEnterRocket?.(v)
     } else {
       this.warpRevert() // step out of the warp form to pilot
       this.player.enterVehicle()
@@ -1239,26 +1246,67 @@ export class Game {
 
   private updateLaunch(dt: number) {
     this.launch.t += dt
-    const rocket = this.vehicles.list.find((v) => v.kind === 'rocket')
-    if (rocket) {
-      rocket.position.y += (4 + this.launch.t * this.launch.t * 9) * dt
-      rocket.model.group.position.copy(rocket.position)
-      rocket.model.update(dt, 1)
-      const cam = this.engine.camera
-      cam.position.set(rocket.position.x + 16, rocket.position.y + 5, rocket.position.z + 16)
-      cam.lookAt(rocket.position.x, rocket.position.y + 2, rocket.position.z)
-      this.focus.copy(rocket.position)
-    }
-    this.hud.fade = Math.max(0, (this.launch.t - 1.5) / 0.6)
-    this.world.update(dt, this.focus)
-    if (this.launch.t > 2.1) {
+    const rocket = this.launch.rocket
+    const cam = this.engine.camera
+    const smooth = (x: number) => { const t = x < 0 ? 0 : x > 1 ? 1 : x; return t * t * (3 - 2 * t) }
+
+    if (this.launch.phase === 'ascend') {
       if (rocket) {
-        rocket.position.y = this.physics.sampleGround(rocket.position.x, rocket.position.z, 80)?.y ?? 0
+        rocket.position.y += (4 + this.launch.t * this.launch.t * 9) * dt
         rocket.model.group.position.copy(rocket.position)
+        rocket.model.update(dt, 1)
+        cam.position.set(rocket.position.x + 16, rocket.position.y + 5, rocket.position.z + 16)
+        cam.lookAt(rocket.position.x, rocket.position.y + 2, rocket.position.z)
+        this.focus.copy(rocket.position)
       }
-      this.launch.active = false
-      this.doTravel(this.launch.target)
-      this.trans = { phase: 'in', t: 0, target: this.launch.target }
+      this.hud.fade = Math.max(0, (this.launch.t - 1.5) / 0.6)
+      this.world.update(dt, this.focus)
+      if (this.launch.t > 2.1) {
+        // Arrive: swap worlds, then re-board so the rocket self-lands on the pad.
+        this.doTravel(this.launch.target)
+        this.player.enterVehicle()
+        this.launch.phase = 'descend'
+        this.launch.t = 0
+        const sp = this.safeSpawn()
+        this.launch.land.set(sp.x + 8, this.physics.sampleGround(sp.x + 8, sp.z + 6, 200)?.y ?? sp.y, sp.z + 6)
+        if (rocket) {
+          rocket.position.set(this.launch.land.x, this.launch.land.y + 95, this.launch.land.z)
+          rocket.model.group.position.copy(rocket.position)
+          rocket.yaw = 0
+          rocket.model.group.rotation.set(0, 0, 0)
+        }
+        this.hud.fade = 1
+      }
+    } else {
+      // Descend: retro-burn down onto the pad (SpaceX-style final landing burn).
+      const k = smooth(Math.min(1, this.launch.t / 3))
+      if (rocket) {
+        const ease = 1 - (1 - k) * (1 - k) // decelerate into the pad
+        rocket.position.y = THREE.MathUtils.lerp(this.launch.land.y + 95, this.launch.land.y, ease)
+        rocket.model.group.position.copy(rocket.position)
+        rocket.model.update(dt, 1 - k) // throttle eases off as it settles
+        cam.position.set(rocket.position.x + 18, this.launch.land.y + 10 + (rocket.position.y - this.launch.land.y) * 0.3, rocket.position.z + 18)
+        cam.lookAt(rocket.position.x, rocket.position.y + 4, rocket.position.z)
+        this.focus.copy(rocket.position)
+      }
+      this.hud.fade = Math.max(0, 1 - this.launch.t / 0.6) // fade in on the new world
+      this.world.update(dt, this.focus)
+      if (this.launch.t > 3.2) {
+        if (rocket) {
+          rocket.position.y = this.launch.land.y
+          rocket.model.group.position.copy(rocket.position)
+          rocket.home.copy(rocket.position) // park where it landed
+        }
+        const sp = this.safeSpawn()
+        this.player.exitVehicle(sp)
+        this.player.setVisible(true)
+        this.camera.snap(this.player.position)
+        this.launch.active = false
+        this.launch.rocket = null
+        this.hud.banner = `ARRIVED · ${this.launch.target.toUpperCase()}`
+        this.bannerTimer = 2.4
+        this.audio.play('land')
+      }
     }
   }
 
