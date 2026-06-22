@@ -64,6 +64,7 @@ export class Vehicles {
   // scratch
   private fwd = new THREE.Vector3()
   private right = new THREE.Vector3()
+  private realUp = new THREE.Vector3()
   private mat = new THREE.Matrix4()
   private q = new THREE.Quaternion()
   private rollQ = new THREE.Quaternion()
@@ -444,8 +445,8 @@ export class Vehicles {
     this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
     this.fwd.addScaledVector(up, -this.fwd.dot(up)).normalize()
     this.right.crossVectors(up, this.fwd).normalize()
-    const realUp = new THREE.Vector3().crossVectors(this.fwd, this.right).normalize()
-    this.mat.makeBasis(this.right, realUp, this.fwd)
+    this.realUp.crossVectors(this.fwd, this.right).normalize()
+    this.mat.makeBasis(this.right, this.realUp, this.fwd)
     this.q.setFromRotationMatrix(this.mat)
     this.rollQ.setFromAxisAngle(this.fwd, bank)
     this.q.premultiply(this.rollQ)

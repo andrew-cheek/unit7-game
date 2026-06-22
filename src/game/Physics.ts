@@ -19,6 +19,11 @@ export class Physics {
   private ray = new THREE.Raycaster()
   private readonly down = new THREE.Vector3(0, -1, 0)
   private normalMat = new THREE.Matrix3()
+  // Scratch reused by sampleGround() so it allocates nothing per call (it runs
+  // for every NPC/vehicle/player every frame). The returned normal points at
+  // hitNormal; copy it if you need it past the next sampleGround() call.
+  private readonly rayOrigin = new THREE.Vector3()
+  private readonly hitNormal = new THREE.Vector3()
   private groundMeshes: THREE.Mesh[]
   colliders: THREE.Box3[]
 
@@ -35,18 +40,20 @@ export class Physics {
 
   /** Highest ground surface directly below (x, z), searched from `fromY` down. */
   sampleGround(x: number, z: number, fromY: number): GroundHit | null {
-    this.ray.set(new THREE.Vector3(x, fromY, z), this.down)
+    this.rayOrigin.set(x, fromY, z)
+    this.ray.set(this.rayOrigin, this.down)
     this.ray.far = fromY + 200
     const hits = this.ray.intersectObjects(this.groundMeshes, false)
     if (hits.length === 0) return null
     const hit = hits[0] // nearest from above = topmost surface
-    let normal = new THREE.Vector3(0, 1, 0)
     if (hit.face) {
       this.normalMat.getNormalMatrix(hit.object.matrixWorld)
-      normal = hit.face.normal.clone().applyMatrix3(this.normalMat).normalize()
-      if (normal.y < 0) normal.negate()
+      this.hitNormal.copy(hit.face.normal).applyMatrix3(this.normalMat).normalize()
+      if (this.hitNormal.y < 0) this.hitNormal.negate()
+    } else {
+      this.hitNormal.set(0, 1, 0)
     }
-    return { y: hit.point.y, normal }
+    return { y: hit.point.y, normal: this.hitNormal }
   }
 
   /**

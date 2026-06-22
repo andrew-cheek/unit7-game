@@ -29,6 +29,7 @@ interface Agent {
   driftX: number
   driftZ: number
   bubble: THREE.Mesh | null
+  rayPhase: number // 0/1: which frame parity this agent samples the ground on
 }
 
 const NPC_RADIUS = 0.4
@@ -50,6 +51,10 @@ export class NPCManager {
   // scratch
   private sep = new THREE.Vector3()
   private desired = new THREE.Vector3()
+  // Spatial hash for boids separation: O(n) rebuild + 3x3-cell neighbor scan per
+  // agent instead of the old O(n^2) all-pairs loop. Cell size = separation radius.
+  private frame = 0
+  private grid = new Map<string, Agent[]>()
   // Shared bubble visuals (one geometry/material reused by every bubbled agent).
   private bubbleGeo = new THREE.SphereGeometry(1.15, 16, 12)
   private bubbleMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
@@ -127,6 +132,7 @@ export class NPCManager {
       driftX: 0,
       driftZ: 0,
       bubble: null,
+      rayPhase: i % 2,
       cap: {
         position: pos,
         alive: true,
@@ -218,6 +224,19 @@ export class NPCManager {
     const speed = config.npc.walkSpeed
     const sepR = config.npc.separationRadius
     const fleeR = config.city.fleeRadius
+
+    // Rebuild the spatial hash once per frame from the live agents (cell = sepR),
+    // so separation below is a local 3x3-cell scan instead of an all-pairs loop.
+    this.frame++
+    this.grid.clear()
+    for (const a of this.agents) {
+      if (!a.alive) continue
+      const key = Math.floor(a.pos.x / sepR) + '|' + Math.floor(a.pos.z / sepR)
+      const cell = this.grid.get(key)
+      if (cell) cell.push(a)
+      else this.grid.set(key, [a])
+    }
+
     for (const a of this.agents) {
       if (!a.alive) {
         a.respawn -= dt
@@ -227,6 +246,24 @@ export class NPCManager {
       // Bubbled agents float/fall under their own handling, skipping normal AI.
       if (a.floatT > 0 || a.falling) {
         this.updateBubbled(a, dt)
+        continue
+      }
+
+      // Distance-culled cheap path: far NPCs (off-screen) skip the boids
+      // separation, the per-frame ground raycast and animation. They keep
+      // drifting toward their target on their last ground height; full detail
+      // resumes the moment they come back inside the cull radius.
+      if (playerPos && (a.pos.x - playerPos.x) ** 2 + (a.pos.z - playerPos.z) ** 2 > NPC_CULL2) {
+        const tx = a.target.x - a.pos.x
+        const tz = a.target.z - a.pos.z
+        const td = Math.hypot(tx, tz)
+        if (td < 3) a.target = this.randomPoint()
+        else {
+          a.pos.x += (tx / td) * speed * dt
+          a.pos.z += (tz / td) * speed * dt
+        }
+        a.model.group.position.copy(a.pos)
+        a.model.group.visible = false
         continue
       }
 
@@ -251,17 +288,25 @@ export class NPCManager {
         this.desired.set(td > 0.01 ? (tx / td) * speed : 0, 0, td > 0.01 ? (tz / td) * speed : 0)
       }
 
-      // Boids separation from neighbors.
+      // Boids separation from neighbors (3x3-cell spatial-hash scan, not O(n^2)).
       this.sep.set(0, 0, 0)
-      for (const o of this.agents) {
-        if (o === a || !o.alive) continue
-        const dx = a.pos.x - o.pos.x
-        const dz = a.pos.z - o.pos.z
-        const dd = Math.hypot(dx, dz)
-        if (dd > 0.001 && dd < sepR) {
-          const w = (sepR - dd) / sepR
-          this.sep.x += (dx / dd) * w
-          this.sep.z += (dz / dd) * w
+      const cx = Math.floor(a.pos.x / sepR)
+      const cz = Math.floor(a.pos.z / sepR)
+      for (let gz = cz - 1; gz <= cz + 1; gz++) {
+        for (let gx = cx - 1; gx <= cx + 1; gx++) {
+          const cell = this.grid.get(gx + '|' + gz)
+          if (!cell) continue
+          for (const o of cell) {
+            if (o === a) continue
+            const dx = a.pos.x - o.pos.x
+            const dz = a.pos.z - o.pos.z
+            const dd = Math.hypot(dx, dz)
+            if (dd > 0.001 && dd < sepR) {
+              const w = (sepR - dd) / sepR
+              this.sep.x += (dx / dd) * w
+              this.sep.z += (dz / dd) * w
+            }
+          }
         }
       }
       this.desired.x += this.sep.x * config.npc.separationForce
@@ -273,8 +318,13 @@ export class NPCManager {
       a.pos.x += a.vel.x * dt
       a.pos.z += a.vel.z * dt
       this.physics.resolveHorizontal(a.pos, a.vel, NPC_RADIUS, NPC_HEIGHT)
-      const g = this.physics.sampleGround(a.pos.x, a.pos.z, a.pos.y + 2)
-      if (g) a.pos.y = g.y
+      // Ground follow staggered on this agent's frame parity: halves the raycast
+      // load for the near crowd. y barely changes frame-to-frame on flat city
+      // ground, so keeping the last height on the off frames is imperceptible.
+      if ((this.frame + a.rayPhase) % 2 === 0) {
+        const g = this.physics.sampleGround(a.pos.x, a.pos.z, a.pos.y + 2)
+        if (g) a.pos.y = g.y
+      }
 
       const sp = Math.hypot(a.vel.x, a.vel.z)
       if (sp > 0.1) {
@@ -282,10 +332,10 @@ export class NPCManager {
         a.model.group.rotation.y = a.yaw
       }
       a.model.group.position.copy(a.pos)
-      // Distance culling: skip rendering + animating far NPCs (mobile perf).
-      const far = playerPos ? (a.pos.x - playerPos.x) ** 2 + (a.pos.z - playerPos.z) ** 2 > NPC_CULL2 : false
-      a.model.group.visible = !far
-      if (!far) a.model.update(dt, sp / speed, true)
+      // Agents reaching here are within the cull radius (far ones took the cheap
+      // path above), so they are always visible + animated.
+      a.model.group.visible = true
+      a.model.update(dt, sp / speed, true)
     }
   }
 
