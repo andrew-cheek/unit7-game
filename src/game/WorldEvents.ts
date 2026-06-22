@@ -46,7 +46,7 @@ export class WorldEvents {
   }
 
   private nextInterval(): number {
-    const base = 13 / Math.max(0.3, this.fx) // high ~13s, medium ~20s, low ~32s
+    const base = 18 / Math.max(0.3, this.fx) // high ~18s, medium ~26s, low ~45s
     return base + Math.random() * base * 0.6
   }
 
@@ -65,7 +65,7 @@ export class WorldEvents {
   update(dt: number, focus: THREE.Vector3) {
     this.focus.copy(focus)
     this.timer -= dt
-    const cap = Math.ceil(2 * this.fx) + 1
+    const cap = Math.ceil(2 * this.fx) // fewer concurrent events (was +1): high 2, med 2, low 1
     if (this.timer <= 0 && this.active.length < cap) {
       this.spawn()
       this.timer = this.nextInterval()

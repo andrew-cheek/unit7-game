@@ -18,7 +18,7 @@ export const config = {
     // radius and lower strength so the whole city doesn't haze up. Runs at
     // half res (see Engine). The dark-city look comes from cutting emissive
     // coverage (procedural/World), not from cranking bloom.
-    bloom: { strength: 0.42, radius: 0.4, threshold: 0.96 },
+    bloom: { strength: 0.34, radius: 0.4, threshold: 0.96 }, // strength trimmed (was 0.42) so near-field neon stops blowing out to white
     shadowMapSize: 2048,
     // Frame dt is clamped to this so a backgrounded tab can't fling entities.
     maxFrameDelta: 0.05,

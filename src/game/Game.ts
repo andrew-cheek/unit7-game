@@ -262,7 +262,7 @@ export class Game {
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
     this.worldEvents.onEvent = (label) => {
-      if (this.bannerTimer <= 0) { this.hud.banner = label; this.bannerTimer = 1.8 }
+      if (this.bannerTimer <= 0) { this.hud.banner = label; this.bannerTimer = 2.5 } // longer silence between event banners
     }
     this.exploration = new ExplorationPoints(this.engine.scene, (credits, label) => {
       this.addCredits(credits)
@@ -296,6 +296,9 @@ export class Game {
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
+    // Vehicle groups are dynamic collision blockers so the camera doesn't clip
+    // through big parked titans/mechs (the static solids list doesn't include them).
+    this.camera.setBlockers(this.vehicles.list.map((v) => v.model.group))
     this.camera.snap(this.player.position)
     this.input.onZoom = (f) => this.camera.adjustZoom(f)
 

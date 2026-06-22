@@ -36,6 +36,10 @@ export interface FollowState {
 export class CameraController {
   private cam: THREE.PerspectiveCamera
   private solids: THREE.Object3D[]
+  // Dynamic collision blockers (vehicle groups) the static `solids` list misses,
+  // so the camera stops punching through big parked titans/mechs. Tested with a
+  // single distance-culled recursive ray (cheap) on the center probe.
+  private blockers: THREE.Object3D[] = []
   private raycaster = new THREE.Raycaster()
 
   private currentTarget = new THREE.Vector3()
@@ -74,6 +78,12 @@ export class CameraController {
 
   setSolids(solids: THREE.Object3D[]) {
     this.solids = solids
+  }
+
+  /** Dynamic collision objects (e.g. vehicle groups) tested in addition to the
+   *  static solids, so the camera doesn't clip through large mechs/titans. */
+  setBlockers(blockers: THREE.Object3D[]) {
+    this.blockers = blockers
   }
 
   /** Snap directly behind a focus point (used after teleports / zone changes). */
@@ -150,6 +160,30 @@ export class CameraController {
         if (d < nearest) nearest = d
       }
     }
+    // Dynamic blockers (vehicles) the static solids miss: one recursive ray from
+    // the target, culled to nearby groups so it stays cheap. Stops the camera
+    // clipping through big parked titans/mechs.
+    if (this.blockers.length) {
+      const reach = want + pad
+      this.raycaster.set(this.currentTarget, this.offsetDir)
+      this.raycaster.far = reach
+      const maxD2 = (reach + 14) * (reach + 14)
+      const near = this.blockers.filter((b) => {
+        if (!b.visible) return false
+        const d2 = b.position.distanceToSquared(this.currentTarget)
+        // d2 > 9 excludes the vehicle you're piloting (it sits at the target) so
+        // the camera doesn't jam against your own mech; only OTHER nearby ones block.
+        return d2 > 9 && d2 < maxD2
+      })
+      if (near.length) {
+        const hits = this.raycaster.intersectObjects(near, true)
+        if (hits.length > 0) {
+          const d = hits[0].distance - pad
+          if (d < nearest) nearest = d
+        }
+      }
+    }
+
     // A wall can pull the camera closer than minDistance; only a small hard floor
     // keeps it off the subject. Clamping back up to minDistance here is what used
     // to shove the camera through the wall and black out the screen.
