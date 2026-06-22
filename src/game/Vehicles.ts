@@ -1,13 +1,13 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createHovercar, createSpaceship, createRocket, createSpeederBike, createMechSuit, type VehicleModel } from './procedural'
+import { createHovercar, createSpaceship, createRocket, createSpeederBike, createMechSuit, createBus, type VehicleModel } from './procedural'
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
 import type { Zone } from './types'
 
-export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL' | 'titan'
-type DriveMode = 'hover' | 'fly' | 'rocket'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL' | 'titan' | 'tram'
+type DriveMode = 'hover' | 'fly' | 'rocket' | 'rail'
 
 export interface Vehicle {
   kind: VehicleKind
@@ -26,6 +26,9 @@ export interface Vehicle {
   home: THREE.Vector3 // Earth parking spot (restored on return)
   wander: boolean // titans that roam the outskirts when not piloted
   wanderTurn: number // current idle turn timer
+  path?: THREE.Vector3[] // waypoint loop for rail vehicles (the tram)
+  pathIdx: number
+  railStop: number // dwell timer at the current stop
 }
 
 // Where the mechs line up relative to spawn when taken to another world.
@@ -91,6 +94,16 @@ export class Vehicles {
       const model = kind === 'speeder' ? createSpeederBike() : createHovercar()
       this.spawn(kind, model, new THREE.Vector3(x, 0, z), kind === 'speeder' ? sh : hh, kind === 'speeder' ? 1.1 : 1.7, 'hover')
     }
+    // A rideable transit tram that auto-loops the avenues and pauses at stops.
+    // Board it (G) to ride hands-free around the city; hop off (G) anywhere.
+    const loop = [
+      new THREE.Vector3(72, 0, 36), new THREE.Vector3(72, 0, -36), new THREE.Vector3(36, 0, -72),
+      new THREE.Vector3(-36, 0, -72), new THREE.Vector3(-72, 0, -36), new THREE.Vector3(-72, 0, 36),
+      new THREE.Vector3(-36, 0, 72), new THREE.Vector3(36, 0, 72),
+    ]
+    const tram = this.spawn('tram', createBus(), loop[0].clone(), 1.4, 3.0, 'rail')
+    tram.path = loop
+    tram.home.copy(loop[0])
     // Drivable cars sitting up on the elevated highway (deck at z=-36, y~9).
     // sampleGround in spawn() lands them on the deck surface.
     this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
@@ -130,6 +143,7 @@ export class Vehicles {
       : kind === 'mechL' ? 'MECH-L'
       : kind === 'mechXL' ? 'MECH-XL'
       : kind === 'titan' ? 'TITAN'
+      : kind === 'tram' ? 'TRAM'
       : 'ROCKET'
     const v: Vehicle = {
       kind,
@@ -148,6 +162,8 @@ export class Vehicles {
       home: position.clone(),
       wander: false,
       wanderTurn: Math.random() * 4,
+      pathIdx: 0,
+      railStop: 0,
     }
     this.list.push(v)
     return v
@@ -266,7 +282,9 @@ export class Vehicles {
       }
       v.model.setMorph?.(v.morph)
       v.model.update(dt, v === this.current ? this.speed01 : 0)
-      if (v === this.current) {
+      if (v.drive === 'rail') {
+        this.driveRail(v, dt) // the tram loops its route whether or not you're aboard
+      } else if (v === this.current) {
         if (v.drive === 'hover') this.driveHover(v, dt, input)
         else if (v.drive === 'fly') this.driveFly(v, dt, input)
       } else {
@@ -274,6 +292,32 @@ export class Vehicles {
       }
       v.model.group.position.copy(v.position)
     }
+  }
+
+  /** Auto-pilot the tram around its waypoint loop, pausing briefly at each stop
+   *  so you can board. Carries the player when it's the current vehicle. */
+  private driveRail(v: Vehicle, dt: number) {
+    if (!v.path || v.path.length === 0) return
+    const target = v.path[v.pathIdx % v.path.length]
+    const dx = target.x - v.position.x, dz = target.z - v.position.z
+    const d = Math.hypot(dx, dz)
+    if (v.railStop > 0) {
+      v.railStop -= dt
+    } else if (d < 2) {
+      v.pathIdx = (v.pathIdx + 1) % v.path.length
+      v.railStop = 2.4 // dwell at the stop
+    } else {
+      const speed = 17
+      const step = Math.min(d, speed * dt)
+      v.position.x += (dx / d) * step
+      v.position.z += (dz / d) * step
+      v.yaw = Math.atan2(dx, dz)
+    }
+    const gy = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 6)?.y ?? 0
+    v.bob += dt
+    v.position.y = gy + v.hoverHeight + Math.sin(v.bob * 1.6) * 0.08
+    v.model.group.rotation.set(0, v.yaw, 0)
+    this.speed01 = v === this.current ? (v.railStop > 0 ? 0 : 0.6) : 0
   }
 
   private idle(v: Vehicle, dt: number) {

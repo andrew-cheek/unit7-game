@@ -2090,6 +2090,8 @@ export class Game {
         ? `${cur.name} - Space/J fly, H fire, T transform, G exit`
         : cur.kind === 'titan'
         ? `${cur.name} - WASD walk, Space/J rise, G exit`
+        : cur.kind === 'tram'
+        ? 'RIDING TRAM - G to hop off'
         : `Press G - Exit ${this.vehicles.currentName}`
     } else if (this.player.mode === 'robot') {
       const near = this.vehicles.nearest(this.player.position)
@@ -2101,6 +2103,8 @@ export class Game {
           const order: Zone[] = ['earth', 'moon', 'mars']
           const next = order[(order.indexOf(this.zone) + 1) % order.length]
           prompt = `Press G - RIDE TO ${next.toUpperCase()}`
+        } else if (near.kind === 'tram') {
+          prompt = 'Press G - RIDE TRAM'
         } else {
           prompt = `Press G - ${near.name}`
         }
