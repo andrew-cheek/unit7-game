@@ -337,7 +337,170 @@ export class Zones {
     this.addBoundary(env.colliders)
     this.scatterRocks(group, env, displace, 0x612e16, 26)
     this.buildMarsLife(group, displace)
+    const colony = this.buildMarsColony(group, env, displace, 64, -56)
+    const baseUpdate = env.update
+    env.update = (dt) => { baseUpdate(dt); colony(dt) }
     return env
+  }
+
+  /**
+   * Mars colony: a Starship launch/catch tower ("Mechazilla") whose chopstick
+   * arms catch a descending booster and relaunch it on a loop, a lit landing
+   * pad, habitat domes, and rovers trundling a patrol - so Mars reads as a
+   * working frontier, not just ruins. The catch cycle is parametric (no physics,
+   * deterministic) and cheap; counts scale down on mobile. Returns an animate fn.
+   */
+  private buildMarsColony(group: THREE.Group, env: PlanetEnv, displace: (x: number, z: number) => number, cx: number, cz: number): (dt: number) => void {
+    const low = config.tier.name === 'low'
+    const by = displace(cx, cz)
+    const site = new THREE.Group()
+    site.position.set(cx, by, cz)
+    group.add(site)
+
+    const steel = new THREE.MeshStandardMaterial({ color: 0x2b2f38, metalness: 0.7, roughness: 0.45 })
+    const dark = new THREE.MeshStandardMaterial({ color: 0x14171e, metalness: 0.6, roughness: 0.5 })
+    const lit = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 2.2, roughness: 0.4 })
+    const hull = new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.6, roughness: 0.32 })
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xffce8a, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+
+    // --- the tower (Mechazilla) ---
+    const TOWER_H = 56
+    const mast = new THREE.Mesh(new THREE.BoxGeometry(4.5, TOWER_H, 4.5), steel)
+    mast.position.y = TOWER_H / 2; mast.castShadow = true
+    site.add(mast)
+    for (let i = 1; i < 8; i++) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(5, 0.35, 5), lit)
+      band.position.y = i * (TOWER_H / 8)
+      site.add(band)
+    }
+    env.colliders.push(new THREE.Box3(new THREE.Vector3(cx - 3, by - 1, cz - 3), new THREE.Vector3(cx + 3, by + TOWER_H, cz + 3)))
+
+    // Chopstick arm carriage at catch height. Each arm hinges at the tower side
+    // and swings open/closed in the horizontal plane to cradle the booster.
+    const CATCH_Y = 34
+    const carriage = new THREE.Group()
+    carriage.position.y = CATCH_Y
+    site.add(carriage)
+    const arms: THREE.Group[] = []
+    for (const sideSign of [-1, 1]) {
+      const arm = new THREE.Group()
+      arm.position.set(sideSign * 2.4, 0, 0)
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.9, 15), steel)
+      beam.position.set(sideSign * 0.5, 0, 8.5)
+      arm.add(beam)
+      const cradle = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.6, 3.2), lit)
+      cradle.position.set(sideSign * 0.5, 0, 15)
+      arm.add(cradle)
+      carriage.add(arm)
+      arms.push(arm)
+    }
+
+    // --- the booster being caught (Super Heavy + a stub ship nose) ---
+    const booster = new THREE.Group()
+    booster.position.set(0, 13, 14)
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 22, 20), hull)
+    body.position.y = 11; body.castShadow = true
+    booster.add(body)
+    const lugs = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.9, 0.9), dark)
+    lugs.position.y = 20.5
+    booster.add(lugs)
+    // grid fins
+    for (const s of [-1, 1]) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.2, 2.2), dark)
+      fin.position.set(s * 2.5, 19, 0)
+      booster.add(fin)
+    }
+    // stub ship nose on top
+    const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 2.4, 7, 20), hull)
+    nose.position.y = 25.5
+    booster.add(nose)
+    // landing-burn flame at the base, pointing down
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(1.8, 7, 14, 1, true), flameMat)
+    flame.rotation.x = Math.PI
+    flame.position.y = -3.5
+    booster.add(flame)
+    site.add(booster)
+
+    // --- pad, domes, perimeter ---
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(10, 10.6, 0.4, 32), new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 1.3, roughness: 0.5 }))
+    pad.position.set(0, 0.2, 14); pad.receiveShadow = true
+    site.add(pad)
+    const shell = new THREE.MeshStandardMaterial({ color: 0xc4b0a0, metalness: 0.4, roughness: 0.6 })
+    const glow = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x49f2c0, emissiveIntensity: 2, roughness: 0.4 })
+    const domeGeo = new THREE.SphereGeometry(1, 14, 9, 0, Math.PI * 2, 0, Math.PI / 2)
+    for (const [dx, dz, r] of [[-16, 6, 4.5], [-22, -4, 3.4], [16, -14, 3.8]] as Array<[number, number, number]>) {
+      const dome = new THREE.Mesh(domeGeo, shell)
+      dome.scale.set(r, r * 0.8, r); dome.position.set(dx, 0, dz); dome.castShadow = true
+      site.add(dome)
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 0.7, 0.16, 8, 22), glow)
+      ring.rotation.x = Math.PI / 2; ring.position.set(dx, r * 0.34, dz)
+      site.add(ring)
+      env.colliders.push(new THREE.Box3(new THREE.Vector3(cx + dx - r, by - 1, cz + dz - r), new THREE.Vector3(cx + dx + r, by + r, cz + dz + r)))
+    }
+    const perimMats: THREE.MeshStandardMaterial[] = []
+    if (!low) {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2
+        const m = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 2 })
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2, 0.4), m)
+        post.position.set(Math.cos(a) * 26, 1, Math.sin(a) * 26)
+        site.add(post); perimMats.push(m)
+      }
+    }
+
+    // --- rovers patrolling the colony (ground-vehicle activity) ---
+    const rovers: { g: THREE.Group; ang: number; spd: number; r: number }[] = []
+    const rn = low ? 1 : 3
+    for (let i = 0; i < rn; i++) {
+      const rv = new THREE.Group()
+      const rbody = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 2), dark)
+      rbody.position.y = 0.9; rv.add(rbody)
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.8, 1.5), lit)
+      cab.position.set(-0.4, 1.6, 0); rv.add(cab)
+      for (const wx of [-1, 1]) for (const wz of [-1, 1]) {
+        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.4, 9), steel)
+        w.rotation.x = Math.PI / 2; w.position.set(wx * 1.1, 0.5, wz * 0.9); rv.add(w)
+      }
+      group.add(rv)
+      rovers.push({ g: rv, ang: (i / rn) * Math.PI * 2, spd: 0.1 + i * 0.03, r: 30 + i * 9 })
+    }
+
+    let t = Math.random() * 4
+    const T = 18 // full catch + relaunch cycle, seconds
+    return (dt: number) => {
+      t += dt
+      const ph = t % T
+      let yy = 13, close = 1, flameK = 0
+      if (ph < 8) {
+        // booster descends from high, arms open until the last moment, then snap shut
+        const k = ph / 8
+        yy = 84 + (13 - 84) * k
+        close = k > 0.84 ? (k - 0.84) / 0.16 : 0
+        flameK = k > 0.5 ? 1 : 0.25
+      } else if (ph < 12) {
+        yy = 13; close = 1; flameK = 0 // caught, held
+      } else if (ph < 13) {
+        yy = 13; close = 1 - (ph - 12); flameK = 0 // arms release
+      } else {
+        const k = (ph - 13) / (T - 13)
+        yy = 13 + (84 - 13) * k; close = 0; flameK = 1 // relaunch
+      }
+      booster.position.y = yy
+      const open = 1 - close
+      arms[0].rotation.y = 0.42 * open
+      arms[1].rotation.y = -0.42 * open
+      flame.visible = flameK > 0.05
+      flame.scale.set(1, flameK * (0.85 + Math.random() * 0.4) + 0.15, 1)
+      ;(flameMat as THREE.MeshBasicMaterial).opacity = 0.6 + Math.random() * 0.35
+      for (let i = 0; i < perimMats.length; i++) perimMats[i].emissiveIntensity = 1.2 + Math.sin(t * 3 + i) * 1.1
+      for (const rv of rovers) {
+        rv.ang += rv.spd * dt
+        const rx = cx + Math.cos(rv.ang) * rv.r
+        const rz = cz + Math.sin(rv.ang) * rv.r
+        rv.g.position.set(rx, displace(rx, rz), rz)
+        rv.g.rotation.y = -rv.ang + Math.PI / 2
+      }
+    }
   }
 
   /**
