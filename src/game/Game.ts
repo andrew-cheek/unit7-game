@@ -313,8 +313,9 @@ export class Game {
     this.arcadeMats.push(...lm.mats)
     this.arcadeGeos.push(...lm.geos)
     this.arcadeTex.push(...lm.texs)
-    // Arcade proximity + transport beam (beam resources go into the arcade dispose arrays).
-    this.arcade = new ArcadeSystem(this.engine.scene, this.arcadeGeos, this.arcadeMats)
+    // Arcade proximity + transport beam (beam is a pooled mesh ArcadeSystem owns
+    // and frees in its own dispose(); the arcade arrays hold only landmark resources).
+    this.arcade = new ArcadeSystem(this.engine.scene)
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -2127,6 +2128,7 @@ export class Game {
     const m = this.netLine.material as THREE.Material
     this.netLine.geometry.dispose()
     m.dispose()
+    this.arcade.dispose()
     this.arcadeGeos.forEach((g) => g.dispose())
     this.arcadeMats.forEach((mm) => mm.dispose())
     this.arcadeTex.forEach((t) => t.dispose())

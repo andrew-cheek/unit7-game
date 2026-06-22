@@ -8,8 +8,9 @@ import type { MinigameKind } from './types'
  * This owns only the mechanism: detect when the player stands on a cabinet pad,
  * play the short beam beat, and then fire `onEnter`. The actual minigame entry
  * (pausing the engine, hiding the player, rewards, HUD) is intrinsic Game
- * orchestration and stays in Game, invoked via the callback. Beam geometry +
- * material are pushed into Game's dispose arrays so teardown is unchanged.
+ * orchestration and stays in Game, invoked via the callback. The transport beam
+ * is a single pooled mesh (geo+mat owned here, freed in dispose()), reused on
+ * every trigger like Missiles' ring pool — not re-allocated per entry.
  */
 export interface ArcadeCabinetRef {
   kind: MinigameKind
@@ -32,14 +33,19 @@ const BEAT = 0.7
 
 export class ArcadeSystem {
   private scene: THREE.Scene
-  private sinkGeos: THREE.BufferGeometry[]
-  private sinkMats: THREE.Material[]
-  private pending: { kind: MinigameKind; pos: THREE.Vector3; t: number; beam: THREE.Mesh } | null = null
+  // One reusable transport beam. geo+mat owned here and disposed in dispose();
+  // reused per trigger (toggle visibility/opacity) instead of allocating each time.
+  private beamGeo = new THREE.CylinderGeometry(1.5, 1.5, 16, 20, 1, true)
+  private beamMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+  private beam: THREE.Mesh
+  private pending: { kind: MinigameKind; pos: THREE.Vector3; t: number } | null = null
 
-  constructor(scene: THREE.Scene, sinkGeos: THREE.BufferGeometry[], sinkMats: THREE.Material[]) {
+  constructor(scene: THREE.Scene) {
     this.scene = scene
-    this.sinkGeos = sinkGeos
-    this.sinkMats = sinkMats
+    this.beam = new THREE.Mesh(this.beamGeo, this.beamMat)
+    this.beam.renderOrder = 5
+    this.beam.visible = false
+    this.scene.add(this.beam)
   }
 
   /** A transport is mid-beat (blocks re-triggering / other gameplay checks). */
@@ -65,30 +71,33 @@ export class ArcadeSystem {
   }
 
   private start(pos: THREE.Vector3, kind: MinigameKind, ctx: ArcadeContext) {
-    const geo = new THREE.CylinderGeometry(1.5, 1.5, 16, 20, 1, true)
-    this.sinkGeos.push(geo)
-    const mat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    this.sinkMats.push(mat)
-    const beam = new THREE.Mesh(geo, mat)
-    beam.position.set(pos.x, pos.y + 8, pos.z)
-    beam.renderOrder = 5
-    this.scene.add(beam)
+    this.beam.position.set(pos.x, pos.y + 8, pos.z)
+    this.beam.scale.set(1, 1, 1)
+    this.beam.rotation.y = 0
+    this.beamMat.opacity = 0
+    this.beam.visible = true
     ctx.onSfx()
-    this.pending = { kind, pos: pos.clone(), t: 0, beam }
+    this.pending = { kind, pos: pos.clone(), t: 0 }
   }
 
   private advance(dt: number, ctx: ArcadeContext) {
     const e = this.pending!
     e.t += dt
     const k = Math.min(1, e.t / BEAT)
-    const mat = e.beam.material as THREE.MeshBasicMaterial
-    mat.opacity = Math.sin(k * Math.PI) * 0.7 // fade in then out
-    e.beam.scale.set(1 + k * 0.6, 1, 1 + k * 0.6)
-    e.beam.rotation.y += dt * 6
+    this.beamMat.opacity = Math.sin(k * Math.PI) * 0.7 // fade in then out
+    this.beam.scale.set(1 + k * 0.6, 1, 1 + k * 0.6)
+    this.beam.rotation.y += dt * 6
     if (e.t >= BEAT) {
-      this.scene.remove(e.beam)
+      this.beam.visible = false
       this.pending = null
       ctx.onEnter(e.kind, e.pos)
     }
+  }
+
+  /** Free the pooled beam (geo+mat). Wired into Game.dispose at teardown. */
+  dispose() {
+    this.scene.remove(this.beam)
+    this.beamGeo.dispose()
+    this.beamMat.dispose()
   }
 }
