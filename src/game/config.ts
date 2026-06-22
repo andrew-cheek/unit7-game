@@ -120,7 +120,7 @@ export const config = {
 
   camera: {
     fov: 62,
-    distance: 8.5, // close enough that the robot reads big, not tiny
+    distance: 7.2, // close enough that the robot reads big (Roblox-ish framing)
     minDistance: 2.2,
     // Hard floor the wall-collision pull-in may reach (well below minDistance).
     // Kept just above the camera near plane so a tucked-in camera still renders

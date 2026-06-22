@@ -36,6 +36,8 @@ export class Input {
   pausePressed = false
 
   onUnlock: (() => void) | null = null
+  /** Scroll-wheel zoom (desktop). factor >1 = zoom out, <1 = zoom in. */
+  onZoom: ((factor: number) => void) | null = null
 
   private dom: HTMLElement
   private plc: PointerLockControls
@@ -68,6 +70,12 @@ export class Input {
     dom.addEventListener('pointerdown', this.onPointerDown)
     window.addEventListener('pointerup', this.onPointerUp)
     window.addEventListener('pointercancel', this.onPointerUp)
+    dom.addEventListener('wheel', this.onWheel, { passive: false })
+  }
+
+  private onWheel = (e: WheelEvent) => {
+    e.preventDefault()
+    this.onZoom?.(e.deltaY > 0 ? 1.12 : 0.89) // scroll down = pull camera out
   }
 
   // ---- lifecycle ----------------------------------------------------------
@@ -291,5 +299,6 @@ export class Input {
     this.dom.removeEventListener('pointerdown', this.onPointerDown)
     window.removeEventListener('pointerup', this.onPointerUp)
     window.removeEventListener('pointercancel', this.onPointerUp)
+    this.dom.removeEventListener('wheel', this.onWheel)
   }
 }

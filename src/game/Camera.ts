@@ -49,10 +49,18 @@ export class CameraController {
   private up = new THREE.Vector3()
   private initialized = false
   private shakeAmt = 0
+  // Player zoom (pinch on touch, scroll on desktop). 1 = the configured default;
+  // clamped so you can pull in close or back off without losing the subject.
+  private zoom = 1
 
   /** Kick a quick camera shake (e.g. mech boot-up, heavy landing). 0..1-ish. */
   shake(amount: number) {
     this.shakeAmt = Math.min(1.5, this.shakeAmt + amount)
+  }
+
+  /** Multiply the current zoom (pinch/scroll). >1 = further out. Clamped. */
+  adjustZoom(factor: number) {
+    this.zoom = THREE.MathUtils.clamp(this.zoom * factor, 0.55, 2.2)
   }
 
   constructor(cam: THREE.PerspectiveCamera, solids: THREE.Object3D[]) {
@@ -114,7 +122,7 @@ export class CameraController {
     // zoom floor and is applied to the desired distance only - a collision hit
     // below is allowed to tuck the camera closer than this so it never sits
     // inside a wall.
-    let want = config.camera.distance * distanceScale * (1 + (config.camera.speedPullback - 1) * speed01)
+    let want = config.camera.distance * distanceScale * this.zoom * (1 + (config.camera.speedPullback - 1) * speed01)
     want = Math.max(config.camera.minDistance, want)
 
     // --- collision: center + 4 offset probes, take the nearest blocker ---

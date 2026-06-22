@@ -142,6 +142,7 @@ export interface GameControls {
   pause(): void
   skipIntro(): void
   dropDeploy(): void // pop the parachute during the orbital drop-in
+  adjustZoom(factor: number): void // pinch / scroll camera zoom (>1 = further out)
   requestPointerLock(): void
   exitMinigame(): void // leave a minigame and return to the city
   restartIntro(): void // replay the opening cinematic from the start

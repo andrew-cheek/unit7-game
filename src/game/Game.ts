@@ -285,6 +285,7 @@ export class Game {
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
     this.camera.snap(this.player.position)
+    this.input.onZoom = (f) => this.camera.adjustZoom(f)
 
     this.buildArcadePortals()
 
@@ -332,6 +333,7 @@ export class Game {
       skipIntro: () => { this.intro?.skip(); this.dropIn?.skip() },
       dropDeploy: () => this.dropIn?.deploy(),
       requestPointerLock: () => this.input.requestLock(),
+      adjustZoom: (factor: number) => this.camera.adjustZoom(factor),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute() },

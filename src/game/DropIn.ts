@@ -334,8 +334,10 @@ export class DropIn {
 
   private placeCamera(snap: boolean) {
     const fwd = new THREE.Vector3(Math.sin(this.camHeading), 0, Math.cos(this.camHeading))
-    const want = this.camPos.copy(this.pos).addScaledVector(fwd, -11).add(new THREE.Vector3(0, 6.5, 0))
-    const lookWant = this.camLook.copy(this.pos).addScaledVector(fwd, 8).add(new THREE.Vector3(0, -7, 0))
+    // Closer chase so the diver reads big (Roblox-ish framing), still angled down
+    // the route at the city/factory.
+    const want = this.camPos.copy(this.pos).addScaledVector(fwd, -7.5).add(new THREE.Vector3(0, 4.2, 0))
+    const lookWant = this.camLook.copy(this.pos).addScaledVector(fwd, 7).add(new THREE.Vector3(0, -5, 0))
     if (snap) this.cam.position.copy(want)
     else this.cam.position.lerp(want, 0.09)
     this.cam.lookAt(lookWant)

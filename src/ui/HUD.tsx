@@ -160,7 +160,7 @@ export function HUD({
       {/* control hints (desktop) */}
       {!touch && (
         <div style={hints}>
-          WASD move · SHIFT sprint · SPACE/J jetpack · H fire · G enter/ride · R warp · F boost · T transform · O chute · ESC pause
+          WASD move · SPACE jump (hold to fly) · SHIFT sprint · SCROLL zoom · H fire · G enter/ride · R warp · F boost · T transform · O chute · ESC pause
         </div>
       )}
 
