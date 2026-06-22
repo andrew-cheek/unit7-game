@@ -252,6 +252,8 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
       const inward = -side // doors on the left wall face +X, etc.
       const door = new THREE.Group()
       door.position.set(wallX, gy, z)
+      door.name = 'arcade-door-' + g.kind
+      door.userData.minigameKind = g.kind
 
       // recessed door frame
       const frame = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.3, 4.2, 3.2)), own(new THREE.MeshStandardMaterial({ color: 0x05070c, metalness: 0.5, roughness: 0.4 })))

@@ -38,7 +38,7 @@ export class WorldEvents {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
-    this.timer = this.nextInterval() * 0.65 // first event slightly sooner, but not a front-loaded dump
+    this.timer = this.nextInterval() // first event at a full interval (no front-loaded dump)
   }
 
   private get fx(): number {
@@ -46,7 +46,7 @@ export class WorldEvents {
   }
 
   private nextInterval(): number {
-    const base = 22 / Math.max(0.3, this.fx) // high ~22s, medium ~31s, low ~55s
+    const base = 28 / Math.max(0.3, this.fx) // high ~28s, medium ~40s, low ~70s
     return base + Math.random() * base * 0.6
   }
 
@@ -59,7 +59,7 @@ export class WorldEvents {
       e.dispose()
     }
     this.active = []
-    this.timer = this.nextInterval() * 0.5
+    this.timer = this.nextInterval() // full interval after a zone change too
   }
 
   update(dt: number, focus: THREE.Vector3) {
@@ -184,7 +184,7 @@ export class WorldEvents {
     const color = 0xffb347
     const podMat = new THREE.MeshBasicMaterial({ color: 0x2a2018, fog: false })
     const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    const beamMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const beamMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.15, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
     const pod = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), podMat)
     group.add(pod)
     const halo = new THREE.Mesh(new THREE.TorusGeometry(2.4, 0.25, 8, 20), glowMat)

@@ -713,7 +713,7 @@ export class World {
     this.groundMeshes.push(ramp)
     this.solidMeshes.push(ramp)
 
-    const arch = new THREE.Mesh(this.boxGeo, this.glow(config.palette.cyan, 3))
+    const arch = new THREE.Mesh(this.boxGeo, this.glow(config.palette.cyan, 1.8))
     arch.scale.set(width + 2, 0.6, 0.6)
     arch.position.set(px, 0.3, z0 - run - 1)
     this.group.add(arch)
@@ -1629,7 +1629,9 @@ export class World {
         ]
       : []
     for (const [x, y, z, c] of accents) {
-      const pl = new THREE.PointLight(c, 42, 50, 2)
+      // 18 (was 42): the spawn-plaza fill at [0,8,0] was so bright it bloomed to
+      // a white hotspot up close. 18 keeps the colored fill without the blowout.
+      const pl = new THREE.PointLight(c, 18, 50, 2)
       pl.position.set(x, y, z)
       this.scene.add(pl)
       this.accentLights.push(pl)

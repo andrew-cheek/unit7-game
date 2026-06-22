@@ -140,6 +140,11 @@ export class RobotFactory {
     // Skylight shaft glow down into the hall (the "goes into the factory" read).
     const shaft = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2.6, 2.6, TH, 16, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     shaft.position.set(0, TH / 2, -18); this.group.add(shaft)
+
+    // Interior fill so the hall reads as a lit space, not just glowing strips.
+    // Cool key over the line, warm bounce on the crate bays.
+    const lamp1 = new THREE.PointLight(0x9fe8ff, 2.4, 50, 2); lamp1.position.set(-4, 9, -D / 2); this.group.add(lamp1)
+    const lamp2 = new THREE.PointLight(0xff8a1e, 1.6, 40, 2); lamp2.position.set(8, 5, -D / 2 + 2); this.group.add(lamp2)
   }
 
   /** A city target for a freshly-built robot: head to a road to ride off, to the

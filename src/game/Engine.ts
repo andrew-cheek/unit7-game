@@ -180,7 +180,9 @@ export class Engine {
       new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
       this.baseBloom,
       config.render.bloom.radius,
-      config.render.bloom.threshold,
+      // High tier blooms harder (full strength + HDR), so raise its threshold so
+      // only genuinely bright hero neon blooms, not every lit emitter/event beam.
+      tier.name === 'high' ? Math.min(1, config.render.bloom.threshold + 0.04) : config.render.bloom.threshold,
     )
     if (tier.bloom) this.composer.addPass(this.bloomPass)
 
@@ -301,9 +303,14 @@ export class Engine {
     if (this.adaptTimer < 1) return
     this.adaptTimer = 0
     const prev = this.renderScale
-    if (this.fps < 30 && this.renderScale > Engine.SCALE_FLOOR) {
+    // Tier-aware band: desktop targets 60fps (back off below 48, recover above 56);
+    // mobile only needs its 30fps floor (back off below 28, recover above 44). The
+    // old 30/52 band left a dead zone so a 36-43fps desktop crowd never downscaled.
+    const downAt = this.tier.name === 'low' ? 28 : 48
+    const upAt = this.tier.name === 'low' ? 44 : 56
+    if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) {
       this.renderScale = Math.max(Engine.SCALE_FLOOR, this.renderScale - 0.1)
-    } else if (this.fps > 52 && this.renderScale < 1) {
+    } else if (this.fps > upAt && this.renderScale < 1) {
       this.renderScale = Math.min(1, this.renderScale + 0.1)
     }
     if (Math.abs(this.renderScale - prev) > 0.001) this.applyResolution()

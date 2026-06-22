@@ -424,7 +424,11 @@ export class Game {
     this.applyAccentCosmetic()
 
     this.engine.onUpdate = this.update
-    if (import.meta.env.DEV) (window as unknown as { __unit7?: Game }).__unit7 = this
+    // Expose the game handle in dev, or in prod when ?debug is present (lets a
+    // remote playtest reach internals without a dev build).
+    if (import.meta.env.DEV || /[?&]debug\b/.test(window.location.search)) {
+      (window as unknown as { __unit7?: Game }).__unit7 = this
+    }
 
     // Spawn directly into an off-world zone if requested.
     if (this.zone !== 'earth') {
@@ -499,6 +503,9 @@ export class Game {
     // hand-off to the follow camera reads as one continuous shot.
     this.hud.fade = 1
     this.trans = { phase: 'in', t: 0, target: this.zone }
+    // Grace period so the player can orient before the Mars gate (which sits on
+    // the route out) can fire — stops an accidental yank to Mars on hand-off.
+    this.travelCooldown = 3
     this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Inside the robot factory - units roll off the line and head into the city. Follow them out, or find the amber Mars gate.' }
     this.missionPopupTimer = 6
   }
@@ -586,6 +593,9 @@ export class Game {
     // hand-off to the follow camera reads as one continuous shot.
     this.hud.fade = 1
     this.trans = { phase: 'in', t: 0, target: this.zone }
+    // Grace period so the Mars gate (z=13, right on the route out from spawn)
+    // can't fire on the player's first step before they've read the card.
+    this.travelCooldown = 3
     // Intro mission card: tells the player what to do in the first seconds.
     this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Portal Plaza detected. Follow the neon route to the beam.' }
     this.missionPopupTimer = 5
