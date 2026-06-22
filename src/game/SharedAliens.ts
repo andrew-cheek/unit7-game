@@ -98,6 +98,18 @@ export class SharedAliens {
     return bestId >= 0 && bestPos ? { id: bestId, pos: bestPos.clone() } : null
   }
 
+  /** Closest shared alien to a point in any direction (for the capture-objective
+   *  beacon, which guides toward — not claims — the swarm). Null if none. */
+  nearestTo(x: number, z: number): THREE.Vector3 | null {
+    let bestD = Infinity
+    let bestPos: THREE.Vector3 | null = null
+    for (const a of this.aliens.values()) {
+      const d = (a.pos.x - x) ** 2 + (a.pos.z - z) ** 2
+      if (d < bestD) { bestD = d; bestPos = a.pos }
+    }
+    return bestPos ? bestPos.clone() : null
+  }
+
   update(dt: number) {
     if (!this.visible) return
     const k = 1 - Math.exp(-dt * 10)

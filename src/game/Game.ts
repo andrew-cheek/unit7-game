@@ -1823,6 +1823,7 @@ export class Game {
       isUnlocked: (k) => this.isUnlocked(k),
       earthPortals: this.zones.portalsFor('earth'),
       arcadePortals: this.arcadePortals,
+      nearestAlien: (x, z) => this.nearestCapturable(x, z),
       groundY: (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0,
       onComplete: (title, xp, credits) => {
         this.awardXp(xp)
@@ -1932,6 +1933,21 @@ export class Game {
     this.camera.update(frameDt, this.input, this.focus, this.buildFollowState())
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
+  }
+
+  /** Nearest live capturable alien to a point, across both the local roamers and
+   *  the shared (server-owned) swarm. Drives the capture-objective beacon. */
+  private nearestCapturable(x: number, z: number): THREE.Vector3 | null {
+    let best: THREE.Vector3 | null = null
+    let bestD = Infinity
+    for (const c of this.capturables) {
+      if (!c.alive) continue
+      const d = (c.position.x - x) ** 2 + (c.position.z - z) ** 2
+      if (d < bestD) { bestD = d; best = c.position }
+    }
+    const shared = this.sharedAliens.nearestTo(x, z)
+    if (shared && (shared.x - x) ** 2 + (shared.z - z) ** 2 < bestD) best = shared
+    return best ? best.clone() : null
   }
 
   /** Assemble the modern-cam follow hints for the current control subject. */

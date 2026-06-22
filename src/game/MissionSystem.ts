@@ -23,6 +23,9 @@ export interface MissionContext {
   earthPortals: { target: Zone; position: THREE.Vector3 }[]
   /** Arcade cabinet positions, for the 'minigame' objective beacon. */
   arcadePortals: { pos: THREE.Vector3 }[]
+  /** Nearest live capturable alien to a point (local + shared swarm), for the
+   *  'capture' objective beacon. Null when no aliens are present. */
+  nearestAlien: (x: number, z: number) => THREE.Vector3 | null
   groundY: (x: number, z: number) => number
   /** Fired once when an objective is completed (title + its reward payout). */
   onComplete: (title: string, xp: number, credits: number) => void
@@ -136,7 +139,11 @@ export class MissionSystem {
       }
       return best ? best.clone() : null
     }
-    return null // capture: no fixed beacon (aliens roam)
+    if (m.type === 'capture') {
+      // Aliens roam, so guide to whichever live one is closest right now.
+      return ctx.nearestAlien(ctx.playerPos.x, ctx.playerPos.z)
+    }
+    return null
   }
 
   private buildBeacon(): THREE.Group {
