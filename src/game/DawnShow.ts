@@ -38,14 +38,16 @@ interface Walker {
   t: number
 }
 
-// Landing pads laid out in front of spawn (player faces +Z) so the morning
-// arrival fleet touches down right where you're looking.
+// Landing pads laid out in a fan in front of spawn (player faces +Z) so the
+// whole morning fleet - several rockets and shuttles - touches down right where
+// you're looking, staggered so they arrive as a steady stream, not all at once.
 const PADS = [
-  { p: new THREE.Vector3(28, 0, 34), kind: 'ship', delay: 0.0 },
-  { p: new THREE.Vector3(-30, 0, 36), kind: 'ship', delay: 2.4 },
-  // Rocket pad pulled well off the central plaza-beam axis so it stays fully in
-  // view (towering to the left), not hidden behind the beam.
-  { p: new THREE.Vector3(-24, 0, 60), kind: 'rocket', delay: 1.0 },
+  { p: new THREE.Vector3(-40, 0, 48), kind: 'rocket', delay: 0.0 },
+  { p: new THREE.Vector3(28, 0, 34), kind: 'ship', delay: 1.2 },
+  { p: new THREE.Vector3(-26, 0, 36), kind: 'ship', delay: 2.4 },
+  { p: new THREE.Vector3(42, 0, 52), kind: 'rocket', delay: 3.4 },
+  { p: new THREE.Vector3(0, 0, 64), kind: 'ship', delay: 4.6 },
+  { p: new THREE.Vector3(-44, 0, 70), kind: 'rocket', delay: 5.8 },
 ] as const
 const SPAWN_Y = 80 // craft spawn altitude (lower than before so the descent is clearly seen)
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -303,7 +305,7 @@ export class DawnShow {
   /** Spawn a few commuters at a pad. depart=true: door -> pad (boarding, with
    *  briefcase). depart=false: pad -> nearest office door (heading to work). */
   private spawnWorkersAt(pad: THREE.Vector3, depart: boolean) {
-    const n = 3
+    const n = 5
     for (let i = 0; i < n; i++) {
       const door = OFFICE_ANCHORS[Math.floor(Math.random() * OFFICE_ANCHORS.length)].door
       const padSpot = new THREE.Vector3(pad.x + (Math.random() * 5 - 2.5), 0, pad.z + 4 + (Math.random() * 4 - 2))

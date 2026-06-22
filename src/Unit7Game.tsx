@@ -220,7 +220,9 @@ function WarpMenu({
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === 'r' || e.key === 'R') { onClose(); e.preventDefault(); return }
+      // Note: R is handled by the engine (toggleWarp) so it both opens and closes;
+      // don't also close here or the two toggles cancel out. Escape closes.
+      if (e.key === 'Escape') { onClose(); e.preventDefault(); return }
       const n = parseInt(e.key, 10)
       if (n >= 1 && n <= WARP_FORMS.length && warp.ready) { onPick(WARP_FORMS[n - 1].id); e.preventDefault() }
     }

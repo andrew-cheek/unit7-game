@@ -1424,13 +1424,13 @@ export class World {
       const strip = new THREE.Mesh(this.boxGeo, lightMat)
       strip.scale.set(W * 0.7, 0.12, 0.5); strip.position.set(0, H - 0.2, -D / 2)
       g.add(strip)
-      // Two desks with a seated worker robot + glowing monitor each.
-      for (const dx of [-W / 4, W / 4]) {
+      // Three desks across the front, each a seated worker robot + glowing monitor.
+      for (const dx of [-W / 3, 0, W / 3]) {
         const desk = new THREE.Mesh(this.boxGeo, deskMat)
-        desk.scale.set(2.0, 0.12, 1.0); desk.position.set(dx, 1.05, -D + 1.4)
+        desk.scale.set(1.8, 0.12, 1.0); desk.position.set(dx, 1.05, -D + 1.4)
         g.add(desk)
         const monitor = new THREE.Mesh(this.boxGeo, this.glow(config.palette.cyan, 2.2))
-        monitor.scale.set(1.0, 0.6, 0.08); monitor.position.set(dx, 1.5, -D + 1.05)
+        monitor.scale.set(0.9, 0.6, 0.08); monitor.position.set(dx, 1.5, -D + 1.05)
         g.add(monitor)
         // Seated worker: torso + head, facing the monitor (toward -Z).
         const torso = new THREE.Mesh(this.boxGeo, workerMat)
@@ -1441,14 +1441,33 @@ export class World {
         head.scale.set(0.3, 0.3, 0.3); head.position.set(dx, 1.75, -D + 2.1)
         g.add(head)
       }
-      // A spare worker robot charging against the side wall (glowing charge bar).
-      const charger = new THREE.Mesh(this.boxGeo, workerMat)
-      charger.scale.set(0.5, 1.5, 0.4); charger.position.set(W / 2 - 0.6, 0.95, -D + 1.2)
-      charger.castShadow = true
-      g.add(charger)
-      const cbar = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 2.4))
-      cbar.scale.set(0.12, 1.0, 0.18); cbar.position.set(W / 2 - 0.15, 1.1, -D + 1.2)
-      g.add(cbar)
+      // Two worker robots charging against the side wall (glowing charge bars).
+      for (const cz of [-D + 1.2, -D + 3.0]) {
+        const charger = new THREE.Mesh(this.boxGeo, workerMat)
+        charger.scale.set(0.5, 1.5, 0.4); charger.position.set(W / 2 - 0.6, 0.95, cz)
+        charger.castShadow = true
+        g.add(charger)
+        const cbar = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 2.4))
+        cbar.scale.set(0.12, 1.0, 0.18); cbar.position.set(W / 2 - 0.15, 1.1, cz)
+        g.add(cbar)
+      }
+      // A tall window-lit tower rising behind the room so it reads as an office
+      // building from across the plaza, with a glowing sign band over the entrance.
+      const TOWER_H = 26
+      const tower = new THREE.Mesh(this.boxGeo, wallMat)
+      tower.scale.set(W + 1.2, TOWER_H, D + 0.6); tower.position.set(0, TOWER_H / 2 + H, -D / 2)
+      tower.castShadow = true
+      g.add(tower)
+      const winMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0a1422, emissive: 0xffe0a0, emissiveIntensity: 1.5, roughness: 0.5 }))
+      for (let row = 0; row < 6; row++) {
+        const band = new THREE.Mesh(this.boxGeo, winMat)
+        band.scale.set(W * 0.78, 1.1, 0.2); band.position.set(0, H + 2.6 + row * 3.7, 0.05)
+        g.add(band)
+      }
+      const signColor = [config.palette.cyan, config.palette.magenta, config.palette.orange, config.palette.lime][Math.abs((a.office.x + a.office.z) | 0) % 4]
+      const sign = new THREE.Mesh(this.boxGeo, this.glow(signColor, 2.6))
+      sign.scale.set(W * 0.85, 0.9, 0.3); sign.position.set(0, H + 0.7, 0.2)
+      g.add(sign)
       this.group.add(g)
     }
   }
