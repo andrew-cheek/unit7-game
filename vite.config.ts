@@ -32,6 +32,18 @@ export default defineConfig({
           },
         },
       }
-    : {},
+    : {
+        rollupOptions: {
+          output: {
+            // Split Three.js (the heaviest dependency) into its own chunk so it
+            // downloads in parallel with the app code and stays cached across app
+            // deploys - the engine rarely changes Three versions, so repeat loads
+            // skip re-downloading ~600KB.
+            manualChunks(id: string) {
+              if (id.indexOf('node_modules/three') !== -1) return 'three'
+            },
+          },
+        },
+      },
 })
 

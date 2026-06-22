@@ -35,8 +35,10 @@ const HALF = 200
  */
 export class Zones {
   readonly earthPortals: Portal[] = []
-  readonly mars: PlanetEnv
-  readonly moon: PlanetEnv
+  // Built lazily on first visit (see ensure): you start on Earth, so the off-world
+  // terrain + colonies don't need to be generated at boot.
+  private mars: PlanetEnv | null = null
+  private moon: PlanetEnv | null = null
 
   private scene: THREE.Scene
   private earthPortalGroup = new THREE.Group()
@@ -55,25 +57,36 @@ export class Zones {
     // Planet/moon travel is its own thing, separate from the arcade: these ring
     // portals are how you leave Earth for another world.
     scene.add(this.earthPortalGroup)
+  }
 
-    this.mars = this.buildMars()
-    this.moon = this.buildMoon()
-    this.mars.group.visible = false
-    this.moon.group.visible = false
-    scene.add(this.mars.group, this.moon.group)
+  /** Build a planet environment on first visit and cache it. Deferring this keeps
+   *  the Earth boot cheap (no Mars/Moon terrain, colony, or data-centre geometry
+   *  generated until you actually travel). The one-time build hides under the
+   *  zone-transition fade. */
+  private ensure(zone: Zone): PlanetEnv | null {
+    if (zone === 'mars') {
+      if (!this.mars) { this.mars = this.buildMars(); this.mars.group.visible = false; this.scene.add(this.mars.group) }
+      return this.mars
+    }
+    if (zone === 'moon') {
+      if (!this.moon) { this.moon = this.buildMoon(); this.moon.group.visible = false; this.scene.add(this.moon.group) }
+      return this.moon
+    }
+    return null
   }
 
   env(zone: Zone): PlanetEnv | null {
-    return zone === 'mars' ? this.mars : zone === 'moon' ? this.moon : null
+    return this.ensure(zone)
   }
   portalsFor(zone: Zone): Portal[] {
-    return zone === 'earth' ? this.earthPortals : this.env(zone)!.portals
+    return zone === 'earth' ? this.earthPortals : this.ensure(zone)!.portals
   }
 
   setActive(zone: Zone) {
     this.earthPortalGroup.visible = zone === 'earth'
-    this.mars.group.visible = zone === 'mars'
-    this.moon.group.visible = zone === 'moon'
+    if (zone === 'mars' || zone === 'moon') this.ensure(zone) // build before showing
+    if (this.mars) this.mars.group.visible = zone === 'mars'
+    if (this.moon) this.moon.group.visible = zone === 'moon'
     // Every Earth/Mars/Moon transition (portals and rocket both route through
     // here) emits one zone_change. Guarded so re-applying the same zone is silent.
     if (zone !== this.activeZone) {
@@ -832,8 +845,8 @@ export class Zones {
 
   dispose() {
     for (const p of this.earthPortals) disposePlanet(p.group)
-    this.mars.dispose()
-    this.moon.dispose()
+    this.mars?.dispose()
+    this.moon?.dispose()
   }
 }
 
