@@ -110,7 +110,7 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
   },
   low: {
     name: 'low',
-    pixelRatioCap: 1.25, // fewer fragments on dense phone screens
+    pixelRatioCap: 1.2, // fewer fragments on dense phone screens
     msaaSamples: 0,
     bloom: true, // kept on - it is the whole neon look - but cheaper params
     ssao: false,
@@ -121,11 +121,11 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     softShadows: false,
     buildingShadows: false, // only the player/vehicles cast shadows on mobile
     maxSubSteps: 2,
-    densityScale: 0.45,
+    densityScale: 0.38, // fewer crowd/traffic/prop draws -> steadier mobile frame rate
     accentLights: false,
-    starCount: 500,
+    starCount: 320,
     anisotropy: 2,
-    drawDistance: 220,
+    drawDistance: 210,
     envMapIntensity: 1.0,
     fxScale: 0.4,
   },

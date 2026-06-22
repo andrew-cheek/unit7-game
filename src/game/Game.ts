@@ -330,6 +330,7 @@ export class Game {
       resume: () => this.setPaused(false),
       pause: () => this.setPaused(true),
       skipIntro: () => { this.intro?.skip(); this.dropIn?.skip() },
+      dropDeploy: () => this.dropIn?.deploy(),
       requestPointerLock: () => this.input.requestLock(),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
@@ -415,8 +416,9 @@ export class Game {
    * through the descent so you land as the sun finishes cresting.
    */
   private beginDropIn() {
-    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
-    this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : 'portal')
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.robotFactory.roofPad, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
+    this.robotFactory.setPadGlow(true)
     this.hud.intro = true // surfaces the SKIP button
     this.player.setVisible(false)
     this.input.setLockEnabled(true)
@@ -437,9 +439,11 @@ export class Game {
   private finishDrop() {
     this.dropIn?.dispose()
     this.dropIn = null
+    this.robotFactory.setPadGlow(false)
     this.hud.intro = false
     this.hud.drop = null
-    this.player.exitVehicle(this.world.spawn.clone())
+    // Land "inside" the factory: place the player on the floor among the robots.
+    this.player.exitVehicle(this.robotFactory.entrance.clone())
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
@@ -449,8 +453,8 @@ export class Game {
     // hand-off to the follow camera reads as one continuous shot.
     this.hud.fade = 1
     this.trans = { phase: 'in', t: 0, target: this.zone }
-    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Touchdown. The amber ring ahead is the Mars gate - or head out and explore.' }
-    this.missionPopupTimer = 5
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Inside the robot factory - units roll off the line and head into the city. Follow them out, or find the amber Mars gate.' }
+    this.missionPopupTimer = 6
   }
 
   /** Replay the opening cinematic from the top (triggered by the HUD button). */
@@ -1901,7 +1905,8 @@ export class Game {
       this.dawnShow.update(dt, this.world.dayFactor)
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
-      this.hud.drop = { alt: Math.round(this.dropIn.hud.alt), rings: this.dropIn.hud.rings, total: this.dropIn.hud.total }
+      const d = this.dropIn.hud
+      this.hud.drop = { alt: Math.round(d.alt), rings: d.rings, total: d.total, speed: Math.round(d.speed), phase: d.phase, gauge: d.gauge, sweetLo: d.sweetLo, sweetHi: d.sweetHi, result: d.result }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return

@@ -72,7 +72,9 @@ export interface HudState {
   progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
   warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
   race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
-  drop: { alt: number; rings: number; total: number } | null // non-null during the orbital drop-in opening
+  // non-null during the orbital drop-in opening: altimeter, ring count, and the
+  // parachute-deploy timing gauge (gauge/sweetLo/sweetHi drive the tap target).
+  drop: { alt: number; rings: number; total: number; speed: number; phase: 'fall' | 'window' | 'canopy' | 'land'; gauge: number | null; sweetLo: number; sweetHi: number; result: string | null } | null
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */
@@ -139,6 +141,7 @@ export interface GameControls {
   resume(): void
   pause(): void
   skipIntro(): void
+  dropDeploy(): void // pop the parachute during the orbital drop-in
   requestPointerLock(): void
   exitMinigame(): void // leave a minigame and return to the city
   restartIntro(): void // replay the opening cinematic from the start

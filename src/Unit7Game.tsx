@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
 import type { GameControls, HudState, Unit7Config } from './game/types'
@@ -135,7 +135,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       )}
       {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
       {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && <Leaderboard rows={hud.leaderboard} />}
-      {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} drop={hud.drop} />}
+      {hud?.intro && hud.drop && (
+        <DropOverlay
+          drop={hud.drop}
+          touch={touch}
+          onSkip={() => controlsRef.current?.skipIntro()}
+          onDeploy={() => controlsRef.current?.dropDeploy()}
+          onSteer={(x, y) => controlsRef.current?.setVirtualMove(x, y)}
+        />
+      )}
+      {hud?.intro && !hud.drop && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} onCycleNeon={() => controlsRef.current?.cycleNeon()} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
         <Suspense fallback={null}>
@@ -350,27 +359,90 @@ function Leaderboard({ rows }: { rows: { name: string; score: number }[] }) {
   )
 }
 
-function IntroOverlay({ onSkip, drop }: { onSkip: () => void; drop: { alt: number; rings: number; total: number } | null }) {
+function IntroOverlay({ onSkip }: { onSkip: () => void }) {
   return (
     <>
       <div style={introTitle}>
         <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
-        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>
-          {drop ? 'ORBITAL DROP' : 'ASSEMBLY SEQUENCE'}
-        </div>
+        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ASSEMBLY SEQUENCE</div>
       </div>
-      {drop && (
-        <div style={dropReadout}>
-          <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
-          <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>RINGS {drop.rings}/{drop.total}</div>
-        </div>
-      )}
-      <button style={skipBtn} onClick={onSkip}>
-        SKIP ▸
-      </button>
+      <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
     </>
   )
 }
+
+type DropState = NonNullable<HudState['drop']>
+
+/**
+ * Orbital drop-in HUD: altimeter + ring count, the parachute-deploy timing gauge
+ * (tap when the marker is in the green to pop a clean canopy), a DEPLOY button,
+ * and on touch a full-screen drag-to-steer layer behind the buttons.
+ */
+function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropState; touch: boolean; onSkip: () => void; onDeploy: () => void; onSteer: (x: number, y: number) => void }) {
+  const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
+  const onDown = (e: ReactPointerEvent) => {
+    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
+  }
+  const onMove = (e: ReactPointerEvent) => {
+    const d = dragRef.current
+    if (!d || e.pointerId !== d.id) return
+    // Normalize a small drag into a full steer vector; +y forward is up-drag.
+    const x = clampN((e.clientX - d.x) / 90)
+    const y = clampN((d.y - e.clientY) / 90)
+    onSteer(x, y)
+  }
+  const onUp = () => { dragRef.current = null; onSteer(0, 0) }
+
+  const label = drop.phase === 'fall' ? 'FREEFALL' : drop.phase === 'window' ? 'DEPLOY NOW' : drop.phase === 'canopy' ? 'GLIDE TO THE PAD' : 'TOUCHDOWN'
+  const armed = drop.gauge != null
+  return (
+    <>
+      {/* touch steer pad sits behind the buttons */}
+      {touch && (
+        <div
+          style={{ position: 'absolute', inset: 0, zIndex: 12, touchAction: 'none' }}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+        />
+      )}
+      <div style={introTitle}>
+        <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
+        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ORBITAL DROP</div>
+      </div>
+
+      <div style={dropReadout}>
+        <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
+        <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · RINGS {drop.rings}/{drop.total}</div>
+        <div style={{ fontSize: 12, letterSpacing: '0.28em', color: 'rgba(223,238,255,0.7)', marginTop: 6 }}>{label}</div>
+      </div>
+
+      {/* deploy timing gauge */}
+      {armed && (
+        <div style={gaugeWrap}>
+          <div style={gaugeBar}>
+            <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${drop.sweetLo * 100}%`, width: `${(drop.sweetHi - drop.sweetLo) * 100}%`, background: 'rgba(157,255,90,0.45)', borderLeft: '2px solid #9dff5a', borderRight: '2px solid #9dff5a' }} />
+            <div style={{ position: 'absolute', top: -4, bottom: -4, left: `calc(${(drop.gauge ?? 0) * 100}% - 2px)`, width: 4, background: '#fff', boxShadow: '0 0 10px #fff' }} />
+          </div>
+          <div style={{ fontSize: 12, letterSpacing: '0.25em', color: '#fff', marginTop: 8, textAlign: 'center' }}>
+            {touch ? 'TAP DEPLOY IN THE GREEN' : 'SPACE / TAP DEPLOY IN THE GREEN'}
+          </div>
+        </div>
+      )}
+      {drop.result && (
+        <div style={{ ...gaugeWrap, top: '38%' }}>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.12em', textAlign: 'center', color: drop.result.startsWith('PERFECT') ? '#9dff5a' : drop.result.startsWith('GOOD') ? '#27e7ff' : '#ff8a1e', textShadow: '0 0 18px currentColor' }}>{drop.result}</div>
+        </div>
+      )}
+
+      <button style={{ ...deployBtn, opacity: armed ? 1 : 0.5, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
+      <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
+    </>
+  )
+}
+
+function clampN(v: number) { return Math.max(-1, Math.min(1, v)) }
 
 const rootStyle: CSSProperties = {
   position: 'relative',
@@ -401,6 +473,38 @@ const dropReadout: CSSProperties = {
   textAlign: 'center',
   pointerEvents: 'none',
   fontFamily: 'ui-monospace, Menlo, monospace',
+}
+const gaugeWrap: CSSProperties = {
+  position: 'absolute',
+  top: '46%',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 15,
+  width: 'min(440px, 76vw)',
+  pointerEvents: 'none',
+}
+const gaugeBar: CSSProperties = {
+  position: 'relative',
+  height: 18,
+  borderRadius: 999,
+  background: 'rgba(8,12,24,0.78)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  overflow: 'hidden',
+}
+const deployBtn: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: 30,
+  transform: 'translateX(-50%)',
+  zIndex: 16,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '16px 40px',
+  font: '800 18px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.2em',
+  background: 'rgba(8,12,24,0.7)',
+  border: '2px solid #9dff5a',
+  borderRadius: 999,
 }
 const skipBtn: CSSProperties = {
   position: 'absolute',

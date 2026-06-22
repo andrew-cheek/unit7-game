@@ -21,6 +21,12 @@ const SITE = new THREE.Vector3(-110, 0, 64)
 const FACE = Math.PI // open front toward -Z (the city)
 
 export class RobotFactory {
+  // Drop-in targets: the rooftop landing pad on the intake tower (world space)
+  // and where the player ends up "inside" after dropping through it.
+  readonly roofPad = new THREE.Vector3()
+  readonly entrance = new THREE.Vector3()
+  private padMat: THREE.MeshBasicMaterial | null = null
+
   private scene: THREE.Scene
   private physics: Physics
   private group = new THREE.Group()
@@ -43,7 +49,15 @@ export class RobotFactory {
     this.group.position.y = physics.sampleGround(SITE.x, SITE.z, 80)?.y ?? 0
     this.group.rotation.y = FACE
     this.build()
+    // World-space drop targets (the build placed the pad in local space).
+    this.roofPad.set(0, 26, -18).applyEuler(this.group.rotation).add(this.group.position)
+    this.entrance.set(0, 0, -8).applyEuler(this.group.rotation).add(this.group.position)
     scene.add(this.group)
+  }
+
+  /** Pulse the rooftop landing pad (drives the drop-in target glow). */
+  setPadGlow(on: boolean) {
+    if (this.padMat) this.padMat.opacity = on ? 0.85 : 0.4
   }
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
@@ -111,6 +125,21 @@ export class RobotFactory {
     // Stacks of finished crates / charging bays on the other side.
     const bay = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.lime, emissiveIntensity: 2.0, roughness: 0.5 }))
     for (let i = 0; i < 4; i++) { const c = box(0.2, 1.4, 0.5, bay); c.position.set(9, 1.0, -D + 3 + i * 2.2); this.group.add(c) }
+
+    // Intake tower over the back of the hall: a tall spire with an open rooftop
+    // landing pad. This is the "drop in through the roof" target - new units
+    // (and arriving pilots) come down the tower into the line.
+    const TH = 26
+    const tower = box(11, TH, 11, shell); tower.position.set(0, TH / 2, -18); tower.castShadow = true; this.group.add(tower)
+    for (let i = 1; i < 5; i++) { const band = box(11.4, 0.5, 11.4, this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 1.8, roughness: 0.4 }))); band.position.set(0, i * (TH / 5), -18); this.group.add(band) }
+    // Open landing collar + glowing target ring on top.
+    const collar = box(13, 1.2, 13, steel); collar.position.set(0, TH, -18); this.group.add(collar)
+    this.padMat = this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const padRing = new THREE.Mesh(this.ownG(new THREE.RingGeometry(3.2, 5, 36)), this.padMat)
+    padRing.rotation.x = -Math.PI / 2; padRing.position.set(0, TH + 0.7, -18); this.group.add(padRing)
+    // Skylight shaft glow down into the hall (the "goes into the factory" read).
+    const shaft = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2.6, 2.6, TH, 16, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    shaft.position.set(0, TH / 2, -18); this.group.add(shaft)
   }
 
   /** A city target for a freshly-built robot: head to a road to ride off, to the
