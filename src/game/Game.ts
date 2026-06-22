@@ -117,6 +117,7 @@ export class Game {
   private netTimer = 0
   private missileCooldown = 0
   private invasionTriggered = false
+  private playClock = 0 // seconds of active gameplay (lets the peaceful morning play before the invasion)
   private profile: Profile = loadProfile()
   private credits = 0
   private unlocked = new Set<string>()
@@ -1818,6 +1819,7 @@ export class Game {
     this.arcadeCooldown = Math.max(0, this.arcadeCooldown - dt)
     this.updateMorningSunrise()
     this.updateWarp(dt)
+    this.playClock += dt
     if (this.input.consumeEdge('warp')) this.toggleWarp()
 
     if (this.launch.active) {
@@ -1889,9 +1891,10 @@ export class Game {
       if (onEarth && this.trans.phase === 'none') this.checkArcadePortals()
     }
 
-    // When the sun finishes rising, the aliens invade (once). In multiplayer the
-    // shared server swarm is the content, so the local invasion is suppressed.
-    if (onEarth && !this.net && !this.invasionTriggered && this.world.dayFactor >= 0.96) {
+    // Let the peaceful morning - sunrise, shuttle arrival, the crew filing into
+    // the offices - fully play out before the aliens invade (once). In
+    // multiplayer the shared server swarm is the content, so it's suppressed.
+    if (onEarth && !this.net && !this.invasionTriggered && !this.morningSunrise && this.playClock > 45 && this.world.dayFactor >= 0.96) {
       this.invasionTriggered = true
       this.events.startInvasion(this.player.position)
       this.hud.banner = 'ALIEN INVASION'
@@ -2071,6 +2074,10 @@ export class Game {
         if (isMech(near.kind) && !this.isUnlocked(near.kind)) {
           const cost = MECH_COST[near.kind] ?? 0
           prompt = this.credits >= cost ? `G - Unlock ${near.name} (${cost} CR)` : `${near.name} LOCKED - need ${cost} CR`
+        } else if (near.kind === 'rocket') {
+          const order: Zone[] = ['earth', 'moon', 'mars']
+          const next = order[(order.indexOf(this.zone) + 1) % order.length]
+          prompt = `Press G - RIDE TO ${next.toUpperCase()}`
         } else {
           prompt = `Press G - ${near.name}`
         }

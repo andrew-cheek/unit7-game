@@ -256,7 +256,10 @@ export class DawnShow {
   private start(mode: 'arrive' | 'depart') {
     this.endFleet()
     this.mode = mode
-    for (const def of PADS) {
+    // Trim the fleet on lower tiers so mobile stays smooth (full 6 on high).
+    const fx = config.tier.fxScale
+    const count = fx >= 0.9 ? PADS.length : fx >= 0.6 ? 4 : 3
+    for (const def of PADS.slice(0, count)) {
       const model = def.kind === 'rocket' ? createRocket() : createSpaceship()
       model.group.position.set(def.p.x, SPAWN_Y, def.p.z)
       this.groups.earth.add(model.group)
@@ -305,7 +308,7 @@ export class DawnShow {
   /** Spawn a few commuters at a pad. depart=true: door -> pad (boarding, with
    *  briefcase). depart=false: pad -> nearest office door (heading to work). */
   private spawnWorkersAt(pad: THREE.Vector3, depart: boolean) {
-    const n = 5
+    const n = config.tier.fxScale >= 0.9 ? 5 : config.tier.fxScale >= 0.6 ? 4 : 3
     for (let i = 0; i < n; i++) {
       const door = OFFICE_ANCHORS[Math.floor(Math.random() * OFFICE_ANCHORS.length)].door
       const padSpot = new THREE.Vector3(pad.x + (Math.random() * 5 - 2.5), 0, pad.z + 4 + (Math.random() * 4 - 2))
