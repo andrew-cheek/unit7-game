@@ -313,7 +313,9 @@ export class World {
 
   private buildMaterials() {
     this.groundMat = this.own(
-      new THREE.MeshStandardMaterial({ color: config.palette.asphalt, roughness: 0.3, metalness: 0.55 }), // wet sheen via env reflection
+      // Slightly lifted off pure asphalt (was config.palette.asphalt 0x14161d) so the
+      // off-avenue ground isn't a pitch-black void you can't read; keeps the wet sheen.
+      new THREE.MeshStandardMaterial({ color: 0x191d28, roughness: 0.3, metalness: 0.55 }),
     )
     this.groundMat.envMapIntensity = config.tier.envMapIntensity
     this.windowTex = [3, 11, 27, 54, 71, 96, 123, 158].map((s) => createWindowTexture(s))
@@ -412,7 +414,10 @@ export class World {
     // ~40% of towers are dark, matte concrete/metal with NO glowing window grid.
     // This is the main lever for both "less neon" and "more variety": the city
     // becomes lit towers standing among dark ones, instead of every face glowing.
-    const dark = hash01(seed * 1.31) < 0.4
+    // On mobile (low/medium) fewer are dark, so the sparser, bloom-light skyline
+    // still reads as lit windows instead of collapsing into flat black boxes.
+    const darkFrac = config.tier.name === 'high' ? 0.4 : 0.24
+    const dark = hash01(seed * 1.31) < darkFrac
     // ~16% are cylindrical for silhouette variety against the box towers.
     const round = hash01(seed * 2.91) < 0.16
     const bodyGeo = round ? this.cylGeo : this.boxGeo

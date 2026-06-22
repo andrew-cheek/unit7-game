@@ -38,7 +38,7 @@ export class WorldEvents {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
-    this.timer = this.nextInterval() * 0.4 // first event comes a bit sooner
+    this.timer = this.nextInterval() * 0.65 // first event slightly sooner, but not a front-loaded dump
   }
 
   private get fx(): number {
@@ -46,7 +46,7 @@ export class WorldEvents {
   }
 
   private nextInterval(): number {
-    const base = 18 / Math.max(0.3, this.fx) // high ~18s, medium ~26s, low ~45s
+    const base = 22 / Math.max(0.3, this.fx) // high ~22s, medium ~31s, low ~55s
     return base + Math.random() * base * 0.6
   }
 
