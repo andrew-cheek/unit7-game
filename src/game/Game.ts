@@ -24,6 +24,7 @@ import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
 import { DawnShow } from './DawnShow'
+import { RobotFactory } from './RobotFactory'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -150,6 +151,7 @@ export class Game {
   private exploration!: ExplorationPoints
   private playground!: Playground
   private dawnShow!: DawnShow
+  private robotFactory!: RobotFactory
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
   private timeFromQuery = false // ?time= debug override present (skip morning start)
@@ -251,6 +253,7 @@ export class Game {
     this.playground = new Playground(this.engine.scene)
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
     this.dawnShow = new DawnShow(this.engine.scene, this.physics)
+    this.robotFactory = new RobotFactory(this.engine.scene, this.physics)
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -847,6 +850,7 @@ export class Game {
     this.exploration.setActive(zone)
     this.playground.setActive(zone)
     this.dawnShow.setActive(zone)
+    this.robotFactory.setActive(zone === 'earth')
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -1934,6 +1938,7 @@ export class Game {
     this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
+    if (onEarth) this.robotFactory.update(dt)
     this.updateBootPuffs(dt)
     this.updateBubbleShots(dt)
     if (this.net) {
@@ -2154,6 +2159,7 @@ export class Game {
     this.exploration.dispose()
     this.playground.dispose()
     this.dawnShow.dispose()
+    this.robotFactory.dispose()
     for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
     this.bootPuffs = []
     this.bootGeo.dispose()
