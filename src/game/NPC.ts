@@ -54,7 +54,7 @@ export class NPCManager {
   // Spatial hash for boids separation: O(n) rebuild + 3x3-cell neighbor scan per
   // agent instead of the old O(n^2) all-pairs loop. Cell size = separation radius.
   private frame = 0
-  private grid = new Map<string, Agent[]>()
+  private grid = new Map<number, Agent[]>()
   // Shared bubble visuals (one geometry/material reused by every bubbled agent).
   private bubbleGeo = new THREE.SphereGeometry(1.15, 16, 12)
   private bubbleMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
@@ -231,7 +231,9 @@ export class NPCManager {
     this.grid.clear()
     for (const a of this.agents) {
       if (!a.alive) continue
-      const key = Math.floor(a.pos.x / sepR) + '|' + Math.floor(a.pos.z / sepR)
+      // Packed integer cell key (cell indices stay well inside +/-1024 given the
+      // world half-size and sepR), avoiding per-agent string allocation + hashing.
+      const key = (Math.floor(a.pos.x / sepR) + 1024) * 4096 + (Math.floor(a.pos.z / sepR) + 1024)
       const cell = this.grid.get(key)
       if (cell) cell.push(a)
       else this.grid.set(key, [a])
@@ -294,7 +296,7 @@ export class NPCManager {
       const cz = Math.floor(a.pos.z / sepR)
       for (let gz = cz - 1; gz <= cz + 1; gz++) {
         for (let gx = cx - 1; gx <= cx + 1; gx++) {
-          const cell = this.grid.get(gx + '|' + gz)
+          const cell = this.grid.get((gx + 1024) * 4096 + (gz + 1024))
           if (!cell) continue
           for (const o of cell) {
             if (o === a) continue

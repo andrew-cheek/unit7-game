@@ -62,6 +62,7 @@ export const config = {
     accel: 60, // snappier off-the-line response (was 46)
     decel: 52, // crisper stop, less ice-skating (was 34)
     airControl: 0.4,
+    airControlJet: 0.65, // snappier steering while the jetpack is actively thrusting
     jumpSpeed: 9.5,
     // Fall faster than you rise so jumps/hops feel grounded, not floaty.
     fallGravityMult: 1.6,
@@ -229,13 +230,17 @@ export const config = {
 
   // Lightweight objective chain (one active at a time). Drives the HUD objective
   // line + completion banners. Config-driven so the flow is tunable in one place.
+  // Moon before Mars: the Moon portal is the one walk-through gate present on
+  // Earth (Mars is reachable only via the plaza hero ring), so the first
+  // off-world objective points at a portal that actually has a beacon. Each step
+  // pays escalating XP/credits so the guided chain is itself a progression hook.
   missions: [
-    { id: 'plaza', title: 'Find Portal Plaza', type: 'reach', x: 0, z: 13, radius: 10 },
-    { id: 'mech', title: 'Pilot a battle mech', type: 'mech' },
-    { id: 'mars', title: 'Travel to Mars', type: 'zone', zone: 'mars' },
-    { id: 'moon', title: 'Travel to the Moon', type: 'zone', zone: 'moon' },
-    { id: 'capture', title: 'Capture 3 aliens', type: 'capture', count: 3 },
-    { id: 'arcade', title: 'Play an arcade game', type: 'minigame' },
+    { id: 'plaza', title: 'Find Portal Plaza', type: 'reach', x: 0, z: 13, radius: 10, xp: 50 },
+    { id: 'mech', title: 'Pilot a battle mech', type: 'mech', xp: 75, credits: 40 },
+    { id: 'moon', title: 'Travel to the Moon', type: 'zone', zone: 'moon', xp: 100, credits: 50 },
+    { id: 'mars', title: 'Travel to Mars', type: 'zone', zone: 'mars', xp: 120, credits: 75 },
+    { id: 'capture', title: 'Capture 3 aliens', type: 'capture', count: 3, xp: 130, credits: 60 },
+    { id: 'arcade', title: 'Play an arcade game', type: 'minigame', xp: 150, credits: 100 },
   ] as Mission[],
 
   // Per-zone physics + atmosphere. Skybox/terrain swap on zone change.
@@ -255,6 +260,10 @@ export interface Mission {
   radius?: number
   zone?: Zone
   count?: number
+  /** XP awarded on completion (defaults applied at the call site if omitted). */
+  xp?: number
+  /** Credits awarded on completion. */
+  credits?: number
 }
 
 export interface ZoneCfg {

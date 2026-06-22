@@ -211,10 +211,14 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     floor.receiveShadow = true
     scene.add(floor)
 
-    // Interior lighting so the room + doors read (cheap, no shadows).
+    // Interior lighting so the room + doors read (cheap, no shadows). The main
+    // cool key always lights the hall; the two colored fills are accent-only, so
+    // the low/mobile tier sheds them like World's accent lights do.
     const lampA = new THREE.PointLight(0x9fe8ff, 1.8, 46, 2); lampA.position.set(CX, gy + 8.5, CZ); scene.add(lampA)
-    const lampB = new THREE.PointLight(0xff2bd0, 0.9, 30, 2); lampB.position.set(CX, gy + 5, frontZ + 5); scene.add(lampB)
-    const lampC = new THREE.PointLight(0x27e7ff, 0.9, 30, 2); lampC.position.set(CX, gy + 5, backZ - 5); scene.add(lampC)
+    if (config.tier.accentLights) {
+      const lampB = new THREE.PointLight(0xff2bd0, 0.9, 30, 2); lampB.position.set(CX, gy + 5, frontZ + 5); scene.add(lampB)
+      const lampC = new THREE.PointLight(0x27e7ff, 0.9, 30, 2); lampC.position.set(CX, gy + 5, backZ - 5); scene.add(lampC)
+    }
 
     // roof: open frame (perimeter beams + a couple crossbeams) so the third-person
     // camera has headroom inside but it still reads as a roofed building.

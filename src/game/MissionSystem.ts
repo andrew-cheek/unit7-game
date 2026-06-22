@@ -24,8 +24,8 @@ export interface MissionContext {
   /** Arcade cabinet positions, for the 'minigame' objective beacon. */
   arcadePortals: { pos: THREE.Vector3 }[]
   groundY: (x: number, z: number) => number
-  /** Fired once when an objective is completed (title of the finished mission). */
-  onComplete: (title: string) => void
+  /** Fired once when an objective is completed (title + its reward payout). */
+  onComplete: (title: string, xp: number, credits: number) => void
 }
 
 export class MissionSystem {
@@ -81,10 +81,14 @@ export class MissionSystem {
     let label: string | null
     if (done) {
       this.idx++
-      ctx.onComplete(m.title)
+      ctx.onComplete(m.title, m.xp ?? 40, m.credits ?? 0)
       const nextM = list[this.idx]
       if (nextM?.type === 'capture') this.captureBase = ctx.captured
       label = nextM?.title ?? 'Free roam: explore the world!'
+    } else if (m.type === 'capture') {
+      // Live progress on the only objective with no beacon/distance feedback.
+      const got = Math.min(m.count ?? 1, ctx.captured - this.captureBase)
+      label = `${m.title} · ${got}/${m.count ?? 1}`
     } else {
       label = m.title
     }

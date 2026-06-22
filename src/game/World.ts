@@ -97,6 +97,10 @@ const DAWN = {
   sun: new THREE.Color(0xfff4e0),
   sunI: 3.4,
 }
+// Night base colors of the distant fog-immune silhouettes, snapshotted so the
+// day-tint lerp toward fog never compounds (re-reading the live color would).
+const NIGHT_SKYLINE = new THREE.Color(0x0a1124)
+const NIGHT_LANDMARK = new THREE.Color(0x111a30)
 // Building window glow is dimmed toward daytime so lit windows don't read at noon.
 // Pulled down hard (1.7 -> 1.25 -> 0.85): lit windows should read as a dim
 // minority accent on a dark facade, not as light sources. The dark-city value
@@ -184,6 +188,16 @@ export class World {
   private sunGroup = new THREE.Group()
   private sunCoreMat!: THREE.SpriteMaterial
   private sunGlowMat!: THREE.SpriteMaterial
+  // Reusable warm-target colors for the sun disc (hoisted out of the per-frame
+  // update so it stops allocating two THREE.Color objects every frame by day).
+  private sunWarmGlow = new THREE.Color(0xfff0cf)
+  private sunWarmCore = new THREE.Color(0xfffbf0)
+  // Distant silhouette body materials (skyline ring + colossus landmark). Captured
+  // so applyDawn can tint them toward the fog color by day; at night they keep
+  // their near-black base. Fog-immune, so without this they read as a hard black
+  // cutout band over bright daytime haze.
+  private skylineBodyMat: THREE.MeshBasicMaterial | null = null
+  private landmarkBodyMat: THREE.MeshBasicMaterial | null = null
   private time = 0
   private timeScale = 1 // clock speed multiplier (slowed during the scripted morning sunrise)
   private dawn = 0 // current day factor (0 night .. 1 full day)
@@ -849,6 +863,7 @@ export class World {
     // Instanced: the whole ring is two draw calls (bodies + neon caps) instead
     // of ~150 meshes - a big draw-call saving on mobile for the far field.
     const bodyMat = this.own(new THREE.MeshBasicMaterial({ color: 0x0a1124, fog: false }))
+    this.skylineBodyMat = bodyMat // tinted toward fog by day in applyDawn
     const capMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })) // tinted per-instance
     const bodies = new THREE.InstancedMesh(this.boxGeo, bodyMat, n)
     const caps = new THREE.InstancedMesh(this.boxGeo, capMat, n)
@@ -918,6 +933,7 @@ export class World {
     const x = -250
     const z = -210
     const body = this.own(new THREE.MeshBasicMaterial({ color: 0x111a30, fog: false }))
+    this.landmarkBodyMat = body // tinted toward fog by day in applyDawn
     const neon = this.own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
     for (let i = 0; i < 5; i++) {
       const w = 86 - i * 14
@@ -1702,6 +1718,11 @@ export class World {
     // Dim the lit windows toward daytime so towers don't glow at noon.
     const winI = lerp(WINDOW_NIGHT_I, WINDOW_DAY_I, t)
     for (const m of this.facadeMats) m.emissiveIntensity = winI
+    // Tint the fog-immune distant silhouettes toward the fog color by day (not all
+    // the way, so they keep a touch of mass), killing the hard black-cutout read.
+    const fogC = this.scene.fog instanceof THREE.FogExp2 ? this.scene.fog.color : DAWN.fog
+    if (this.skylineBodyMat) this.skylineBodyMat.color.copy(NIGHT_SKYLINE).lerp(fogC, t * 0.85)
+    if (this.landmarkBodyMat) this.landmarkBodyMat.color.copy(NIGHT_LANDMARK).lerp(fogC, t * 0.85)
   }
 
   /**
@@ -1768,8 +1789,8 @@ export class World {
     if (this.sunGroup.visible) {
       this.sunGroup.position.set(focus.x + lerp(440, 200, dawn), lerp(-120, 380, dawn), focus.z + 240)
       const warm = clamp01(dawn * 1.6)
-      this.sunGlowMat.color.setHex(0xff7a3a).lerp(new THREE.Color(0xfff0cf), warm)
-      this.sunCoreMat.color.setHex(0xffb070).lerp(new THREE.Color(0xfffbf0), warm)
+      this.sunGlowMat.color.setHex(0xff7a3a).lerp(this.sunWarmGlow, warm)
+      this.sunCoreMat.color.setHex(0xffb070).lerp(this.sunWarmCore, warm)
       const a = clamp01((dawn - 0.02) / 0.18) // fade in as it clears the horizon
       this.sunGlowMat.opacity = a * 0.9
       this.sunCoreMat.opacity = a
@@ -1778,8 +1799,12 @@ export class World {
       b.mat.opacity = b.base + Math.sin(this.time * b.rate + b.phase) * 0.25
     }
 
-    // Rain falls and follows the player; embers drift up; shafts/ads pulse.
-    if (this.rain && this.rainGeo) {
+    // Rain falls and follows the player; embers drift up; shafts/ads pulse. Both
+    // live in the city group (hidden off-world) and are frustumCulled=false, so
+    // guard the CPU loop + full-array GPU re-upload to Earth-with-city-visible —
+    // off-world it was pure waste re-uploading geometry that is never drawn.
+    const cityActive = this.zone === 'earth' && this.group.visible
+    if (cityActive && this.rain && this.rainGeo) {
       this.rain.position.set(focus.x, 0, focus.z)
       const a = this.rainGeo.attributes.position as THREE.BufferAttribute
       const arr = a.array as Float32Array
@@ -1789,7 +1814,7 @@ export class World {
       }
       a.needsUpdate = true
     }
-    if (this.embers && this.emberGeo) {
+    if (cityActive && this.embers && this.emberGeo) {
       this.embers.position.set(focus.x, 0, focus.z)
       const a = this.emberGeo.attributes.position as THREE.BufferAttribute
       const arr = a.array as Float32Array

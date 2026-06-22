@@ -279,20 +279,28 @@ export class Player {
     const maxSpeed = (board ? config.player.runSpeed * config.hoverboard.speedMul : wantSprint ? config.player.runSpeed : config.player.walkSpeed) * this.speedMul * this.warpSpeedMul
     const accelV = board ? config.hoverboard.accel : config.player.accel
     const decelV = board ? config.hoverboard.decel : config.player.decel
-    const rate = (intent > 0.1 ? accelV : decelV) * (this.grounded ? 1 : config.player.airControl)
+    const jetting = input.held.jet
+    // Sub-frame tap recovery: consume the one-shot jet edge latched in Input so a
+    // tap whose press+release fell entirely between fixed steps still hops.
+    const jetEdge = input.consumeEdge('jet')
+    // Air control is weak in an unpowered fall (deliberately weighty) but snappier
+    // while the jetpack is actively thrusting, since flight is a primary traversal.
+    const air = jetting ? config.player.airControlJet : config.player.airControl
+    const rate = (intent > 0.1 ? accelV : decelV) * (this.grounded ? 1 : air)
     this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
     this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
 
     // Jetpack: hold to fly. Unlimited — it never runs out and always gives full
     // lift; the fuel meter stays topped up.
-    const jetting = input.held.jet
+    const canHop = this.grounded || this.airTime < config.player.coyoteTime
     if (jetting) {
       // Coyote time: still allow the launch hop just after stepping off a ledge.
-      const canHop = this.grounded || this.airTime < config.player.coyoteTime
       if (!this.prevJet && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
       this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
       this.model.setThrust(1)
     } else {
+      // Held already released this frame, but a latched tap still owes one hop.
+      if (jetEdge && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
       this.model.setThrust(0)
     }
     this.fuel = config.jetpack.fuelMax

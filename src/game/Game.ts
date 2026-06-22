@@ -472,7 +472,7 @@ export class Game {
     if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
     this.hud.banner = 'ORBITAL DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DROP IN', body: 'Steer with WASD or the stick. Hold F / Space to dive. Thread the rings down to the city.' }
+    this.hud.missionPopup = { title: 'DROP IN', body: 'Steer with WASD or the stick to thread the rings. When the DEPLOY gauge lights up, tap F / Space in the sweet zone for a clean chute.' }
     this.missionPopupTimer = 6
   }
 
@@ -507,7 +507,7 @@ export class Game {
     // Grace period so the player can orient before the Mars gate (which sits on
     // the route out) can fire — stops an accidental yank to Mars on hand-off.
     this.travelCooldown = 3
-    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Inside the robot factory - units roll off the line and head into the city. Follow them out, or find the amber Mars gate.' }
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'You are on the factory floor. Follow the green beacon to Portal Plaza - the OBJECTIVE readout shows the distance.' }
     this.missionPopupTimer = 6
   }
 
@@ -642,7 +642,8 @@ export class Game {
 
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
-    this.missions.markMinigamePlayed()
+    // The "played" credit is granted on exit, gated on real engagement time, so
+    // the chain objective + daily can't be farmed by tapping in and bouncing out.
     this.warpRevert() // can't carry a warp form into a cabinet game
     this.minigameStartMs = typeof performance !== 'undefined' ? performance.now() : 0
     trackEvent('minigame_start', { game: kind })
@@ -659,9 +660,11 @@ export class Game {
     if (!this.inMinigame) return
     this.inMinigame = false
     // Report which arcade game was played and for how long, before clearing it.
+    let playedLongEnough = false
     if (this.hud.minigame) {
       const now = typeof performance !== 'undefined' ? performance.now() : 0
       const duration_seconds = this.minigameStartMs ? Math.round((now - this.minigameStartMs) / 1000) : 0
+      playedLongEnough = duration_seconds >= 8
       trackEvent('minigame_end', { game: this.hud.minigame, duration_seconds })
     }
     this.hud.minigame = null
@@ -677,10 +680,14 @@ export class Game {
     this.input.setLockEnabled(true)
     this.camera.snap(this.player.position)
     this.engine.start()
-    // Playing a cabinet counts toward XP + the daily "play" objective.
-    this.awardXp(15)
-    const d = noteDaily('play', 1)
-    if (d.completed && d.reward) this.grantDailyReward(d.reward)
+    // A real play (>= 8s) counts toward XP, the chain's arcade objective, and the
+    // daily "play" objective. Bouncing straight out earns nothing.
+    if (playedLongEnough) {
+      this.missions.markMinigamePlayed()
+      this.awardXp(15)
+      const d = noteDaily('play', 1)
+      if (d.completed && d.reward) this.grantDailyReward(d.reward)
+    }
     this.refreshProgression()
     this.hudListener({ ...this.hud, radar: this.radar })
     // A minigame may have changed our W/L record; refresh the shared profile.
@@ -1816,9 +1823,12 @@ export class Game {
       earthPortals: this.zones.portalsFor('earth'),
       arcadePortals: this.arcadePortals,
       groundY: (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0,
-      onComplete: (title) => {
-        this.hud.banner = 'OBJECTIVE COMPLETE'
-        this.bannerTimer = 1.4
+      onComplete: (title, xp, credits) => {
+        this.awardXp(xp)
+        if (credits) this.addCredits(credits)
+        const reward = credits ? `+${xp} XP  +${credits}c` : `+${xp} XP`
+        this.hud.banner = `OBJECTIVE COMPLETE  ${reward}`
+        this.bannerTimer = 2
         vibrate(40)
         this.audio.play('objective')
         trackEvent('objective_complete', { objective: title })

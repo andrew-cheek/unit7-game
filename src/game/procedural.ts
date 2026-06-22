@@ -422,7 +422,10 @@ export interface SkyModel {
 /** Gradient sky dome + a twinkling starfield (both fog-immune so they stay visible). */
 export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500): SkyModel {
   const group = new THREE.Group()
-  const geo = new THREE.SphereGeometry(900, 32, 18)
+  // Radius sits below the camera far plane (900). The dome group is centered on
+  // the focus, ~10m ahead of the camera, so an equal radius let the rear
+  // hemisphere cross the far plane and show clear-color through it.
+  const geo = new THREE.SphereGeometry(860, 32, 18)
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3), 3))
   const domeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })
   const dome = new THREE.Mesh(geo, domeMat)
@@ -436,7 +439,7 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
     const ch = new THREE.Color(h)
     const c = new THREE.Color()
     for (let i = 0; i < pos.count; i++) {
-      const yn = THREE.MathUtils.clamp((pos.getY(i) / 900 + 0.15) / 0.7, 0, 1)
+      const yn = THREE.MathUtils.clamp((pos.getY(i) / 860 + 0.15) / 0.7, 0, 1)
       c.copy(ch).lerp(ct, yn)
       colors.setXYZ(i, c.r, c.g, c.b)
     }

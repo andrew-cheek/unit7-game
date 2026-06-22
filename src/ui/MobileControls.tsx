@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import type { GameAction, GameControls, HudState } from '../game/types'
 
 const JOY_R = 56
+const JOY_DEAD = 8 // px of slack around center so a resting thumb reads as zero
 
 interface BtnDef {
   label: string
@@ -100,8 +101,14 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     let dy = e.clientY - joyOrigin.current.y
     const len = Math.hypot(dx, dy)
     if (len > JOY_R) { dx = (dx / len) * JOY_R; dy = (dy / len) * JOY_R }
-    setKnob({ x: dx, y: dy })
-    controls.setVirtualMove(dx / JOY_R, -dy / JOY_R)
+    setKnob({ x: dx, y: dy }) // knob still tracks the raw thumb position
+    // Deadzone + magnitude rescale: a resting thumb reads as zero intent and the
+    // usable range ramps 0..1 from the deadzone edge, so contact no longer lurches
+    // movement (the mech/glide path floors intent at 0.55 with no gate).
+    const clampedLen = Math.min(len, JOY_R)
+    if (clampedLen <= JOY_DEAD) { controls.setVirtualMove(0, 0); return }
+    const mag = (clampedLen - JOY_DEAD) / (JOY_R - JOY_DEAD)
+    controls.setVirtualMove((dx / clampedLen) * mag, -(dy / clampedLen) * mag)
   }
   const onJoyUp = (e: RPointerEvent) => {
     if (e.pointerId !== joyId.current) return

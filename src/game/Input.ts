@@ -75,7 +75,10 @@ export class Input {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault()
-    this.onZoom?.(e.deltaY > 0 ? 1.12 : 0.89) // scroll down = pull camera out
+    // Exact reciprocals so an out-then-in scrub returns to the same zoom (the old
+    // 1.12 / 0.89 pair multiplied to 0.997, drifting the camera in over time).
+    const step = 1.12
+    this.onZoom?.(e.deltaY > 0 ? step : 1 / step) // scroll down = pull camera out
   }
 
   // ---- lifecycle ----------------------------------------------------------
@@ -233,6 +236,10 @@ export class Input {
   pressAction(action: GameAction, down: boolean) {
     if (HELD.includes(action)) {
       this.held[action] = down
+      // Also latch a one-shot rising edge for jet, so a quick tap whose down+up
+      // both land between two fixed steps still registers one jump (held.jet
+      // would otherwise be false again before any step samples it).
+      if (down && action === 'jet') this.edges.add('jet')
     } else if (down) {
       this.edges.add(action)
     }
