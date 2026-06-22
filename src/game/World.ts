@@ -539,15 +539,19 @@ export class World {
         const cx = i * pitch
         const cz = j * pitch
         const seed = (i + 50) * 131 + (j + 50)
-        if (hash01(seed) < 0.1) continue
         const distNorm = Math.min(1, Math.hypot(i, j) / cells)
+        // Density falls off with distance from the core: a dense downtown that
+        // thins into sparse sprawl at the edges (skip ~8% near the centre,
+        // ~94% out at the rim).
+        if (hash01(seed) < 0.08 + Math.pow(distNorm, 1.6) * 0.86) continue
         const maxH = 120 * (1 - distNorm) + 20 // taller glowing towers
         // District neon rule (NeonManager): a tight inner commercial core is the
         // bright signage band; the plaza heart stays limited (the hub is the
         // hero), and the residential/industrial outskirts are calm + ambient.
         const neon = districtNeon(distNorm)
         const usable = config.world.block - config.world.sidewalk * 2
-        const n = hash01(seed * 7) < 0.45 ? 2 : 1
+        // Twin-tower blocks only in the inner half; the outskirts are single, low.
+        const n = distNorm < 0.5 && hash01(seed * 7) < 0.45 ? 2 : 1
         for (let k = 0; k < n; k++) {
           const fx = 16 + hash01(seed * 3 + k) * (usable - 16) * (n === 2 ? 0.55 : 1)
           const fz = 16 + hash01(seed * 5 + k) * (usable - 16) * (n === 2 ? 0.55 : 1)

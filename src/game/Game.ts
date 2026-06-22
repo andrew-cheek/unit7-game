@@ -189,6 +189,9 @@ export class Game {
     const tier = TIERS[tierName]
     config.quality = tierName
     config.tier = tier
+    // A much larger world on capable devices (it thins out toward the edges), but
+    // kept smaller on mobile so the draw count stays sane.
+    config.world.half = tier.fxScale >= 0.9 ? 480 : tier.fxScale >= 0.6 ? 384 : 288
 
     this.cfg = {
       startInIntro: userConfig.startInIntro ?? true,
