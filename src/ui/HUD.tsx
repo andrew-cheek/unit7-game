@@ -58,6 +58,10 @@ export function HUD({
 }) {
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
+  // Meters + stat readouts are clutter on a phone, so collapse them behind a
+  // STATS toggle there (open by default on desktop, where there's room). The map
+  // always stays visible.
+  const [statsOpen, setStatsOpen] = useState(!touch)
   const [viewing, setViewing] = useState<string | null>(null)
   const [rosterSort, setRosterSort] = useState<'rank' | 'caught'>('rank')
   const profiles = hud.profiles ?? []
@@ -71,14 +75,18 @@ export function HUD({
         {touch && !hud.paused && (
           <button style={{ ...pillBtn, borderColor: 'rgba(255,43,208,0.5)', boxShadow: '0 0 14px rgba(255,43,208,0.2)' }} onClick={onPause}>PAUSE ❚❚</button>
         )}
+        {!hud.minigame && (
+          <button
+            style={{ ...pillBtn, borderColor: statsOpen ? 'rgba(155,255,77,0.6)' : 'rgba(39,231,255,0.5)', color: statsOpen ? NEON.lime : 'rgba(223,238,255,0.92)' }}
+            onClick={() => setStatsOpen((s) => !s)}
+          >
+            {statsOpen ? 'STATS ✕' : 'STATS'}
+          </button>
+        )}
       </div>
 
-      {/* top-left meters */}
+      {/* top-left meters: always-on action/alert chips; full meters behind STATS */}
       <div style={{ ...panel, ...metersPos }}>
-        <Logo />
-        <PilotProgress p={hud.progress} compact={touch} />
-        <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
-        <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
         {hud.powerup && (
           <div style={{ ...chip, color: NEON.cyan, borderColor: NEON.cyan }}>
             {hud.powerup.kind.toUpperCase()} {Math.ceil(hud.powerup.remaining)}s
@@ -86,23 +94,35 @@ export function HUD({
         )}
         {hud.shield && <div style={{ ...chip, color: NEON.purple, borderColor: NEON.purple }}>SHIELD</div>}
         <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />
+        {statsOpen && (
+          <>
+            <Logo />
+            <PilotProgress p={hud.progress} compact={touch} />
+            <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
+            <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
+          </>
+        )}
       </div>
 
-      {/* top-right stats + radar */}
+      {/* top-right: the map is always shown; the stat readouts collapse behind STATS */}
       <div style={{ ...panel, ...statsPos, alignItems: 'flex-end' }}>
         <Radar hud={hud} />
-        <div style={statRow}>
-          <Stat label="ZONE" value={hud.zone.toUpperCase()} color={NEON.magenta} />
-          <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
-          <Stat label="CREDITS" value={String(hud.credits)} color={NEON.orange} />
-          <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
-        </div>
-        <div style={statRow}>
-          <Stat label="BEST" value={String(hud.best)} color={NEON.purple} />
-          <Stat label="SPEED" value={`${hud.speed.toFixed(0)} m/s`} color={NEON.text} />
-          {hud.altitude > 1 && <Stat label="ALT" value={`${hud.altitude.toFixed(0)} m`} color={NEON.text} />}
-          <Stat label="FPS" value={String(hud.fps)} color={hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta} />
-        </div>
+        {statsOpen && (
+          <>
+            <div style={statRow}>
+              <Stat label="ZONE" value={hud.zone.toUpperCase()} color={NEON.magenta} />
+              <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
+              <Stat label="CREDITS" value={String(hud.credits)} color={NEON.orange} />
+              <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
+            </div>
+            <div style={statRow}>
+              <Stat label="BEST" value={String(hud.best)} color={NEON.purple} />
+              <Stat label="SPEED" value={`${hud.speed.toFixed(0)} m/s`} color={NEON.text} />
+              {hud.altitude > 1 && <Stat label="ALT" value={`${hud.altitude.toFixed(0)} m`} color={NEON.text} />}
+              <Stat label="FPS" value={String(hud.fps)} color={hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta} />
+            </div>
+          </>
+        )}
       </div>
 
       {/* street-race status (top-center, above the objective) */}
@@ -510,6 +530,8 @@ const topLeftRow: CSSProperties = {
   top: 'max(14px, env(safe-area-inset-top))',
   left: 'max(14px, env(safe-area-inset-left))',
   display: 'flex',
+  flexWrap: 'wrap',
+  maxWidth: '62vw', // wrap to a second line on narrow phones instead of under the map
   gap: 8,
   pointerEvents: 'none',
 }
