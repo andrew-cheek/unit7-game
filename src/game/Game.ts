@@ -138,7 +138,7 @@ export class Game {
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
-  private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial } | null = null
+  private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial | null } | null = null
   // The central plaza hero ring doubles as the Mars gateway: step into it to
   // travel. Stored as a plain trigger so checkPortals can route it like a ring.
   private plazaMars: { pos: THREE.Vector3; radius: number } | null = null
@@ -622,21 +622,28 @@ export class Game {
     label.position.set(0, 15, 0)
     label.scale.set(9, 2.25, 1)
     g.add(label)
-    // Tall sky beam, visible from across the map (Mars amber).
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    beam.position.y = 110
-    // Explicit renderOrder so this tall additive column always sorts after the
-    // city and in a stable slot, instead of swapping order with other
-    // transparent layers as the camera moves (the additive-flicker fix).
-    beam.renderOrder = 4
-    g.add(beam)
+    // Tall sky beam, visible from across the map (Mars amber). It's a wide
+    // additive column right where the player looks at spawn, so it's skipped on
+    // the low (mobile) tier - the ring + disc + label still mark the gateway -
+    // saving that full-height overdraw on phones.
+    let beamMat: THREE.MeshBasicMaterial | null = null
+    if (config.tier.fxScale >= 0.6) {
+      const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      beam.position.y = 110
+      // Explicit renderOrder so this tall additive column always sorts after the
+      // city and in a stable slot, instead of swapping order with other
+      // transparent layers as the camera moves (the additive-flicker fix).
+      beam.renderOrder = 4
+      g.add(beam)
+      beamMat = beam.material as THREE.MeshBasicMaterial
+    }
     // Neon ground ring marking the plaza floor (the stand-here Mars pad).
     const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     decal.rotation.x = -Math.PI / 2
     decal.position.y = 0.15
     g.add(decal)
     this.engine.scene.add(g)
-    this.plazaHub = { group: g, ring, ring2, beamMat: beam.material as THREE.MeshBasicMaterial }
+    this.plazaHub = { group: g, ring, ring2, beamMat }
     this.plazaMars = { pos: new THREE.Vector3(cx, gy, cz), radius: 4.5 }
   }
 
@@ -2012,7 +2019,7 @@ export class Game {
       if (onEarth) {
         this.plazaHub.ring.rotation.z += dt * 0.5
         this.plazaHub.ring2.rotation.z -= dt * 0.8
-        this.plazaHub.beamMat.opacity = 0.1 + Math.sin(_elapsed * 1.5) * 0.03
+        if (this.plazaHub.beamMat) this.plazaHub.beamMat.opacity = 0.1 + Math.sin(_elapsed * 1.5) * 0.03
       }
     }
 
