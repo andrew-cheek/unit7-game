@@ -48,6 +48,8 @@ export class DropIn {
   readonly group = new THREE.Group()
   done = false
   fade = 0 // no opening black: you're in the bright sky immediately
+  /** Set on canopy deploy: 0..1 how clean the timing was (drives the reward). */
+  chuteQuality = 0
   hud: DropHud = { alt: START.y, rings: 0, total: N_RINGS, speed: 0, phase: 'fall', gauge: null, sweetLo: SWEET_LO, sweetHi: SWEET_HI, result: null }
 
   /** Fired on a clean ring pass, the canopy pop, and touchdown, for SFX. */
@@ -230,6 +232,7 @@ export class DropIn {
         const half = (SWEET_HI - SWEET_LO) / 2
         const dist = Math.abs(marker - center)
         this.quality = forced ? 0.3 : dist < half ? 1 - (dist / half) * 0.35 : Math.max(0, 0.55 - (dist - half) * 2.2)
+        this.chuteQuality = this.quality
         this.hud.result = this.quality >= 0.85 ? 'PERFECT CHUTE' : this.quality >= 0.55 ? 'GOOD CHUTE' : 'HARD OPEN'
         this.hud.gauge = null
         this.phase = 'canopy'; this.hud.phase = 'canopy'

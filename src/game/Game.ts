@@ -439,9 +439,20 @@ export class Game {
   }
 
   private finishDrop() {
+    // Reward the drop: rings threaded + how clean the parachute timing was.
+    const rings = this.dropIn?.hud.rings ?? 0
+    const q = this.dropIn?.chuteQuality ?? 0
+    const chuteBonus = q >= 0.85 ? 150 : q >= 0.55 ? 60 : 0
+    const credits = 100 + rings * 25 + chuteBonus
+    const xp = 40 + rings * 10 + (q >= 0.85 ? 40 : 0)
     this.dropIn?.dispose()
     this.dropIn = null
     this.robotFactory.setPadGlow(false)
+    this.addCredits(credits)
+    this.awardXp(xp)
+    const grade = q >= 0.85 ? 'PERFECT LANDING' : q >= 0.55 ? 'CLEAN LANDING' : 'TOUCHDOWN'
+    this.hud.banner = `${grade}  ${rings} rings  +${credits}c`
+    this.bannerTimer = 3.4
     this.hud.intro = false
     this.hud.drop = null
     // Land "inside" the factory: place the player on the floor among the robots.
