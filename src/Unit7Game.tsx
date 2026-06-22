@@ -49,7 +49,6 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     [],
   )
   // Portrait phones squeeze the landscape-first HUD into a thin strip; nudge a rotate.
-  const [portrait, setPortrait] = useState(false)
   // One-time touch control coach (the desktop control legend is hidden on touch).
   const [coachDone, setCoachDone] = useState(() => {
     try { return localStorage.getItem('u7.touchcoach.v1') === '1' } catch { return true }
@@ -111,16 +110,6 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       sentinel?.release().catch(() => {})
     }
   }, [])
-
-  // Track portrait orientation on touch devices so we can prompt a rotate.
-  useEffect(() => {
-    if (!touch || typeof window === 'undefined' || !window.matchMedia) return
-    const mq = window.matchMedia('(orientation: portrait)')
-    const onChange = () => setPortrait(mq.matches)
-    onChange()
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [touch])
 
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
@@ -242,8 +231,6 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onClose={() => controlsRef.current?.toggleWarp()}
         />
       )}
-      {/* Rotate-to-landscape nudge (on top of everything except a minigame). */}
-      {touch && portrait && hud && !hud.minigame && <OrientationPrompt />}
     </div>
   )
 }
