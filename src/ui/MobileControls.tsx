@@ -189,8 +189,11 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
 }
 
 const root: CSSProperties = { position: 'absolute', inset: 0, zIndex: 8, pointerEvents: 'none', touchAction: 'none' }
-const lookArea: CSSProperties = { position: 'absolute', right: 0, top: 0, width: '55%', height: '78%', pointerEvents: 'auto', touchAction: 'none' }
-const joyArea: CSSProperties = { position: 'absolute', left: 0, bottom: 0, width: '50%', height: '74%', pointerEvents: 'auto', touchAction: 'none' }
+// Clean left/right split so a center touch is never ambiguous: left half drives
+// the floating stick, right half drives camera-drag + pinch. The action buttons
+// render on top of these areas, so taps on them still win.
+const lookArea: CSSProperties = { position: 'absolute', left: '50%', top: 0, width: '50%', height: '82%', pointerEvents: 'auto', touchAction: 'none' }
+const joyArea: CSSProperties = { position: 'absolute', left: 0, bottom: 0, width: '50%', height: '78%', pointerEvents: 'auto', touchAction: 'none' }
 const joyBase: CSSProperties = {
   position: 'absolute',
   width: JOY_R * 2,

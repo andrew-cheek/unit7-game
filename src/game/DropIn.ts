@@ -27,11 +27,6 @@ const DEPLOY_FLOOR = 44 // forced (poor) deploy if you wait past this
 const SWEET_LO = 0.42
 const SWEET_HI = 0.6
 
-const smooth = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1)
-  return t * t * (3 - 2 * t)
-}
-
 /**
  * Interactive orbital drop-in: the opening you play. Freefall fast through a
  * bright dawn sky steering a short slalom of rings, time a tap to deploy the
@@ -99,6 +94,9 @@ export class DropIn {
     this.target = target.clone()
     this.getGround = getGround
     this.rb = createRobot()
+    // Face down the route toward the target from the first frame so the opening
+    // frames the city and the factory, not empty sky behind you.
+    this.camHeading = Math.atan2(this.target.x - START.x, this.target.z - START.z)
     this.build()
     scene.add(this.group)
     this.placeCamera(true)
@@ -278,10 +276,8 @@ export class DropIn {
 
     // touchdown -> brief fade + handoff
     if (this.phase === 'land' && this.pos.y <= this.target.y + 0.6) {
-      this.resultT += dt
       if (this.fade === 0) this.onSfx?.('land')
-      this.fade = smooth(0, 0.45, this.resultT - 0)
-      this.fade = clamp(this.fade + dt * 2.2, 0, 1)
+      this.fade = clamp(this.fade + dt * 2.2, 0, 1) // smooth ~0.45s fade to the handoff
       if (this.fade >= 1) this.done = true
     }
   }
