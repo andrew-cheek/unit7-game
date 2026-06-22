@@ -10,7 +10,7 @@ Live at humanoidrobots.com. Repo: github.com/andrew-cheek/unit7-game.
 
 ## The core gameplay loop
 
-The game is structured as a quest chain across four modes. Each mode should be a self-contained scene that the mode manager loads and unloads cleanly. Do not build these as one monolithic scene.
+The game is structured as a quest chain across four modes. Each mode should be a self-contained scene that the mode manager loads and unloads cleanly. Do not build these as one monolithic scene.Live at https://unit7.humanoidrobots.com
 
 1. **Booster Run** - traversal / movement mode
 2. **Rocket Launch minigame** - timing/skill minigame
