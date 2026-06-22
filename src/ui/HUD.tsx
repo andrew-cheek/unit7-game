@@ -21,7 +21,7 @@ const NEON = {
   orange: '#ff8a1e',
   lime: '#9bff4d',
   text: 'rgba(223,238,255,0.92)',
-  dim: 'rgba(223,238,255,0.55)',
+  dim: 'rgba(223,238,255,0.72)',
 }
 
 const BLIP_COLOR: Record<BlipKind, string> = {
@@ -40,6 +40,7 @@ export function HUD({
   touch,
   onRestart,
   onToggleMute,
+  onPause,
   onChallenge,
   onBuy,
   onEquip,
@@ -49,6 +50,7 @@ export function HUD({
   touch: boolean
   onRestart: () => void
   onToggleMute: () => void
+  onPause: () => void
   onChallenge?: (id: string) => void
   onBuy?: (id: string) => void
   onEquip?: (slot: 'trail' | 'accent', id: string) => void
@@ -62,12 +64,17 @@ export function HUD({
   const viewed = viewing === '__self__' ? profiles.find((p) => p.self) : viewing ? profiles.find((p) => p.id === viewing) : null
   return (
     <div style={wrap}>
-      {/* top-left restart (replays the opening cinematic) */}
-      <button style={restartBtn} onClick={onRestart}>RESTART ↺</button>
-      <button style={muteBtn} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+      {/* top-left controls (restart replays the cinematic; pause is touch-only since desktop has Esc) */}
+      <div style={topLeftRow}>
+        <button style={pillBtn} onClick={onRestart}>RESTART ↺</button>
+        <button style={{ ...pillBtn, borderColor: 'rgba(138,92,255,0.5)', boxShadow: '0 0 14px rgba(138,92,255,0.2)' }} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+        {touch && !hud.paused && (
+          <button style={{ ...pillBtn, borderColor: 'rgba(255,43,208,0.5)', boxShadow: '0 0 14px rgba(255,43,208,0.2)' }} onClick={onPause}>PAUSE ❚❚</button>
+        )}
+      </div>
 
       {/* top-left meters */}
-      <div style={{ ...panel, top: 52, left: 14 }}>
+      <div style={{ ...panel, ...metersPos }}>
         <Logo />
         <PilotProgress p={hud.progress} compact={touch} />
         <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
@@ -82,7 +89,7 @@ export function HUD({
       </div>
 
       {/* top-right stats + radar */}
-      <div style={{ ...panel, top: 14, right: 14, alignItems: 'flex-end' }}>
+      <div style={{ ...panel, ...statsPos, alignItems: 'flex-end' }}>
         <Radar hud={hud} />
         <div style={statRow}>
           <Stat label="ZONE" value={hud.zone.toUpperCase()} color={NEON.magenta} />
@@ -121,9 +128,10 @@ export function HUD({
         </div>
       )}
 
-      {/* current objective (top-center, persistent + readable) */}
+      {/* current objective (top-center, persistent + readable). On touch it drops
+          below the corner control row so it never collides with the PAUSE button. */}
       {hud.objective && !hud.minigame && (
-        <div style={objectiveStyle}>
+        <div style={{ ...objectiveStyle, top: touch ? 'max(48px, calc(env(safe-area-inset-top) + 38px))' : objectiveStyle.top }}>
           <span style={{ color: NEON.dim, marginRight: 8 }}>OBJECTIVE</span>
           <span style={{ color: NEON.lime }}>{hud.objective}</span>
         </div>
@@ -161,6 +169,13 @@ export function HUD({
       {!touch && (
         <div style={hints}>
           WASD move · SPACE jump (hold to fly) · SHIFT sprint · SCROLL zoom · H fire · G enter/ride · R warp · F boost · T transform · O chute · ESC pause
+        </div>
+      )}
+
+      {/* control hints (touch) — desktop hides its legend on touch, so mirror a short one */}
+      {touch && !hud.paused && (
+        <div style={hints}>
+          left stick move · drag right to look · tap actions · PAUSE top-left
         </div>
       )}
 
@@ -487,20 +502,18 @@ const panel: CSSProperties = {
   WebkitBackdropFilter: 'blur(6px)',
   textShadow: '0 0 6px rgba(0,0,0,0.85)',
 }
-const microLabel: CSSProperties = { font: '600 9px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.14em' }
-const barTrack: CSSProperties = {
-  width: '100%',
-  height: 7,
-  background: 'rgba(255,255,255,0.08)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  borderRadius: 4,
-  overflow: 'hidden',
-}
-const statRow: CSSProperties = { display: 'flex', gap: 14, marginTop: 4 }
-const restartBtn: CSSProperties = {
+const microLabel: CSSProperties = { font: '600 10px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.14em' }
+// Top-left button row + a shared pill style. Anchored with safe-area insets so
+// the buttons clear notches / rounded corners in landscape.
+const topLeftRow: CSSProperties = {
   position: 'absolute',
-  top: 14,
-  left: 14,
+  top: 'max(14px, env(safe-area-inset-top))',
+  left: 'max(14px, env(safe-area-inset-left))',
+  display: 'flex',
+  gap: 8,
+  pointerEvents: 'none',
+}
+const pillBtn: CSSProperties = {
   pointerEvents: 'auto',
   cursor: 'pointer',
   padding: '6px 12px',
@@ -511,22 +524,26 @@ const restartBtn: CSSProperties = {
   font: '700 10px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.14em',
   boxShadow: '0 0 14px rgba(39,231,255,0.25)',
+  whiteSpace: 'nowrap',
 }
-const muteBtn: CSSProperties = {
-  position: 'absolute',
-  top: 14,
-  left: 110,
-  pointerEvents: 'auto',
-  cursor: 'pointer',
-  padding: '6px 12px',
-  background: 'rgba(6,10,22,0.7)',
-  border: '1px solid rgba(138,92,255,0.5)',
-  borderRadius: 999,
-  color: 'rgba(223,238,255,0.92)',
-  font: '700 10px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.14em',
-  boxShadow: '0 0 14px rgba(138,92,255,0.2)',
+// Panels sit below the button row (left) and in the top-right, both inset-aware.
+const metersPos: CSSProperties = {
+  top: 'max(52px, calc(env(safe-area-inset-top) + 40px))',
+  left: 'max(14px, env(safe-area-inset-left))',
 }
+const statsPos: CSSProperties = {
+  top: 'max(14px, env(safe-area-inset-top))',
+  right: 'max(14px, env(safe-area-inset-right))',
+}
+const barTrack: CSSProperties = {
+  width: '100%',
+  height: 7,
+  background: 'rgba(255,255,255,0.08)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 4,
+  overflow: 'hidden',
+}
+const statRow: CSSProperties = { display: 'flex', gap: 14, marginTop: 4 }
 const chip: CSSProperties = {
   marginTop: 4,
   alignSelf: 'flex-start',
@@ -552,7 +569,7 @@ const promptStyle: CSSProperties = {
 const objectiveStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
-  top: 16,
+  top: 'max(16px, env(safe-area-inset-top))',
   transform: 'translateX(-50%)',
   padding: '6px 16px',
   maxWidth: '70vw',
@@ -636,7 +653,7 @@ const clickHint: CSSProperties = {
 const hints: CSSProperties = {
   position: 'absolute',
   left: '50%',
-  bottom: 12,
+  bottom: 'max(12px, env(safe-area-inset-bottom))',
   transform: 'translateX(-50%)',
   font: '600 10px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.08em',

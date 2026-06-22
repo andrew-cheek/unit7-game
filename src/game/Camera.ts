@@ -130,10 +130,12 @@ export class CameraController {
     this.up.set(0, 1, 0)
     const pad = config.camera.collisionPadding
     let nearest = want
-    // Desktop sweeps a small cross to catch thin edges; mobile uses center-only.
+    // Desktop sweeps a full cross; other tiers use a 3-probe horizontal cross
+    // (center + left/right) so the camera stops clipping through building edges
+    // on mobile. The two extra rays are cheap next to a visible wall break.
     const probes = config.tier.name === 'high'
       ? [[0, 0], [pad, 0], [-pad, 0], [0, pad], [0, -pad]]
-      : [[0, 0]]
+      : [[0, 0], [pad, 0], [-pad, 0]]
     for (const [s, u] of probes) {
       this.probeOrigin.copy(this.currentTarget).addScaledVector(this.side, s).addScaledVector(this.up, u)
       this.raycaster.set(this.probeOrigin, this.offsetDir)

@@ -53,7 +53,8 @@ export function Invaders({ onExit, touch }: { onExit: () => void; touch: boolean
     aliens.current = arr
     bullets.current = []
     bombs.current = []
-    alienVX.current = 26 + wave.current * 6
+    // Cap the per-wave speed so late waves stay fast-but-playable, not unhittable.
+    alienVX.current = Math.min(26 + wave.current * 6, 92)
   }, [])
 
   const start = useCallback(() => {
@@ -98,7 +99,7 @@ export function Invaders({ onExit, touch }: { onExit: () => void; touch: boolean
     const ox = (r.width - FW * scale) / 2
     return (clientX - r.left - ox) / scale
   }
-  const onDown = (e: React.PointerEvent) => { dragging.current = true; targetX.current = mapX(e.clientX) }
+  const onDown = (e: React.PointerEvent) => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); targetX.current = mapX(e.clientX) }
   const onMove = (e: React.PointerEvent) => { if (dragging.current) targetX.current = mapX(e.clientX) }
   const onUp = () => { dragging.current = false }
 

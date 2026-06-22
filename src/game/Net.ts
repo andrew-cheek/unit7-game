@@ -91,15 +91,13 @@ export function resolveHost(explicit?: string): string {
   return PROD_HOST
 }
 
-// Production realtime host. Set it once via the `VITE_PARTYKIT_HOST` build env
-// var (Netlify: Site settings -> environment variables) to the host that
-// `npx partykit deploy` prints, e.g. `unit7-world.<your-account>.partykit.dev`.
-// Until that var is set, multiplayer only connects on localhost dev or with a
-// `?mp=host` override, and the game runs fine single-player.
+// Production realtime host. Defaults to the deployed PartyKit host; override per
+// build with the `VITE_PARTYKIT_HOST` env var (Netlify: Site settings ->
+// environment variables) if the server moves.
 const ENV_HOST = (import.meta.env?.VITE_PARTYKIT_HOST as string | undefined)?.trim()
-export const PROD_HOST = ENV_HOST || 'unit7-world.PARTYKIT_ACCOUNT.partykit.dev'
-/** True once a real production host has been configured (not the placeholder). */
-export const HAS_PROD_HOST = !!ENV_HOST
+export const PROD_HOST = ENV_HOST || 'play.humanoidrobots.com'
+/** A real production host is configured (not a placeholder). */
+export const HAS_PROD_HOST = !!PROD_HOST
 
 export class Net {
   private ws: WebSocket | null = null

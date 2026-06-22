@@ -196,6 +196,8 @@ export class Input {
   private onBlur = () => {
     this.keys.clear()
     this.held.sprint = this.held.jet = this.held.boost = false
+    // Also drop queued one-shot edges, else a net/enter/morph/chute fires on refocus.
+    this.edges.clear()
   }
 
   private onMouseMove = (e: MouseEvent) => {

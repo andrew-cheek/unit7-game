@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
+import { trackEvent } from './lib/analytics'
 import type { GameControls, HudState, Unit7Config } from './game/types'
 import { loadCallsign, saveCallsign } from './game/storage'
 import { WARP_FORMS } from './game/WarpForms'
@@ -47,6 +48,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     () => isTouchDevice() || (typeof location !== 'undefined' && location.search.includes('touch')),
     [],
   )
+  // Portrait phones squeeze the landscape-first HUD into a thin strip; nudge a rotate.
+  const [portrait, setPortrait] = useState(false)
+  // One-time touch control coach (the desktop control legend is hidden on touch).
+  const [coachDone, setCoachDone] = useState(() => {
+    try { return localStorage.getItem('u7.touchcoach.v1') === '1' } catch { return true }
+  })
+  const dismissCoach = () => {
+    try { localStorage.setItem('u7.touchcoach.v1', '1') } catch { /* private mode */ }
+    setCoachDone(true)
+  }
 
   useEffect(() => {
     const container = containerRef.current
@@ -61,6 +72,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     } catch (e) {
       // Surface a startup crash on-screen instead of a silent black page.
       console.error('[Unit7] startup failed:', e)
+      const message = String((e as Error)?.message || e).slice(0, 300)
+      trackEvent('startup_error', { message })
       setErr(String((e as Error)?.stack || (e as Error)?.message || e))
       return
     }
@@ -99,6 +112,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     }
   }, [])
 
+  // Track portrait orientation on touch devices so we can prompt a rotate.
+  useEffect(() => {
+    if (!touch || typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(orientation: portrait)')
+    const onChange = () => setPortrait(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [touch])
+
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
@@ -114,6 +137,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           touch={touch}
           onRestart={() => controlsRef.current?.restartIntro()}
           onToggleMute={() => controlsRef.current?.toggleMute()}
+          onPause={() => controlsRef.current?.pause()}
           onChallenge={(id) => controlsRef.current?.challengePilot(id)}
           onBuy={(id) => controlsRef.current?.buyCosmetic(id)}
           onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
@@ -123,6 +147,9 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}
+      {touch && !coachDone && hud && !hud.intro && !hud.minigame && !hud.paused && (mpJoined || !multiplayer) && (
+        <TouchCoach onDismiss={dismissCoach} />
+      )}
       {multiplayer && !mpJoined && hud && !hud.intro && (
         <JoinWorld
           onJoin={(name) => {
@@ -130,7 +157,10 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
             gameRef.current?.connectMultiplayer(name, config?.multiplayerHost)
             setMpJoined(true)
           }}
-          onSolo={() => setMpJoined(true)}
+          onSolo={() => {
+            gameRef.current?.startSolo()
+            setMpJoined(true)
+          }}
         />
       )}
       {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
@@ -212,6 +242,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onClose={() => controlsRef.current?.toggleWarp()}
         />
       )}
+      {/* Rotate-to-landscape nudge (on top of everything except a minigame). */}
+      {touch && portrait && hud && !hud.minigame && <OrientationPrompt />}
     </div>
   )
 }
@@ -443,6 +475,35 @@ function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropSta
 }
 
 function clampN(v: number) { return Math.max(-1, Math.min(1, v)) }
+
+/** Portrait nudge for touch devices. The 3D HUD is built landscape-first, so
+ * portrait squeezes the world into a thin strip; this asks the player to rotate. */
+function OrientationPrompt() {
+  return (
+    <div style={orientBackdrop}>
+      <div style={orientPhone} />
+      <div style={orientTitle}>ROTATE YOUR DEVICE</div>
+      <div style={orientSub}>UNIT 7 PLAYS IN LANDSCAPE</div>
+    </div>
+  )
+}
+
+/** One-time touch control coach. The desktop control legend is hidden on touch,
+ * so first-time phone players otherwise get no idea what the zones do. */
+function TouchCoach({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div style={coachBackdrop} onPointerDown={(e) => { e.stopPropagation(); onDismiss() }}>
+      <div style={{ ...coachTag, left: '8%', bottom: '24%' }}>◄ MOVE ►<div style={coachTagSub}>left thumb</div></div>
+      <div style={{ ...coachTag, right: '22%', top: '24%' }}>DRAG TO LOOK<div style={coachTagSub}>right side</div></div>
+      <div style={{ ...coachTag, right: '8%', bottom: '24%' }}>ACTIONS<div style={coachTagSub}>tap buttons</div></div>
+      <div style={coachCenter}>
+        <div style={coachTitle}>HOW TO PLAY</div>
+        <div style={coachBody}>Follow the green objective to find Portal Plaza. Reach the neon arcade cabinets to launch the mini-games.</div>
+        <div style={coachCta}>TAP TO START ▸</div>
+      </div>
+    </div>
+  )
+}
 
 const rootStyle: CSSProperties = {
   position: 'relative',
@@ -703,7 +764,7 @@ const warpCloseBtn: CSSProperties = {
   font: '700 11px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.12em',
 }
-const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}`
+const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}@keyframes unit7rotate{0%,15%{transform:rotate(0deg)}55%,78%{transform:rotate(90deg)}100%{transform:rotate(0deg)}}`
 const errStyle: CSSProperties = {
   position: 'absolute',
   inset: 0,
@@ -713,4 +774,96 @@ const errStyle: CSSProperties = {
   background: 'rgba(5,6,11,0.96)',
   color: 'rgba(223,238,255,0.92)',
   font: '500 12px/1.5 ui-monospace, Menlo, monospace',
+}
+const orientBackdrop: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  zIndex: 45,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(4,6,12,0.97)',
+  pointerEvents: 'auto',
+  textAlign: 'center',
+  padding: 24,
+}
+const orientPhone: CSSProperties = {
+  width: 64,
+  height: 104,
+  border: '3px solid #27e7ff',
+  borderRadius: 12,
+  boxShadow: '0 0 24px rgba(39,231,255,0.5)',
+  animation: 'unit7rotate 2.4s ease-in-out infinite',
+}
+const orientTitle: CSSProperties = {
+  marginTop: 28,
+  color: '#27e7ff',
+  font: '800 20px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.18em',
+  textShadow: '0 0 16px #27e7ff',
+}
+const orientSub: CSSProperties = {
+  marginTop: 10,
+  color: 'rgba(223,238,255,0.72)',
+  font: '600 12px/1.5 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+}
+const coachBackdrop: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  zIndex: 24,
+  background: 'rgba(4,6,12,0.8)',
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+}
+const coachTag: CSSProperties = {
+  position: 'absolute',
+  color: '#27e7ff',
+  font: '800 13px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+  textShadow: '0 0 10px #27e7ff',
+  textAlign: 'center',
+  pointerEvents: 'none',
+}
+const coachTagSub: CSSProperties = {
+  marginTop: 4,
+  color: 'rgba(223,238,255,0.75)',
+  font: '600 10px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.08em',
+}
+const coachCenter: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '50%',
+  transform: 'translate(-50%,-50%)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  maxWidth: 320,
+  padding: '0 16px',
+  textAlign: 'center',
+  pointerEvents: 'none',
+}
+const coachTitle: CSSProperties = {
+  color: '#27e7ff',
+  font: '800 18px/1.3 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  textShadow: '0 0 14px #27e7ff',
+}
+const coachBody: CSSProperties = {
+  marginTop: 8,
+  color: 'rgba(223,238,255,0.85)',
+  font: '600 12px/1.5 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.06em',
+}
+const coachCta: CSSProperties = {
+  marginTop: 16,
+  color: '#05060b',
+  background: '#27e7ff',
+  borderRadius: 999,
+  padding: '8px 18px',
+  font: '800 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 18px rgba(39,231,255,0.5)',
 }

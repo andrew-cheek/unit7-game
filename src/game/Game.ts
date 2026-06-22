@@ -30,6 +30,7 @@ import { RaceActivity, type RaceHud } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
+import { trackEvent } from '../lib/analytics'
 import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, recordGameResult, type Profile } from './storage'
 import {
   loadProgression, addXp, noteLogin, noteDaily, recordDuel, levelForXp, levelInfo, tierForRating, cosmeticById,
@@ -195,6 +196,18 @@ export class Game {
   private warpActive: string | null = null
   private warpModel: WarpFormModel | null = null
 
+  // --- analytics state (GA via trackEvent; never affects gameplay) ----------
+  private multiplayerEnabled: boolean
+  private gameStarted = false // game_start fired exactly once per (re)entry
+  private startedMode: 'solo' | 'multiplayer' | null = null // remembered for cinematic replays
+  private sessionStartMs = 0 // perf.now() at game_start, for game_over duration
+  private lastScoreMilestone = 0 // highest 100-pt milestone already reported
+  private caughtCount = 0 // times the player has been caught (soaked)
+  private lastCaughtMs = -1e9 // throttles player_caught during balloon barrages
+  private prevJetHeld = false // jetpack rising-edge debounce
+  private prevBoostHeld = false // boost rising-edge debounce
+  private minigameStartMs = 0 // perf.now() on arcade entry, for minigame_end duration
+
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
     // then make it the single object every system reads from.
@@ -212,6 +225,7 @@ export class Game {
       initialZone: userConfig.initialZone ?? 'earth',
     }
     this.zone = this.cfg.initialZone
+    this.multiplayerEnabled = userConfig.multiplayer !== false
     this.hudListener = hudListener
 
     this.engine = new Engine(container, tier)
@@ -280,6 +294,7 @@ export class Game {
       this.bannerTimer = 0.45 // brief, fades fast (it's a side gag now)
       vibrate(30)
       this.audio.play('soak')
+      this.onPlayerCaught()
     }
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
@@ -330,13 +345,17 @@ export class Game {
       pressAction: (a: Parameters<Input['pressAction']>[0], down: boolean) => this.input.pressAction(a, down),
       resume: () => this.setPaused(false),
       pause: () => this.setPaused(true),
-      skipIntro: () => { this.intro?.skip(); this.dropIn?.skip() },
+      skipIntro: () => {
+        if ((this.intro && !this.intro.done) || (this.dropIn && !this.dropIn.done)) trackEvent('intro_skipped')
+        this.intro?.skip()
+        this.dropIn?.skip()
+      },
       dropDeploy: () => this.dropIn?.deploy(),
       requestPointerLock: () => this.input.requestLock(),
       adjustZoom: (factor: number) => this.camera.adjustZoom(factor),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
-      toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
+      toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
       challengePilot: (id: string) => this.net?.sendChallenge(id, this.equippedTrailColor()),
       acceptChallenge: () => {
@@ -408,6 +427,8 @@ export class Game {
       this.beginDropIn()
     } else {
       this.startMorning()
+      // Without multiplayer there's no join/solo prompt, so control begins now.
+      if (!this.multiplayerEnabled) this.emitGameStart('solo')
     }
   }
 
@@ -470,9 +491,59 @@ export class Game {
     this.missionPopupTimer = 6
   }
 
+  /**
+   * Fire game_start once per (re)entry into the world. Records the mode (for a
+   * later cinematic replay) and the session clock (for game_over duration).
+   */
+  private emitGameStart(mode: 'solo' | 'multiplayer') {
+    if (this.gameStarted) return
+    this.gameStarted = true
+    this.startedMode = mode
+    this.sessionStartMs = typeof performance !== 'undefined' ? performance.now() : 0
+    trackEvent('game_start', { mode, zone: this.zone })
+  }
+
+  /**
+   * Called by the React shell when the player dismisses the join prompt with
+   * "play solo". Keeping the trackEvent inside the engine layer means src/game
+   * stays free of React and the shell just pokes a plain method.
+   */
+  startSolo() {
+    this.emitGameStart('solo')
+  }
+
+  /** Count + report a "caught" hit (water-balloon soak), throttled so a balloon
+   * barrage can't spam GA. The running tally also feeds game_over's `caught`. */
+  private onPlayerCaught() {
+    const now = typeof performance !== 'undefined' ? performance.now() : 0
+    if (now - this.lastCaughtMs < 1500) return
+    this.lastCaughtMs = now
+    this.caughtCount += 1
+    trackEvent('player_caught', { caught_count: this.caughtCount })
+  }
+
+  /** Fire game_over with the session summary. No-op if the world never started. */
+  private emitGameOver() {
+    if (!this.gameStarted) return
+    const now = typeof performance !== 'undefined' ? performance.now() : 0
+    const duration_seconds = this.sessionStartMs ? Math.round((now - this.sessionStartMs) / 1000) : 0
+    trackEvent('game_over', {
+      score: this.hud.score,
+      best: this.profile.best,
+      caught: this.caughtCount,
+      credits: this.credits,
+      zone: this.zone,
+      duration_seconds,
+    })
+  }
+
   /** Replay the opening cinematic from the top (triggered by the HUD button). */
   private restartIntro() {
     if (this.intro || this.inMinigame || this.paused) return
+    // Replaying the cinematic ends the current run; finishIntro re-emits
+    // game_start (with the same mode) when control hands back.
+    this.emitGameOver()
+    this.gameStarted = false
     if (this.vehicles.current) this.player.exitVehicle(this.player.position)
     // The cinematic stages over Earth and hands off at the Earth spawn.
     if (this.zone !== 'earth') this.doTravel('earth')
@@ -507,6 +578,12 @@ export class Game {
     this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Portal Plaza detected. Follow the neon route to the beam.' }
     this.missionPopupTimer = 5
     this.startMorning()
+    // Control hands off here. On a cinematic replay the solo/multiplayer choice
+    // was already made, so re-announce it; on a first run with multiplayer
+    // disabled there's no join prompt, so the world begins now. (With multiplayer
+    // enabled, game_start waits for the join/solo choice in the React shell.)
+    if (this.startedMode) this.emitGameStart(this.startedMode)
+    else if (!this.multiplayerEnabled) this.emitGameStart('solo')
   }
 
   /**
@@ -816,6 +893,8 @@ export class Game {
     this.inMinigame = true
     this.minigamePlayed = true
     this.warpRevert() // can't carry a warp form into a cabinet game
+    this.minigameStartMs = typeof performance !== 'undefined' ? performance.now() : 0
+    trackEvent('minigame_start', { game: kind })
     this.audio.play('portal')
     this.hud.minigame = kind
     this.activePortal.copy(pos)
@@ -828,6 +907,12 @@ export class Game {
   private exitMinigame() {
     if (!this.inMinigame) return
     this.inMinigame = false
+    // Report which arcade game was played and for how long, before clearing it.
+    if (this.hud.minigame) {
+      const now = typeof performance !== 'undefined' ? performance.now() : 0
+      const duration_seconds = this.minigameStartMs ? Math.round((now - this.minigameStartMs) / 1000) : 0
+      trackEvent('minigame_end', { game: this.hud.minigame, duration_seconds })
+    }
     this.hud.minigame = null
     // Step the robot out of the doorway (toward spawn) so it doesn't re-trigger.
     const out = this.scratchFwd.subVectors(this.world.spawn, this.activePortal)
@@ -987,6 +1072,7 @@ export class Game {
 
   private startRocketLaunch(rocket: Vehicle) {
     if (this.launch.active || this.trans.phase !== 'none') return
+    trackEvent('vehicle_entered', { type: 'rocket' })
     // Earth -> Moon -> Mars -> Earth, matching the journey out and back.
     const order: Zone[] = ['earth', 'moon', 'mars']
     const next = order[(order.indexOf(this.zone) + 1) % order.length]
@@ -1023,6 +1109,8 @@ export class Game {
       this.input.setLockEnabled(true)
       this.input.requestLock()
     }
+    // ESC pause menu open/close. Guarded above, so this only fires on a real toggle.
+    trackEvent(p ? 'game_pause' : 'game_resume')
     this.hudListener({ ...this.hud, radar: this.radar })
   }
 
@@ -1030,6 +1118,7 @@ export class Game {
     if (this.vehicles.current) {
       const exitPos = this.vehicles.exit()
       this.player.exitVehicle(exitPos)
+      trackEvent('ability_used', { ability: 'vehicle' }) // G = exit
       return
     }
     if (this.player.mode !== 'robot' && this.player.mode !== 'plane') return
@@ -1056,12 +1145,15 @@ export class Game {
       return
     }
     if (v.kind === 'rocket') {
+      trackEvent('ability_used', { ability: 'vehicle' }) // G = board the rocket
       this.warpRevert()
-      this.vehicles.onEnterRocket?.(v)
+      this.vehicles.onEnterRocket?.(v) // vehicle_entered fires in startRocketLaunch
     } else {
       this.warpRevert() // step out of the warp form to pilot
       this.player.enterVehicle()
       this.vehicles.enter(v)
+      trackEvent('ability_used', { ability: 'vehicle' }) // G = enter
+      trackEvent('vehicle_entered', { type: v.kind })
       // Mech / titan boot-up moment: name banner, camera shake + an energy/steam
       // burst so boarding a giant reads as a powered-up reward.
       if (isMech(v.kind) || v.kind === 'titan') {
@@ -1076,6 +1168,7 @@ export class Game {
   }
 
   private fireNet() {
+    trackEvent('ability_used', { ability: 'net' }) // H = net / capture
     const N = NET_SEGMENTS
     const yaw = this.input.yaw
     this.scratchFwd.set(Math.sin(yaw), 0, Math.cos(yaw))
@@ -1135,6 +1228,7 @@ export class Game {
       this.hud.score += Math.round(award * this.scoreMul)
       this.addCredits(Math.round(award * 0.5))
       this.hud.captured += 1
+      trackEvent('npc_captured', { total: this.hud.captured })
       // Juice: a quick cyan ring pop where the target was netted.
       this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
       vibrate(25)
@@ -1264,6 +1358,7 @@ export class Game {
       this.bannerTimer = 1.4
       vibrate(40)
       this.audio.play('objective')
+      trackEvent('objective_complete', { objective: m.title })
       this.world.pushHeadline(`UNIT 7 PILOT COMPLETES "${m.title}"`)
       const nextM = list[this.missionIdx]
       if (nextM?.type === 'capture') this.captureBase = this.hud.captured
@@ -1336,7 +1431,12 @@ export class Game {
       this.hud.captured += 1
       hits++
     }
-    if (hits > 0) { vibrate(40); this.awardCaptureProgress(hits) }
+    if (hits > 0) {
+      vibrate(40)
+      this.awardCaptureProgress(hits)
+      // One event per blast (not per target) so a big missile hit can't spam GA.
+      trackEvent('npc_captured', { total: this.hud.captured })
+    }
     this.audio.play('explosion')
   }
 
@@ -1471,6 +1571,7 @@ export class Game {
   connectMultiplayer(username: string, host?: string) {
     if (this.net) return // already connected/connecting
     this.username = username
+    this.emitGameStart('multiplayer')
     this.net = new Net(
       username,
       {
@@ -1508,6 +1609,7 @@ export class Game {
           if (by === this.net?.myId) {
             this.hud.score += award
             this.hud.captured += 1
+            trackEvent('npc_captured', { total: this.hud.captured })
             this.addCredits(Math.round(award * 0.5))
             vibrate(25)
             this.audio.play('capture')
@@ -1829,6 +1931,7 @@ export class Game {
     this.neonLevel = order[i]
     saveHighScore('neon', i + 1) // low=1, med=2, high=3 (0/unset -> high default)
     this.applyNeon()
+    trackEvent('neon_changed', { level: this.neonLevel })
     this.hud.banner = `NEON: ${this.neonLevel.toUpperCase()}`
     this.bannerTimer = 1.2
   }
@@ -1907,6 +2010,21 @@ export class Game {
     this.net.sendState(s)
   }
 
+  /**
+   * Held abilities fire ability_used once per activation, not every frame: we
+   * watch for the rising edge of each held flag. Jetpack is only the on-foot
+   * thruster (Space/J in a mech is mech-flight, a different control), so it's
+   * gated on not piloting; boost (F) is the plane afterburner.
+   */
+  private trackHeldAbilities(piloting: boolean) {
+    const jet = this.input.held.jet
+    if (jet && !this.prevJetHeld && !piloting) trackEvent('ability_used', { ability: 'jetpack' })
+    this.prevJetHeld = jet
+    const boost = this.input.held.boost
+    if (boost && !this.prevBoostHeld) trackEvent('ability_used', { ability: 'boost' })
+    this.prevBoostHeld = boost
+  }
+
   private update = (dt: number, _elapsed: number) => {
     this.input.update()
 
@@ -1964,10 +2082,14 @@ export class Game {
     const onEarth = this.zone === 'earth'
     const piloting = !!this.vehicles.current
 
+    // Held abilities (jetpack / boost) report on the rising edge only.
+    this.trackHeldAbilities(piloting)
+
     if (this.input.consumeEdge('enter')) this.handleEnterExit()
     if (!piloting) {
-      if (this.input.consumeEdge('morph')) this.player.toggleMorph()
-      if (this.input.consumeEdge('chute')) this.player.deployChute()
+      if (this.input.consumeEdge('morph')) { this.player.toggleMorph(); trackEvent('ability_used', { ability: 'morph' }) }
+      // Only report a parachute deploy that actually took (airborne, past the min).
+      if (this.input.consumeEdge('chute') && this.player.deployChute()) trackEvent('ability_used', { ability: 'parachute' })
       if (this.input.consumeEdge('net')) this.fireNet()
     } else {
       this.input.consumeEdge('chute')
@@ -1978,6 +2100,7 @@ export class Game {
           this.hud.banner = mode === 'jet' ? 'JET FORM' : 'ROBOT FORM'
           this.bannerTimer = 1.0
           vibrate(30)
+          trackEvent('ability_used', { ability: 'morph' })
         }
       }
       // In a mech, CAPTURE / FIRE launches missiles.
@@ -2247,6 +2370,14 @@ export class Game {
     }
     this.hud.best = this.profile.best
 
+    // Score milestones every 100 pts. Reports the highest hundred crossed and
+    // fires once per new milestone, so a big capture jump can't spam GA.
+    const milestone = Math.floor(this.hud.score / 100) * 100
+    if (milestone > this.lastScoreMilestone) {
+      this.lastScoreMilestone = milestone
+      trackEvent('score_milestone', { score: milestone })
+    }
+
     this.hud.fps = Math.round(this.engine.fps)
     this.hud.stamina = this.player.stamina / config.player.staminaMax
     this.hud.fuel = this.player.fuel / config.jetpack.fuelMax
@@ -2283,6 +2414,8 @@ export class Game {
   }
 
   dispose() {
+    // Session end: report the final summary before tearing anything down.
+    this.emitGameOver()
     // Persist session takings (credits + best are already saved live).
     this.profile.lifetimeCaptured += this.hud.captured
     this.profile.credits = this.credits

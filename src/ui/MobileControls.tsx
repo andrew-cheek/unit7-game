@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
 import type { GameAction, GameControls, HudState } from '../game/types'
 
 const JOY_R = 56
@@ -43,6 +43,15 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   // Pinch: track pointers active in the camera area; 2 = zoom gesture.
   const pinch = useRef<Map<number, { x: number; y: number }>>(new Map())
   const pinchDist = useRef<number | null>(null)
+
+  // Sprint is a toggle. The engine clears held inputs on window blur, so sync the
+  // button's visual state off too, otherwise it can show "on" while the engine
+  // has already stopped sprinting (a stuck-sprint mismatch).
+  useEffect(() => {
+    const reset = () => setSprintOn(false)
+    window.addEventListener('blur', reset)
+    return () => window.removeEventListener('blur', reset)
+  }, [])
 
   // --- context ---
   const inVehicle = hud.mode === 'vehicle'
