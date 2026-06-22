@@ -48,6 +48,7 @@ export class RaceActivity {
   private best = loadHighScore('race')
   private result = 0
   private cooldown = 0
+  private stray = 0
 
   /** Granted on a finish: (credits, xp, isBest). */
   onFinish?: (credits: number, xp: number, isBest: boolean) => void
@@ -150,7 +151,12 @@ export class RaceActivity {
         // Final leg: back through the start/finish gate.
         if (distGate < DETECT) this.finish()
       }
-      if (this.time > 180) this.reset() // safety: abandon a stalled run
+      // Abandon if the player strays far from the next target for a while (left
+      // the race) instead of leaving the clock running forever.
+      const tgt = this.cp >= this.rings.length ? GATE : this.rings[this.cp].pos
+      const off = Math.hypot(px - tgt.x, pz - tgt.z) > 120
+      this.stray = off ? this.stray + dt : 0
+      if (this.stray > 8 || this.time > 240) { this.stray = 0; this.reset() }
     } else if (this.state === 'done') {
       this.countdown -= dt
       if (this.countdown <= 0) this.reset()

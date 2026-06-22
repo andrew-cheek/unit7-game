@@ -137,6 +137,12 @@ export class World {
   private tankGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12) // rooftop water tank
   private groundMat!: THREE.MeshStandardMaterial
   private windowTex: THREE.CanvasTexture[] = []
+  // Pools so lit towers SHARE window textures + materials instead of cloning one
+  // per building (which uploaded a separate GPU texture each). Keyed by base
+  // texture + repeat (tex) and + facade colour (material): count drops from
+  // hundreds to a few dozen.
+  private texPool = new Map<string, THREE.Texture>()
+  private litMatPool = new Map<string, THREE.MeshStandardMaterial>()
   private ownedMats: THREE.Material[] = []
   private ownedTex: THREE.Texture[] = []
   private ownedGeos: THREE.BufferGeometry[] = []
@@ -374,23 +380,40 @@ export class World {
     } else {
       const fpal = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019, 0x0a1a1f, 0x161021, 0x1a1410, 0x101a16]
       const facade = fpal[Math.floor(hash01(seed * 1.7) * fpal.length)]
-      const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
-      tex.needsUpdate = true
-      tex.anisotropy = config.tier.anisotropy
-      tex.repeat.set(Math.max(2, Math.round(fx / 6)), Math.max(3, Math.round(h / 8)))
-      // Per-building offset so neighbouring towers don't share the same lit pattern.
-      tex.offset.set(hash01(seed * 3.1), hash01(seed * 4.2))
-      this.ownedTex.push(tex)
-      mat = this.own(new THREE.MeshStandardMaterial({
-        color: facade,
-        metalness: 0.35,
-        roughness: 0.55,
-        emissive: 0xffffff,
-        emissiveMap: tex,
-        emissiveIntensity: WINDOW_NIGHT_I,
-        envMapIntensity: config.tier.envMapIntensity,
-      }))
-      this.facadeMats.push(mat) // only lit towers dim with the day cycle
+      // Pool the window texture by (base index, repeat) - towers of similar size
+      // reuse one GPU texture instead of each cloning its own.
+      const ti = Math.floor(hash01(seed * 2.3) * this.windowTex.length)
+      const rx = Math.max(2, Math.round(fx / 6))
+      const ry = Math.max(3, Math.round(h / 8))
+      const tkey = ti + '_' + rx + '_' + ry
+      let tex = this.texPool.get(tkey)
+      if (!tex) {
+        tex = this.windowTex[ti].clone()
+        tex.needsUpdate = true
+        tex.anisotropy = config.tier.anisotropy
+        tex.repeat.set(rx, ry)
+        tex.offset.set((ti * 0.137) % 1, (ti * 0.281) % 1)
+        this.texPool.set(tkey, tex)
+        this.ownedTex.push(tex)
+      }
+      // Pool the lit material by (texture, facade colour) too, so the renderer
+      // sees far fewer distinct materials.
+      const mkey = tkey + '_' + facade
+      let lm = this.litMatPool.get(mkey)
+      if (!lm) {
+        lm = this.own(new THREE.MeshStandardMaterial({
+          color: facade,
+          metalness: 0.35,
+          roughness: 0.55,
+          emissive: 0xffffff,
+          emissiveMap: tex,
+          emissiveIntensity: WINDOW_NIGHT_I,
+          envMapIntensity: config.tier.envMapIntensity,
+        }))
+        this.litMatPool.set(mkey, lm)
+        this.facadeMats.push(lm) // only lit towers dim with the day cycle
+      }
+      mat = lm
     }
     const mesh = new THREE.Mesh(bodyGeo, mat)
     mesh.scale.set(fx, h, fz)

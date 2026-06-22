@@ -69,7 +69,7 @@ export function HUD({
       {/* top-left meters */}
       <div style={{ ...panel, top: 52, left: 14 }}>
         <Logo />
-        <PilotProgress p={hud.progress} />
+        <PilotProgress p={hud.progress} compact={touch} />
         <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
         <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
         {hud.powerup && (
@@ -321,26 +321,32 @@ function WarpChip({ w, touch, onTap }: { w: HudState['warp']; touch: boolean; on
   )
 }
 
-function PilotProgress({ p }: { p: HudState['progress'] }) {
+function PilotProgress({ p, compact }: { p: HudState['progress']; compact?: boolean }) {
   const frac = p.xpSpan > 0 ? Math.max(0, Math.min(1, p.xpInto / p.xpSpan)) : 0
   const d = p.daily
   const dailyText = (DAILY_LABEL[d.kind] ?? ((t: number) => `Goal ${t}`))(d.target)
   return (
-    <div style={{ width: 160, marginBottom: 8 }}>
+    <div style={{ width: compact ? 134 : 160, marginBottom: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
-        <span style={{ ...microLabel, color: NEON.cyan }}>PILOT LV {p.level}</span>
+        <span style={{ ...microLabel, color: NEON.cyan }}>LV {p.level}</span>
         {p.streak > 0 && <span style={{ ...microLabel, color: NEON.orange }}>🔥 {p.streak}d</span>}
+        {compact && <span style={{ ...microLabel, color: d.claimed ? NEON.lime : NEON.text }}>{Math.min(d.progress, d.target)}/{d.target}</span>}
       </div>
       <div style={barTrack}>
         <div style={{ width: `${frac * 100}%`, height: '100%', background: NEON.cyan, boxShadow: `0 0 8px ${NEON.cyan}` }} />
       </div>
-      <div style={{ ...microLabel, color: NEON.dim, marginTop: 5, display: 'flex', justifyContent: 'space-between' }}>
-        <span>DAILY</span>
-        <span style={{ color: d.claimed ? NEON.lime : NEON.text }}>{Math.min(d.progress, d.target)}/{d.target}{d.claimed ? ' ✓' : ''}</span>
-      </div>
-      <div style={{ font: '600 9px/1.3 ui-monospace, Menlo, monospace', color: d.claimed ? NEON.lime : 'rgba(223,238,255,0.7)', letterSpacing: '0.04em' }}>
-        {d.claimed ? 'Daily complete!' : dailyText}
-      </div>
+      {/* On phones the long daily line is dropped to keep the corner clear. */}
+      {!compact && (
+        <>
+          <div style={{ ...microLabel, color: NEON.dim, marginTop: 5, display: 'flex', justifyContent: 'space-between' }}>
+            <span>DAILY</span>
+            <span style={{ color: d.claimed ? NEON.lime : NEON.text }}>{Math.min(d.progress, d.target)}/{d.target}{d.claimed ? ' ✓' : ''}</span>
+          </div>
+          <div style={{ font: '600 9px/1.3 ui-monospace, Menlo, monospace', color: d.claimed ? NEON.lime : 'rgba(223,238,255,0.7)', letterSpacing: '0.04em' }}>
+            {d.claimed ? 'Daily complete!' : dailyText}
+          </div>
+        </>
+      )}
     </div>
   )
 }

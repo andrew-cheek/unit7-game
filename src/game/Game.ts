@@ -310,7 +310,9 @@ export class Game {
     this.engine.scene.add(this.netLine)
 
     this.input.onUnlock = () => {
-      if (!this.paused) this.setPaused(true)
+      // The warp picker frees the cursor on purpose (so its buttons are clickable
+      // on desktop); don't treat that as a pause request.
+      if (!this.paused && !this.warpMenuOpen) this.setPaused(true)
     }
 
     this.controls = {
@@ -765,9 +767,10 @@ export class Game {
   /** Open/close the warp picker. Opens when charged or already warped (to switch
    *  / revert); otherwise nudges that it's still charging. */
   private toggleWarp() {
-    if (this.warpMenuOpen) { this.warpMenuOpen = false; return }
+    if (this.warpMenuOpen) { this.warpMenuOpen = false; this.input.requestLock(); return }
     if (this.warpCharge >= Game.WARP_TIME || this.warpActive) {
       this.warpMenuOpen = true
+      this.input.exitLock() // free the cursor so the picker is clickable on desktop
       this.audio.play('ui')
     } else {
       this.hud.banner = `WARP CHARGING ${Math.floor((this.warpCharge / Game.WARP_TIME) * 100)}%`
@@ -2064,6 +2067,10 @@ export class Game {
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') for (const p of this.arcadePortals) add(p.pos.x, p.pos.z, 'portal')
+    if (this.zone === 'earth') {
+      add(64, 8, 'objective') // race start gate
+      add(-110, 64, 'objective') // robot factory
+    }
     if (this.objTarget) add(this.objTarget.x, this.objTarget.z, 'objective') // guide blip
     return blips
   }
