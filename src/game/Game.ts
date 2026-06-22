@@ -20,6 +20,7 @@ import { DropIn } from './DropIn'
 import { CameraController } from './Camera'
 import { buildLandmarks } from './Landmarks'
 import { MissionSystem } from './MissionSystem'
+import { ArcadeSystem } from './ArcadeSystem'
 import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
@@ -135,9 +136,9 @@ export class Game {
   private arcadePortals: { kind: MinigameKind; pos: THREE.Vector3; group: THREE.Group; screenMat: THREE.MeshStandardMaterial }[] = []
   // The colossal Unit-7 robot presiding over the arcade (the hub centerpiece).
   private arcadeRobot: VehicleModel | null = null
-  // A short "conveyed in" transport beat played when you step onto a cabinet,
-  // before the minigame entry fires.
-  private pendingEntry: { kind: MinigameKind; pos: THREE.Vector3; t: number; beam: THREE.Mesh } | null = null
+  // Arcade cabinet proximity + transport beam, owned by ArcadeSystem. enter/exit
+  // minigame stays in Game (engine pause, player, rewards).
+  private arcade!: ArcadeSystem
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -312,6 +313,8 @@ export class Game {
     this.arcadeMats.push(...lm.mats)
     this.arcadeGeos.push(...lm.geos)
     this.arcadeTex.push(...lm.texs)
+    // Arcade proximity + transport beam (beam resources go into the arcade dispose arrays).
+    this.arcade = new ArcadeSystem(this.engine.scene, this.arcadeGeos, this.arcadeMats)
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -623,59 +626,6 @@ export class Game {
     if (this.world.dayFactor >= 0.98) {
       this.world.setTimeScale(1)
       this.morningSunrise = false
-    }
-  }
-
-  private checkArcadePortals() {
-    if (this.inMinigame || this.pendingEntry || this.arcadeCooldown > 0 || this.player.mode !== 'robot') return
-    if (this.trans.phase !== 'none') return
-    // The stand-here pad is in front of the cabinet (toward -Z), so trigger on
-    // proximity to the pad point, not the cabinet body.
-    for (const p of this.arcadePortals) {
-      if (this.nearCabinetPad(p.pos)) { this.startTransport(p.pos, p.kind); return }
-    }
-  }
-
-  private nearCabinetPad(pos: THREE.Vector3) {
-    const dx = this.player.position.x - pos.x
-    const dz = this.player.position.z - (pos.z - 2.2) // pad sits 2.2 in front (-Z)
-    return dx * dx + dz * dz < 2.2 * 2.2
-  }
-
-  /**
-   * Begins the "conveyed in" transport: spawns a bright beam column at the
-   * cabinet pad. When the short beat elapses (in update), the minigame entry
-   * fires. This animation IS the portal. The pending flag blocks re-triggering
-   * other cabinets meanwhile.
-   */
-  private startTransport(pos: THREE.Vector3, kind: MinigameKind) {
-    const padZ = pos.z - 2.2
-    const geo = new THREE.CylinderGeometry(1.5, 1.5, 16, 20, 1, true)
-    this.arcadeGeos.push(geo)
-    const mat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    this.arcadeMats.push(mat)
-    const beam = new THREE.Mesh(geo, mat)
-    beam.position.set(pos.x, 8, padZ)
-    beam.renderOrder = 5
-    this.engine.scene.add(beam)
-    this.audio.play('portal')
-    this.pendingEntry = { kind, pos: pos.clone(), t: 0, beam }
-  }
-
-  /** Advances the transport beat; enters the minigame when it completes. */
-  private updateTransport(dt: number) {
-    const e = this.pendingEntry
-    if (!e) return
-    e.t += dt
-    const k = Math.min(1, e.t / 0.7)
-    const mat = e.beam.material as THREE.MeshBasicMaterial
-    mat.opacity = Math.sin(k * Math.PI) * 0.7 // fade in then out
-    e.beam.scale.set(1 + k * 0.6, 1, 1 + k * 0.6)
-    e.beam.rotation.y += dt * 6
-    if (e.t >= 0.7) {
-      this.engine.scene.remove(e.beam)
-      this.pendingEntry = null
-      this.enterMinigame(e.kind, e.pos)
     }
   }
 
@@ -1831,7 +1781,6 @@ export class Game {
         if (s > 0) { this.player.launch(s); this.audio.play('portal'); vibrate(20) }
       }
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
-      if (onEarth && this.trans.phase === 'none') this.checkArcadePortals()
     }
 
     // Let the peaceful morning - sunrise, shuttle arrival, the crew filing into
@@ -1904,9 +1853,17 @@ export class Game {
       }
     }
 
+    // Arcade: advance the transport beam every frame; only start a new one when
+    // on foot, on Earth, not transitioning, and not in/cooling-down a minigame.
+    this.arcade.update(dt, {
+      canTrigger: onEarth && this.trans.phase === 'none' && !this.inMinigame && this.arcadeCooldown <= 0 && this.player.mode === 'robot',
+      playerPos: this.player.position,
+      portals: this.arcadePortals,
+      onEnter: (kind, pos) => this.enterMinigame(kind, pos),
+      onSfx: () => this.audio.play('portal'),
+    })
     // Animate the arcade cabinets: pulse their screens (Earth only). Zone
     // cabinets glow even off-world so you can find your way back.
-    this.updateTransport(dt)
     for (const p of this.arcadePortals) {
       p.group.visible = onEarth
       if (!onEarth) continue
