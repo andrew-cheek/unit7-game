@@ -98,6 +98,29 @@ export function HUD({
         </div>
       </div>
 
+      {/* street-race status (top-center, above the objective) */}
+      {hud.race && hud.race.state !== 'idle' && !hud.minigame && (
+        <div style={raceStyle}>
+          {hud.race.state === 'countdown' ? (
+            <span style={{ color: NEON.lime }}>RACE STARTS {Math.ceil(hud.race.countdown)}</span>
+          ) : hud.race.state === 'done' ? (
+            <span style={{ color: NEON.orange }}>FINISH · {hud.race.result.toFixed(1)}s</span>
+          ) : (
+            <>
+              <span style={{ color: NEON.dim, marginRight: 8 }}>RACE</span>
+              <span style={{ color: NEON.lime }}>CP {hud.race.cp}/{hud.race.total}</span>
+              <span style={{ color: NEON.cyan, marginLeft: 10 }}>{hud.race.time.toFixed(1)}s</span>
+              {hud.race.best > 0 && <span style={{ color: NEON.dim, marginLeft: 10 }}>best {hud.race.best}s</span>}
+            </>
+          )}
+        </div>
+      )}
+      {hud.race && hud.race.near && !hud.minigame && (
+        <div style={{ ...promptStyle, bottom: '28%', borderColor: 'rgba(155,255,77,0.6)' }}>
+          <span style={{ color: NEON.lime }}>DRIVE THROUGH THE GATE TO RACE</span>
+        </div>
+      )}
+
       {/* current objective (top-center, persistent + readable) */}
       {hud.objective && !hud.minigame && (
         <div style={objectiveStyle}>
@@ -536,6 +559,21 @@ const objectiveStyle: CSSProperties = {
   font: '700 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.1em',
   boxShadow: '0 0 16px rgba(155,255,77,0.2)',
+}
+const raceStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: 46,
+  transform: 'translateX(-50%)',
+  padding: '6px 16px',
+  whiteSpace: 'nowrap',
+  background: 'rgba(6,10,22,0.74)',
+  border: '1px solid rgba(155,255,77,0.5)',
+  borderRadius: 999,
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+  boxShadow: '0 0 16px rgba(155,255,77,0.25)',
+  zIndex: 16,
 }
 const bannerStyle: CSSProperties = {
   position: 'absolute',

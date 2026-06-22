@@ -71,6 +71,7 @@ export interface HudState {
   match: MatchView | null // non-null while a live Beam Wars duel is on screen
   progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
   warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
+  race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */

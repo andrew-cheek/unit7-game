@@ -25,6 +25,7 @@ import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
 import { DawnShow } from './DawnShow'
 import { RobotFactory } from './RobotFactory'
+import { RaceActivity, type RaceHud } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
@@ -152,6 +153,8 @@ export class Game {
   private playground!: Playground
   private dawnShow!: DawnShow
   private robotFactory!: RobotFactory
+  private race!: RaceActivity
+  private raceHud: RaceHud = { state: 'idle', cp: 0, total: 0, time: 0, best: 0, countdown: 0, result: 0, near: false }
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
   private timeFromQuery = false // ?time= debug override present (skip morning start)
@@ -254,6 +257,15 @@ export class Game {
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
     this.dawnShow = new DawnShow(this.engine.scene, this.physics)
     this.robotFactory = new RobotFactory(this.engine.scene, this.physics)
+    this.race = new RaceActivity(this.engine.scene, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    this.race.onSfx = (k) => this.audio.play(k === 'cp' ? 'ui' : 'objective')
+    this.race.onFinish = (credits, xp, isBest) => {
+      this.addCredits(credits)
+      this.awardXp(xp)
+      this.hud.banner = `RACE ${this.raceHud.result.toFixed(1)}s${isBest ? '  NEW BEST!' : ''}  +${credits}c`
+      this.bannerTimer = 3.2
+      vibrate(50)
+    }
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -356,6 +368,7 @@ export class Game {
       match: null,
       progress: this.buildProgressHud(),
       warp: { charge01: 0, ready: false, active: null, menu: false },
+      race: { ...this.raceHud },
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -851,6 +864,7 @@ export class Game {
     this.playground.setActive(zone)
     this.dawnShow.setActive(zone)
     this.robotFactory.setActive(zone === 'earth')
+    this.race.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -1939,6 +1953,7 @@ export class Game {
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
     if (onEarth) this.robotFactory.update(dt)
+    if (onEarth) this.raceHud = this.race.update(dt, this.player.position.x, this.player.position.z)
     this.updateBootPuffs(dt)
     this.updateBubbleShots(dt)
     if (this.net) {
@@ -2142,6 +2157,7 @@ export class Game {
       active: this.warpActive,
       menu: this.warpMenuOpen,
     }
+    this.hud.race = this.raceHud
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }
@@ -2160,6 +2176,7 @@ export class Game {
     this.playground.dispose()
     this.dawnShow.dispose()
     this.robotFactory.dispose()
+    this.race.dispose()
     for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
     this.bootPuffs = []
     this.bootGeo.dispose()
