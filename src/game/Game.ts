@@ -425,6 +425,7 @@ export class Game {
     this.applyAccentCosmetic()
 
     this.engine.onUpdate = this.update
+    this.engine.onRender = this.renderFrame
     // Expose the game handle in dev, or in prod when ?debug is present (lets a
     // remote playtest reach internals without a dev build).
     if (import.meta.env.DEV || /[?&]debug\b/.test(window.location.search)) {
@@ -1843,9 +1844,9 @@ export class Game {
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
     this.zones.update(dt, this.zone)
-    this.camera.update(dt, this.input, this.focus, this.buildFollowState())
-    // Keep the (desktop-only) depth-of-field focused on the subject.
-    this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
+    // NOTE: the follow camera + DoF focus are driven per RENDERED frame in
+    // renderFrame() (not here in the fixed sim step), so they stay smooth on
+    // high-refresh displays. `this.focus` computed above is what it reads.
     this.world.update(dt, this.focus)
     // Neon contrast by time of day: full bloom at night, eased down toward noon
     // so daylight reads warm/calm and night reads as the bright neon city.
@@ -1913,6 +1914,24 @@ export class Game {
     }
 
     this.pushHud(dt)
+  }
+
+  /**
+   * Per-rendered-frame work (decoupled from the 60Hz fixed sim step so it is
+   * smooth on 120/144Hz displays). Drains the look input every frame, then
+   * advances the follow camera + DoF with the real frame delta. CameraController
+   * uses frame-rate-independent damping, so a larger/smaller dt is safe.
+   *
+   * The camera is skipped while a cinematic / launch / pause / minigame owns or
+   * freezes it (those set the camera directly, or there is nothing to follow).
+   * Look is still drained in those states so deltas can't pile up and snap later.
+   */
+  private renderFrame = (frameDt: number) => {
+    this.input.drainLook()
+    if (this.dropIn || this.intro || this.matchView || this.paused || this.inMinigame || this.launch.active) return
+    this.camera.update(frameDt, this.input, this.focus, this.buildFollowState())
+    // Keep the (desktop-only) depth-of-field focused on the subject.
+    this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
   }
 
   /** Assemble the modern-cam follow hints for the current control subject. */

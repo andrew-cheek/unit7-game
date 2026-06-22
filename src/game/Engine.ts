@@ -57,6 +57,10 @@ export class Engine {
 
   /** Driven by Game; receives clamped delta + total elapsed seconds. */
   onUpdate: ((dt: number, elapsed: number) => void) | null = null
+  /** Driven by Game once per rendered frame (real clamped frame delta), before
+   *  the composer renders. Hosts per-frame work that must stay smooth at the
+   *  display rate rather than the fixed sim rate — the follow camera + look. */
+  onRender: ((frameDt: number) => void) | null = null
   /** Smoothed real render frame rate (the sim now always steps at a fixed dt). */
   fps = 60
   // Per-frame render stats, cached once at the end of each frame so a console
@@ -285,6 +289,15 @@ export class Engine {
     if (steps === maxSteps) this.accumulator = 0
 
     this.adapt(frame)
+    // Per-frame hook (camera + look) right before the render, using the real
+    // clamped frame delta so it stays smooth on high-refresh displays.
+    if (this.onRender) {
+      try {
+        this.onRender(frame)
+      } catch (err) {
+        console.error('[Unit7] render error:', err)
+      }
+    }
     this.renderer.info.reset()
     this.composer.render()
     // Snapshot the accumulated per-frame totals (scene draw + post passes).
@@ -379,6 +392,7 @@ export class Engine {
     this.disposed = true
     this.stop()
     this.onUpdate = null
+    this.onRender = null
     this.resizeObserver.disconnect()
 
     disposeObject(this.scene)

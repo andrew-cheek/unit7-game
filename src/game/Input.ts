@@ -246,9 +246,10 @@ export class Input {
   }
 
   // ---- per-frame ----------------------------------------------------------
-  /** Resolve keys + accumulated mouse-look into move intent and yaw/pitch. */
-  update() {
-    // Apply mouse-look deltas captured since last frame.
+  /** Apply accumulated pointer-look deltas to yaw/pitch. Drained once per
+   *  RENDERED frame (not per fixed sim step) so look stays smooth on high-refresh
+   *  displays. Safe to call in any state — with no deltas it is a no-op. */
+  drainLook() {
     if (this.lookDX !== 0 || this.lookDY !== 0) {
       this.lastLookMs = performance.now()
       this.yaw -= this.lookDX * config.camera.mouseSensitivity
@@ -260,7 +261,10 @@ export class Input {
       this.lookDX = 0
       this.lookDY = 0
     }
+  }
 
+  /** Resolve held keys into the move-intent vector. Called once per fixed step. */
+  update() {
     if (this.usingVirtualMove) {
       this.moveX = this.virtualMove.x
       this.moveY = this.virtualMove.y
