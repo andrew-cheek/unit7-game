@@ -25,6 +25,7 @@ const TRANSFORM: BtnDef = { label: 'TRANSFORM', action: 'morph', type: 'tap', co
 const DANCE: BtnDef = { label: 'DANCE', action: 'dance', type: 'tap', color: '#ff2bd0' }
 const BUBBLE: BtnDef = { label: 'BUBBLE', action: 'bubble', type: 'tap', color: '#9fe8ff' }
 const BOARD: BtnDef = { label: 'BOARD', action: 'board', type: 'tap', color: '#27e7ff' }
+const WARP: BtnDef = { label: 'WARP', action: 'warp', type: 'tap', color: '#b46bff' }
 
 /**
  * Touch controls: a left thumb-stick for movement, a right-side drag area for
@@ -54,6 +55,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     // On foot: core buttons, plus contextual ones only when useful.
     buttons = [RUN, JET, MORPH, BOARD, BUBBLE, DANCE]
     if (nearVehicle) buttons.unshift(ENTER)
+    // Warp is the headline ability: surface it on the thumb cluster the moment
+    // it's charged (or while you're warped, so you can switch / return to robot).
+    if (hud.warp.ready || hud.warp.active) buttons.unshift(WARP)
     if (hud.canCapture) buttons.push(CAPTURE) // only when a target is in range
     if (airborne) buttons.push(BOOST, CHUTE) // boost/chute matter when flying
   }
@@ -64,12 +68,16 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     : inVehicle
     ? 'EXIT VEHICLE'
     : nearVehicle
-      ? 'ENTER VEHICLE'
-      : airborne
-        ? 'CHUTE AVAILABLE'
-        : hud.fuel > 0.15
-          ? 'JETPACK READY'
-          : null
+      ? (hud.prompt && /RIDE TO/.test(hud.prompt) ? 'RIDE THE ROCKET' : 'ENTER')
+      : hud.warp.active
+        ? 'WARP: SWITCH / RETURN'
+        : hud.warp.ready
+          ? 'WARP READY'
+          : airborne
+            ? 'CHUTE AVAILABLE'
+            : hud.fuel > 0.15
+              ? 'JETPACK READY'
+              : null
 
   // --- joystick ---
   const onJoyDown = (e: RPointerEvent) => {
