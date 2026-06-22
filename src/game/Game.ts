@@ -18,6 +18,7 @@ import { Events } from './Events'
 import { Intro } from './Intro'
 import { DropIn } from './DropIn'
 import { CameraController } from './Camera'
+import { buildLandmarks } from './Landmarks'
 import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
@@ -302,7 +303,16 @@ export class Game {
     this.camera.snap(this.player.position)
     this.input.onZoom = (f) => this.camera.adjustZoom(f)
 
-    this.buildArcadePortals()
+    // Hub fixtures (arcade cabinets, plaza ring, rocket gate) are built in
+    // Landmarks.ts; Game keeps the data + the per-frame behaviour.
+    const lm = buildLandmarks(this.engine.scene, this.physics)
+    this.arcadePortals = lm.arcadePortals
+    this.plazaHub = lm.plazaHub
+    this.plazaMars = lm.plazaMars
+    this.rocketGate = lm.rocketGate
+    this.arcadeMats.push(...lm.mats)
+    this.arcadeGeos.push(...lm.geos)
+    this.arcadeTex.push(...lm.texs)
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -615,225 +625,6 @@ export class Game {
       this.world.setTimeScale(1)
       this.morningSunrise = false
     }
-  }
-
-  // --- Arcade portals ------------------------------------------------------
-
-  private buildArcadePortals() {
-    // The arcade is a row of cabinets in front of a colossal Unit-7 robot that
-    // presides over the whole hub. Stepping onto a cabinet "conveys" you in (a
-    // transport beam) and drops you into its game - a 2D cabinet game, or a
-    // planet (Mars / Moon) reskinned as just another cabinet.
-    const A = config.palette
-    // Cabinets are spread across a wide, deep plaza instead of one tight row, so
-    // the spawn view opens up (the central Mars portal is the hero) and you
-    // discover the arcades by walking out to them, not all at once. They stay
-    // clear of the spawn circle, the scattered plaza buildings, and the city
-    // grid (first towers sit at z=72).
-    this.arcadePortals.push(this.buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-18, 0, 12)))
-    this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(18, 0, 12)))
-    this.arcadePortals.push(this.buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-46, 0, 26)))
-    this.arcadePortals.push(this.buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(46, 0, 26)))
-    this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-34, 0, 46)))
-    this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(34, 0, 46)))
-    this.arcadePortals.push(this.buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(-12, 0, 56)))
-    this.arcadePortals.push(this.buildCabinet('drivemad', A.lime, 'DRIVE FRENZY', new THREE.Vector3(12, 0, 56)))
-    // Planet/moon travel stays as its own separate ring-portals (built in Zones),
-    // NOT arcade cabinets: the arcade takes you to the mini-games, the portals
-    // take you to other worlds.
-    this.buildArcadeRobot()
-    this.buildPlazaHub()
-    this.buildRocketGate()
-  }
-
-  /** One arcade cabinet bound to a 2D minigame. */
-  private buildCabinet(kind: MinigameKind, color: number, label: string, pos: THREE.Vector3) {
-    const { group, screenMat } = this.makeCabinet(color, label, pos)
-    return { kind, pos: pos.clone(), group, screenMat }
-  }
-
-  /**
-   * Builds the cabinet fixture: a dark body with a glowing screen and marquee
-   * facing the approaching player (toward -Z / the spawn), a control lip, and a
-   * faint stand-here floor pad. Returns the group and the screen material so the
-   * update loop can pulse it. Replaces the old glowing-ring portal look.
-   */
-  private makeCabinet(color: number, label: string, pos: THREE.Vector3) {
-    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
-    const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.arcadeGeos.push(geo); return geo }
-    const gy = this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
-    pos.y = gy
-    const g = new THREE.Group()
-    g.position.set(pos.x, gy, pos.z)
-    // Face the player approaching from spawn (south, -Z): screen on the -Z face.
-    const bodyMat = own(new THREE.MeshStandardMaterial({ color: 0x0b0e16, metalness: 0.5, roughness: 0.5 }))
-    const trimMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 1.6, roughness: 0.4 }))
-    const screenMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 1.5, roughness: 0.3 }))
-
-    const body = new THREE.Mesh(ownG(new THREE.BoxGeometry(3.2, 4.2, 1.8)), bodyMat)
-    body.position.y = 2.1
-    g.add(body)
-    // Glowing screen, tilted back slightly, on the front (-Z) face.
-    const tex = this.makeLabelTexture(label, color)
-    this.arcadeTex.push(tex)
-    const screenFace = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.4, roughness: 0.3 }))
-    const screen = new THREE.Mesh(ownG(new THREE.PlaneGeometry(2.5, 1.6)), screenFace)
-    screen.position.set(0, 2.6, -0.92)
-    screen.rotation.x = 0.12
-    g.add(screen)
-    // Marquee header strip.
-    const marquee = new THREE.Mesh(ownG(new THREE.BoxGeometry(3.0, 0.5, 0.2)), trimMat)
-    marquee.position.set(0, 4.0, -0.85)
-    g.add(marquee)
-    // Side neon trim.
-    for (const sx of [-1.55, 1.55]) {
-      const strip = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.12, 3.6, 0.12)), trimMat)
-      strip.position.set(sx, 2.2, -0.86)
-      g.add(strip)
-    }
-    // Stand-here floor pad.
-    const pad = new THREE.Mesh(ownG(new THREE.RingGeometry(1.4, 1.8, 28)), own(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    pad.rotation.x = -Math.PI / 2
-    pad.position.set(0, 0.06, -2.2)
-    g.add(pad)
-    // Keep the body from being walked through.
-    this.physics.colliders.push(new THREE.Box3(
-      new THREE.Vector3(pos.x - 1.6, 0, pos.z - 0.9),
-      new THREE.Vector3(pos.x + 1.6, 4.2, pos.z + 0.9),
-    ))
-    this.engine.scene.add(g)
-    return { group: g, screenMat }
-  }
-
-  /**
-   * The colossal Unit-7 robot at the back of the arcade, presiding over the
-   * cabinet row. Reuses the battle-mech model at hub scale (~70m), turned to
-   * face the player, with a big ARCADE marquee. Prototype: it's the landmark /
-   * "the arcade is a giant robot" read; the cabinets are the working portals.
-   */
-  private buildArcadeRobot() {
-    // The colossal Unit-7 robot at the back of the arcade is now a real,
-    // pilotable TITAN (spawned in Vehicles at 0,0,44): walk up and press G to
-    // climb in and stomp around. Here we just hang the ARCADE marquee above it.
-    const x = 0, z = 44
-    const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
-    const tex = this.makeLabelTexture('ARCADE', config.palette.cyan)
-    this.arcadeTex.push(tex)
-    const signMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
-    this.arcadeMats.push(signMat)
-    const sign = new THREE.Sprite(signMat)
-    sign.position.set(0, gy + 30, z - 6)
-    sign.scale.set(30, 7.5, 1)
-    this.engine.scene.add(sign)
-  }
-
-  /**
-   * The Portal Plaza hero landmark: a big glowing central ring, a tall sky beam
-   * visible from far away, and a neon ground ring marking the plaza. Sits at the
-   * centre of the arcade row so "Find Portal Plaza" has an obvious destination.
-   */
-  private buildPlazaHub() {
-    const cx = 0, cz = 13
-    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
-    const ownG = <T extends THREE.BufferGeometry>(g: T) => { this.arcadeGeos.push(g); return g }
-    const g = new THREE.Group()
-    const gy = this.physics.sampleGround(cx, cz, 40)?.y ?? 0
-    g.position.set(cx, gy, cz)
-    // Big vertical hero ring - the Mars gateway, in Mars amber/orange so it reads
-    // as "this is the way off-world" from across the plaza.
-    const mars = config.palette.orange
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: mars, fog: false })))
-    ring.position.y = 7
-    g.add(ring)
-    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xffd9a8, fog: false })))
-    ring2.position.y = 7
-    g.add(ring2)
-    // Translucent portal disc filling the ring so it reads as an enterable gate.
-    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(5.7, 40)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.18, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    disc.position.y = 7
-    g.add(disc)
-    // Floating MARS label above the gate.
-    const labelTex = this.makeLabelTexture('MARS', mars)
-    this.arcadeTex.push(labelTex)
-    const label = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthWrite: false })))
-    label.position.set(0, 15, 0)
-    label.scale.set(9, 2.25, 1)
-    g.add(label)
-    // Tall sky beam, visible from across the map (Mars amber). It's a wide
-    // additive column right where the player looks at spawn, so it's skipped on
-    // the low (mobile) tier - the ring + disc + label still mark the gateway -
-    // saving that full-height overdraw on phones.
-    let beamMat: THREE.MeshBasicMaterial | null = null
-    if (config.tier.fxScale >= 0.6) {
-      const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-      beam.position.y = 110
-      // Explicit renderOrder so this tall additive column always sorts after the
-      // city and in a stable slot, instead of swapping order with other
-      // transparent layers as the camera moves (the additive-flicker fix).
-      beam.renderOrder = 4
-      g.add(beam)
-      beamMat = beam.material as THREE.MeshBasicMaterial
-    }
-    // Neon ground ring marking the plaza floor (the stand-here Mars pad).
-    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    decal.rotation.x = -Math.PI / 2
-    decal.position.y = 0.15
-    g.add(decal)
-    this.engine.scene.add(g)
-    this.plazaHub = { group: g, ring, ring2, beamMat }
-    this.plazaMars = { pos: new THREE.Vector3(cx, gy, cz), radius: 4.5 }
-  }
-
-  /**
-   * Dresses the parked rocket (at 2,-20) as an obvious off-world gateway: a
-   * glowing launch-pad ring on the ground and a tall readable sign, so it reads
-   * as "go to Mars / the Moon", not background scenery. Earth-only.
-   */
-  private buildRocketGate() {
-    const own = <T extends THREE.Material>(m: T) => { this.arcadeMats.push(m); return m }
-    const ownG = <T extends THREE.BufferGeometry>(g: T) => { this.arcadeGeos.push(g); return g }
-    const x = 2, z = -20
-    const gy = this.physics.sampleGround(x, z, 40)?.y ?? 0
-    const g = new THREE.Group()
-    g.position.set(x, gy, z)
-    const ring = new THREE.Mesh(ownG(new THREE.RingGeometry(5, 6.3, 44)), own(new THREE.MeshBasicMaterial({ color: config.palette.orange, transparent: true, opacity: 0.45, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    ring.rotation.x = -Math.PI / 2
-    ring.position.y = 0.14
-    g.add(ring)
-    const tex = this.makeLabelTexture('LAUNCH → MARS / MOON', config.palette.orange)
-    this.arcadeTex.push(tex)
-    const sign = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })))
-    sign.position.set(0, 17, 0)
-    sign.scale.set(15, 3.75, 1)
-    g.add(sign)
-    this.engine.scene.add(g)
-    this.rocketGate = g
-  }
-
-  /** A neon text label baked to a canvas texture for a billboard sprite. */
-  private makeLabelTexture(text: string, color = 0x27e7ff): THREE.CanvasTexture {
-    const cv = document.createElement('canvas')
-    cv.width = 512
-    cv.height = 128
-    const ctx = cv.getContext('2d')!
-    ctx.clearRect(0, 0, cv.width, cv.height)
-    // Shrink the font until the label fits the canvas, so longer signage
-    // ("LAUNCH -> MARS / MOON") doesn't clip at the edges.
-    let size = 72
-    ctx.font = `800 ${size}px ui-monospace, Menlo, monospace`
-    while (size > 30 && ctx.measureText(text).width > cv.width - 36) {
-      size -= 4
-      ctx.font = `800 ${size}px ui-monospace, Menlo, monospace`
-    }
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.shadowColor = '#' + color.toString(16).padStart(6, '0')
-    ctx.shadowBlur = 22
-    ctx.fillStyle = '#eaf6ff'
-    ctx.fillText(text, cv.width / 2, cv.height / 2)
-    const tex = new THREE.CanvasTexture(cv)
-    tex.colorSpace = THREE.SRGBColorSpace
-    return tex
   }
 
   private checkArcadePortals() {
