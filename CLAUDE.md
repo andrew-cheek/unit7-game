@@ -6,11 +6,11 @@ This file tells Claude Code how Unit 7 is built and how to work on it. Read it a
 
 A Three.js sci-fi sandbox game running in the browser. The defining constraint: **it must look great on desktop and run smoothly on mobile.** These two goals pull in opposite directions, so the architecture is built around quality tiers, not a single render path.
 
-Live at humanoidrobots.com. Repo: github.com/andrew-cheek/unit7-game.
+Live at https://unit7.humanoidrobots.com. Repo: https://github.com/andrew-cheek/unit7-game.
 
 ## The core gameplay loop
 
-The game is structured as a quest chain across four modes. Each mode should be a self-contained scene that the mode manager loads and unloads cleanly. Do not build these as one monolithic scene.Live at https://unit7.humanoidrobots.com
+The game is structured as a quest chain across four modes. Each mode should be a self-contained scene that the mode manager loads and unloads cleanly. Do not build these as one monolithic scene.
 
 1. **Booster Run** - traversal / movement mode
 2. **Rocket Launch minigame** - timing/skill minigame
