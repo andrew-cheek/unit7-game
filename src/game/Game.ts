@@ -19,6 +19,7 @@ import { Intro } from './Intro'
 import { DropIn } from './DropIn'
 import { CameraController } from './Camera'
 import { buildLandmarks } from './Landmarks'
+import { MissionSystem } from './MissionSystem'
 import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
@@ -100,11 +101,9 @@ export class Game {
   private launch = { active: false, phase: 'ascend' as 'ascend' | 'descend', t: 0, target: 'earth' as Zone, rocket: null as Vehicle | null, land: new THREE.Vector3() }
   private travelCooldown = 0
   private bannerTimer = 0
-  // Lightweight objective chain (config.missions). One active at a time.
-  private missionIdx = 0
+  // Objective chain (config.missions) + guided beacon, owned by MissionSystem.
+  private missions!: MissionSystem
   private missionPopupTimer = 0
-  private captureBase = 0
-  private minigamePlayed = false
   private heroLight!: THREE.PointLight
   private mechAirborne = false
   private footTimer = 0
@@ -130,9 +129,6 @@ export class Game {
   private profile: Profile = loadProfile()
   private credits = 0
   private unlocked = new Set<string>()
-  private objTarget: THREE.Vector3 | null = null
-  private objBeacon!: THREE.Group
-  private objBeaconMats: THREE.Material[] = []
   private scratchFwd = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
@@ -251,9 +247,9 @@ export class Game {
     // Credits balance + unlocked vehicles from the saved profile.
     this.credits = this.profile.credits
     this.unlocked = new Set(this.profile.unlocks)
-    // Guided objective beacon: a tall glowing column placed at the current goal.
-    this.objBeacon = this.buildObjectiveBeacon()
-    this.engine.scene.add(this.objBeacon)
+    // Objective chain + guided beacon (a tall glowing column at the current goal).
+    this.missions = new MissionSystem()
+    this.engine.scene.add(this.missions.objBeacon)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
     this.missiles = new Missiles(this.engine.scene)
     const npcCount = Math.round(config.npc.count * tier.densityScale)
@@ -682,7 +678,7 @@ export class Game {
 
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
-    this.minigamePlayed = true
+    this.missions.markMinigamePlayed()
     this.warpRevert() // can't carry a warp form into a cabinet game
     this.minigameStartMs = typeof performance !== 'undefined' ? performance.now() : 0
     trackEvent('minigame_start', { game: kind })
@@ -1059,22 +1055,6 @@ export class Game {
     this.audio.play('fire')
   }
 
-  private buildObjectiveBeacon(): THREE.Group {
-    const g = new THREE.Group()
-    const own = <T extends THREE.Material>(m: T) => { this.objBeaconMats.push(m); return m }
-    const colMat = own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 60, 12, 1, true), colMat)
-    col.position.y = 30
-    g.add(col)
-    const ringMat = own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.8, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const ring = new THREE.Mesh(new THREE.RingGeometry(2.4, 3.2, 28), ringMat)
-    ring.rotation.x = -Math.PI / 2
-    ring.position.y = 0.4
-    g.add(ring)
-    g.visible = false
-    return g
-  }
-
   private addCredits(n: number) {
     this.credits += n
     this.profile.credits = this.credits
@@ -1083,92 +1063,6 @@ export class Game {
 
   private isUnlocked(kind: string): boolean {
     return !MECH_COST[kind] || this.unlocked.has(kind)
-  }
-
-  /** World position the current objective points at (for the beacon + radar). */
-  private computeObjectiveTarget(): THREE.Vector3 | null {
-    const m = config.missions[this.missionIdx]
-    if (!m) return null
-    if (m.type === 'reach') return new THREE.Vector3(m.x ?? 0, 0, m.z ?? 0)
-    if (this.zone !== 'earth') return null // beacons only guide within the city
-    if (m.type === 'mech') {
-      // Guide to the nearest mech you can actually board (free/unlocked first).
-      let best: THREE.Vector3 | null = null, bd = Infinity
-      for (const v of this.vehicles.list) {
-        if (!isMech(v.kind) || !this.isUnlocked(v.kind)) continue
-        const d = (v.position.x - this.player.position.x) ** 2 + (v.position.z - this.player.position.z) ** 2
-        if (d < bd) { bd = d; best = v.position }
-      }
-      return best ? best.clone() : null
-    }
-    if (m.type === 'zone') {
-      for (const p of this.zones.portalsFor('earth')) if (p.target === m.zone) return p.position.clone()
-      return null
-    }
-    if (m.type === 'minigame') {
-      let best: THREE.Vector3 | null = null, bd = Infinity
-      for (const p of this.arcadePortals) {
-        const d = (p.pos.x - this.player.position.x) ** 2 + (p.pos.z - this.player.position.z) ** 2
-        if (d < bd) { bd = d; best = p.pos }
-      }
-      return best ? best.clone() : null
-    }
-    return null // capture: no fixed beacon (aliens roam)
-  }
-
-  /**
-   * Drive the one-active-at-a-time objective chain (config.missions). Detects
-   * completion by type, advances with a short banner, and keeps hud.objective in
-   * sync. Purely additive: ignored once the chain is finished (free roam).
-   */
-  private updateObjectives() {
-    const list = config.missions
-    if (this.missionIdx >= list.length) { this.hud.objective = null; this.objTarget = null; this.objBeacon.visible = false; return }
-    const m = list[this.missionIdx]
-    let done = false
-    switch (m.type) {
-      case 'reach':
-        done = this.zone === 'earth' && Math.hypot(this.player.position.x - (m.x ?? 0), this.player.position.z - (m.z ?? 0)) < (m.radius ?? 8)
-        break
-      case 'mech':
-        done = !!this.vehicles.current && isMech(this.vehicles.current.kind)
-        break
-      case 'zone':
-        done = this.zone === m.zone
-        break
-      case 'capture':
-        done = this.hud.captured - this.captureBase >= (m.count ?? 1)
-        break
-      case 'minigame':
-        done = this.minigamePlayed
-        break
-    }
-    if (done) {
-      this.missionIdx++
-      this.hud.banner = 'OBJECTIVE COMPLETE'
-      this.bannerTimer = 1.4
-      vibrate(40)
-      this.audio.play('objective')
-      trackEvent('objective_complete', { objective: m.title })
-      this.world.pushHeadline(`UNIT 7 PILOT COMPLETES "${m.title}"`)
-      const nextM = list[this.missionIdx]
-      if (nextM?.type === 'capture') this.captureBase = this.hud.captured
-      this.hud.objective = nextM?.title ?? 'Free roam: explore the world!'
-    } else {
-      this.hud.objective = m.title
-    }
-    // Guided beacon: drop a glowing column on the current goal + show distance.
-    this.objTarget = this.computeObjectiveTarget()
-    if (this.objTarget && this.zone === 'earth') {
-      const gy = this.physics.sampleGround(this.objTarget.x, this.objTarget.z, 80)?.y ?? 0
-      this.objBeacon.position.set(this.objTarget.x, gy, this.objTarget.z)
-      this.objBeacon.visible = true
-      this.objBeacon.rotation.y += 0.4 * (1 / 60)
-      const d = Math.round(Math.hypot(this.objTarget.x - this.player.position.x, this.objTarget.z - this.player.position.z))
-      if (this.hud.objective) this.hud.objective = `${this.hud.objective} · ${d}m`
-    } else {
-      this.objBeacon.visible = false
-    }
   }
 
   /**
@@ -1949,7 +1843,25 @@ export class Game {
 
     // Hero fill light trails the subject so the robot/mech stays readable.
     this.heroLight.position.set(this.focus.x + 2, this.focus.y + 6, this.focus.z + 2)
-    this.updateObjectives()
+    this.hud.objective = this.missions.update({
+      zone: this.zone,
+      playerPos: this.player.position,
+      captured: this.hud.captured,
+      currentVehicle: this.vehicles.current,
+      vehicles: this.vehicles.list,
+      isUnlocked: (k) => this.isUnlocked(k),
+      earthPortals: this.zones.portalsFor('earth'),
+      arcadePortals: this.arcadePortals,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0,
+      onComplete: (title) => {
+        this.hud.banner = 'OBJECTIVE COMPLETE'
+        this.bannerTimer = 1.4
+        vibrate(40)
+        this.audio.play('objective')
+        trackEvent('objective_complete', { objective: title })
+        this.world.pushHeadline(`UNIT 7 PILOT COMPLETES "${title}"`)
+      },
+    })
 
     if (onEarth) this.npcs.update(dt, this.player.position)
     if (onEarth) this.events.update(dt, this.player.position)
@@ -2094,7 +2006,8 @@ export class Game {
       add(64, 8, 'objective') // race start gate
       add(-110, 64, 'objective') // robot factory
     }
-    if (this.objTarget) add(this.objTarget.x, this.objTarget.z, 'objective') // guide blip
+    const ot = this.missions.objTarget
+    if (ot) add(ot.x, ot.z, 'objective') // guide blip
     return blips
   }
 
@@ -2228,7 +2141,7 @@ export class Game {
     this.bubbleShots = []
     this.bubbleShotGeo.dispose()
     this.bubbleShotMat.dispose()
-    this.objBeaconMats.forEach((m) => m.dispose())
+    this.missions.dispose()
     this.input.dispose()
     this.player.dispose()
     this.vehicles.dispose()
