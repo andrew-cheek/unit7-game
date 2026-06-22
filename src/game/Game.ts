@@ -139,6 +139,9 @@ export class Game {
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
   private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial } | null = null
+  // The central plaza hero ring doubles as the Mars gateway: step into it to
+  // travel. Stored as a plain trigger so checkPortals can route it like a ring.
+  private plazaMars: { pos: THREE.Vector3; radius: number } | null = null
   private rocketGate: THREE.Group | null = null
   private inMinigame = false
   private activePortal = new THREE.Vector3()
@@ -485,14 +488,19 @@ export class Game {
     // transport beam) and drops you into its game - a 2D cabinet game, or a
     // planet (Mars / Moon) reskinned as just another cabinet.
     const A = config.palette
-    this.arcadePortals.push(this.buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-15, 0, 10)))
-    this.arcadePortals.push(this.buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-7.5, 0, 14)))
-    this.arcadePortals.push(this.buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(0, 0, 16)))
-    this.arcadePortals.push(this.buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(7.5, 0, 14)))
-    this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(15, 0, 10)))
-    this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
-    this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
-    this.arcadePortals.push(this.buildCabinet('drivemad', A.lime, 'DRIVE FRENZY', new THREE.Vector3(-40, 0, 22)))
+    // Cabinets are spread across a wide, deep plaza instead of one tight row, so
+    // the spawn view opens up (the central Mars portal is the hero) and you
+    // discover the arcades by walking out to them, not all at once. They stay
+    // clear of the spawn circle, the scattered plaza buildings, and the city
+    // grid (first towers sit at z=72).
+    this.arcadePortals.push(this.buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-18, 0, 12)))
+    this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(18, 0, 12)))
+    this.arcadePortals.push(this.buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-46, 0, 26)))
+    this.arcadePortals.push(this.buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(46, 0, 26)))
+    this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-34, 0, 46)))
+    this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(34, 0, 46)))
+    this.arcadePortals.push(this.buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(-12, 0, 56)))
+    this.arcadePortals.push(this.buildCabinet('drivemad', A.lime, 'DRIVE FRENZY', new THREE.Vector3(12, 0, 56)))
     // Planet/moon travel stays as its own separate ring-portals (built in Zones),
     // NOT arcade cabinets: the arcade takes you to the mini-games, the portals
     // take you to other worlds.
@@ -594,28 +602,42 @@ export class Game {
     const g = new THREE.Group()
     const gy = this.physics.sampleGround(cx, cz, 40)?.y ?? 0
     g.position.set(cx, gy, cz)
-    // Big vertical hero ring.
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: 0x1aa6c4, fog: false })))
+    // Big vertical hero ring - the Mars gateway, in Mars amber/orange so it reads
+    // as "this is the way off-world" from across the plaza.
+    const mars = config.palette.orange
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: mars, fog: false })))
     ring.position.y = 7
     g.add(ring)
-    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xc41f9e, fog: false })))
+    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xffd9a8, fog: false })))
     ring2.position.y = 7
     g.add(ring2)
-    // Tall sky beam, visible from across the map.
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    // Translucent portal disc filling the ring so it reads as an enterable gate.
+    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(5.7, 40)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.18, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    disc.position.y = 7
+    g.add(disc)
+    // Floating MARS label above the gate.
+    const labelTex = this.makeLabelTexture('MARS', mars)
+    this.arcadeTex.push(labelTex)
+    const label = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthWrite: false })))
+    label.position.set(0, 15, 0)
+    label.scale.set(9, 2.25, 1)
+    g.add(label)
+    // Tall sky beam, visible from across the map (Mars amber).
+    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     beam.position.y = 110
     // Explicit renderOrder so this tall additive column always sorts after the
     // city and in a stable slot, instead of swapping order with other
     // transparent layers as the camera moves (the additive-flicker fix).
     beam.renderOrder = 4
     g.add(beam)
-    // Neon ground ring marking the plaza floor.
-    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    // Neon ground ring marking the plaza floor (the stand-here Mars pad).
+    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     decal.rotation.x = -Math.PI / 2
     decal.position.y = 0.15
     g.add(decal)
     this.engine.scene.add(g)
     this.plazaHub = { group: g, ring, ring2, beamMat: beam.material as THREE.MeshBasicMaterial }
+    this.plazaMars = { pos: new THREE.Vector3(cx, gy, cz), radius: 4.5 }
   }
 
   /**
@@ -1364,8 +1386,12 @@ export class Game {
     for (const p of this.zones.portalsFor(this.zone)) {
       if (Math.hypot(px - p.position.x, pz - p.position.z) < p.radius) {
         this.requestTravel(p.target)
-        break
+        return
       }
+    }
+    // The central plaza hero ring is the Earth->Mars gateway.
+    if (this.zone === 'earth' && this.plazaMars && Math.hypot(px - this.plazaMars.pos.x, pz - this.plazaMars.pos.z) < this.plazaMars.radius) {
+      this.requestTravel('mars')
     }
   }
 
@@ -2067,6 +2093,7 @@ export class Game {
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') for (const p of this.arcadePortals) add(p.pos.x, p.pos.z, 'portal')
+    if (this.zone === 'earth' && this.plazaMars) add(this.plazaMars.pos.x, this.plazaMars.pos.z, 'portal') // Mars gateway
     if (this.zone === 'earth') {
       add(64, 8, 'objective') // race start gate
       add(-110, 64, 'objective') // robot factory

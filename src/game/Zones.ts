@@ -43,10 +43,10 @@ export class Zones {
   constructor(scene: THREE.Scene) {
     this.scene = scene
 
-    // Well-separated gateways flanking the plaza (clear of the arcade row at
-    // x -33..33) so each portal has breathing room and its own focal point.
-    this.earthPortals.push(this.makePortal('mars', config.palette.orange, new THREE.Vector3(-46, 0, 6)))
-    this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(46, 0, 6)))
+    // Mars is reached through the central Portal Plaza hero ring (wired in Game),
+    // so the only ring portal on Earth is the Moon, set well out to the side so
+    // the spawn view stays open instead of being framed by gateways.
+    this.earthPortals.push(this.makePortal('moon', 0xbfe6ff, new THREE.Vector3(56, 0, 22)))
     for (const p of this.earthPortals) this.earthPortalGroup.add(p.group)
     // Planet/moon travel is its own thing, separate from the arcade: these ring
     // portals are how you leave Earth for another world.
