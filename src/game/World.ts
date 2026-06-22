@@ -287,19 +287,24 @@ export class World {
     const pitch = config.world.block + config.world.roadWidth
     const cells = Math.floor(half / pitch)
     const lineMat = this.glow(config.palette.cyan, 2.2)
-    const lineGeo = this.boxGeo
-    const make = (x: number, z: number, sx: number, sz: number) => {
-      const m = new THREE.Mesh(lineGeo, lineMat)
-      m.scale.set(sx, 0.05, sz)
-      m.position.set(x, 0.03, z)
-      this.group.add(m)
-    }
+    // All the avenue stripes share one material + the unit box, so draw the whole
+    // grid as a single InstancedMesh instead of dozens of meshes.
+    const lines: Array<[number, number, number, number]> = [] // x, z, sx, sz
     for (let i = -cells; i <= cells; i++) {
       const c = i * pitch + pitch / 2
       if (Math.abs(c) > half) continue
-      make(c, 0, 0.4, half * 2) // along Z
-      make(0, c, half * 2, 0.4) // along X
+      lines.push([c, 0, 0.4, half * 2]) // along Z
+      lines.push([0, c, half * 2, 0.4]) // along X
     }
+    const inst = new THREE.InstancedMesh(this.boxGeo, lineMat, lines.length)
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
+    lines.forEach(([x, z, sx, sz], k) => {
+      m.compose(pos.set(x, 0.03, z), q, scl.set(sx, 0.05, sz))
+      inst.setMatrixAt(k, m)
+    })
+    inst.instanceMatrix.needsUpdate = true
+    inst.frustumCulled = false
+    this.group.add(inst)
   }
 
   /**
@@ -1399,83 +1404,76 @@ export class World {
     const floorMat = this.own(new THREE.MeshStandardMaterial({ color: 0x14171f, metalness: 0.4, roughness: 0.7 }))
     const deskMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3142, metalness: 0.6, roughness: 0.5 }))
     const workerMat = this.own(new THREE.MeshStandardMaterial({ color: config.palette.robot, metalness: 0.7, roughness: 0.4 }))
-    // Warm interior glow so the office reads as lit and occupied.
-    const lightMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffe6b0 }))
+    const lightMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffe6b0 })) // warm interior glow
+    const monMat = this.glow(config.palette.cyan, 2.2)
+    const cbarMat = this.glow(config.palette.lime, 2.4)
+    const highTier = config.tier.fxScale >= 0.6
+    const winMat = highTier ? this.own(new THREE.MeshStandardMaterial({ color: 0x0a1422, emissive: 0xffe0a0, emissiveIntensity: 1.5, roughness: 0.5 })) : null
 
-    const W = 8, D = 6, H = 3.6
+    const W = 8, D = 6, H = 3.6, TOWER_H = 26
+    // Every office is structurally identical and differs only by its anchor
+    // transform, so the whole row is drawn with one InstancedMesh per material
+    // (~10 draw calls for all 7 offices instead of ~150 individual meshes) -
+    // identical look, far cheaper. Parts are defined once in office-local space.
+    interface Part { mat: THREE.Material; p: [number, number, number]; s: [number, number, number]; cast?: boolean; recv?: boolean }
+    const parts: Part[] = [
+      { mat: floorMat, p: [0, 0.1, -D / 2], s: [W, 0.2, D], recv: true },
+      { mat: wallMat, p: [0, H / 2, -D], s: [W, H, 0.3] },
+      { mat: wallMat, p: [-W / 2, H / 2, -D / 2], s: [0.3, H, D] },
+      { mat: wallMat, p: [W / 2, H / 2, -D / 2], s: [0.3, H, D] },
+      { mat: wallMat, p: [0, H, -D / 2], s: [W, 0.25, D], cast: true },
+      { mat: lightMat, p: [0, H - 0.2, -D / 2], s: [W * 0.7, 0.12, 0.5] },
+    ]
+    for (const dx of [-W / 3, 0, W / 3]) {
+      parts.push({ mat: deskMat, p: [dx, 1.05, -D + 1.4], s: [1.8, 0.12, 1.0] })
+      parts.push({ mat: monMat, p: [dx, 1.5, -D + 1.05], s: [0.9, 0.6, 0.08] })
+      parts.push({ mat: workerMat, p: [dx, 1.25, -D + 2.1], s: [0.5, 0.7, 0.4], cast: true })
+      parts.push({ mat: workerMat, p: [dx, 1.75, -D + 2.1], s: [0.3, 0.3, 0.3] })
+    }
+    for (const cz of [-D + 1.2, -D + 3.0]) {
+      parts.push({ mat: workerMat, p: [W / 2 - 0.6, 0.95, cz], s: [0.5, 1.5, 0.4], cast: true })
+      parts.push({ mat: cbarMat, p: [W / 2 - 0.15, 1.1, cz], s: [0.12, 1.0, 0.18] })
+    }
+    if (highTier && winMat) {
+      parts.push({ mat: wallMat, p: [0, TOWER_H / 2 + H, -D / 2], s: [W + 1.2, TOWER_H, D + 0.6], cast: true })
+      for (let row = 0; row < 6; row++) parts.push({ mat: winMat, p: [0, H + 2.6 + row * 3.7, 0.05], s: [W * 0.78, 1.1, 0.2] })
+    }
+
+    const q = new THREE.Quaternion(), ident = new THREE.Quaternion()
+    const officeM = new THREE.Matrix4(), localM = new THREE.Matrix4(), worldM = new THREE.Matrix4()
+    const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3(), sv = new THREE.Vector3()
+    const groups = new Map<THREE.Material, { ms: THREE.Matrix4[]; cast: boolean; recv: boolean }>()
     for (const a of OFFICE_ANCHORS) {
-      const g = new THREE.Group()
-      g.position.copy(a.office)
-      g.rotation.y = a.face
-      // Local space: open front at +Z, room extends to -Z.
-      const floor = new THREE.Mesh(this.boxGeo, floorMat)
-      floor.scale.set(W, 0.2, D); floor.position.set(0, 0.1, -D / 2)
-      floor.receiveShadow = true
-      g.add(floor)
-      const back = new THREE.Mesh(this.boxGeo, wallMat)
-      back.scale.set(W, H, 0.3); back.position.set(0, H / 2, -D)
-      g.add(back)
-      for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(this.boxGeo, wallMat)
-        side.scale.set(0.3, H, D); side.position.set(sx * W / 2, H / 2, -D / 2)
-        g.add(side)
+      q.setFromAxisAngle(up, a.face)
+      officeM.compose(a.office, q, one)
+      for (const part of parts) {
+        localM.compose(pv.set(part.p[0], part.p[1], part.p[2]), ident, sv.set(part.s[0], part.s[1], part.s[2]))
+        worldM.multiplyMatrices(officeM, localM)
+        let grp = groups.get(part.mat)
+        if (!grp) { grp = { ms: [], cast: false, recv: false }; groups.set(part.mat, grp) }
+        grp.ms.push(worldM.clone())
+        if (part.cast) grp.cast = true
+        if (part.recv) grp.recv = true
       }
-      const roof = new THREE.Mesh(this.boxGeo, wallMat)
-      roof.scale.set(W, 0.25, D); roof.position.set(0, H, -D / 2)
-      roof.castShadow = true
-      g.add(roof)
-      // Ceiling light strip.
-      const strip = new THREE.Mesh(this.boxGeo, lightMat)
-      strip.scale.set(W * 0.7, 0.12, 0.5); strip.position.set(0, H - 0.2, -D / 2)
-      g.add(strip)
-      // Three desks across the front, each a seated worker robot + glowing monitor.
-      for (const dx of [-W / 3, 0, W / 3]) {
-        const desk = new THREE.Mesh(this.boxGeo, deskMat)
-        desk.scale.set(1.8, 0.12, 1.0); desk.position.set(dx, 1.05, -D + 1.4)
-        g.add(desk)
-        const monitor = new THREE.Mesh(this.boxGeo, this.glow(config.palette.cyan, 2.2))
-        monitor.scale.set(0.9, 0.6, 0.08); monitor.position.set(dx, 1.5, -D + 1.05)
-        g.add(monitor)
-        // Seated worker: torso + head, facing the monitor (toward -Z).
-        const torso = new THREE.Mesh(this.boxGeo, workerMat)
-        torso.scale.set(0.5, 0.7, 0.4); torso.position.set(dx, 1.25, -D + 2.1)
-        torso.castShadow = true
-        g.add(torso)
-        const head = new THREE.Mesh(this.boxGeo, workerMat)
-        head.scale.set(0.3, 0.3, 0.3); head.position.set(dx, 1.75, -D + 2.1)
-        g.add(head)
-      }
-      // Two worker robots charging against the side wall (glowing charge bars).
-      for (const cz of [-D + 1.2, -D + 3.0]) {
-        const charger = new THREE.Mesh(this.boxGeo, workerMat)
-        charger.scale.set(0.5, 1.5, 0.4); charger.position.set(W / 2 - 0.6, 0.95, cz)
-        charger.castShadow = true
-        g.add(charger)
-        const cbar = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 2.4))
-        cbar.scale.set(0.12, 1.0, 0.18); cbar.position.set(W / 2 - 0.15, 1.1, cz)
-        g.add(cbar)
-      }
-      // A tall window-lit tower rising behind the room so it reads as an office
-      // building from across the plaza. Skipped on the low (mobile) tier to keep
-      // the draw count down - the lit room + sign + workers still read there.
-      if (config.tier.fxScale >= 0.6) {
-        const TOWER_H = 26
-        const tower = new THREE.Mesh(this.boxGeo, wallMat)
-        tower.scale.set(W + 1.2, TOWER_H, D + 0.6); tower.position.set(0, TOWER_H / 2 + H, -D / 2)
-        tower.castShadow = true
-        g.add(tower)
-        const winMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0a1422, emissive: 0xffe0a0, emissiveIntensity: 1.5, roughness: 0.5 }))
-        for (let row = 0; row < 6; row++) {
-          const band = new THREE.Mesh(this.boxGeo, winMat)
-          band.scale.set(W * 0.78, 1.1, 0.2); band.position.set(0, H + 2.6 + row * 3.7, 0.05)
-          g.add(band)
-        }
-      }
+    }
+    for (const [mat, grp] of groups) {
+      const inst = new THREE.InstancedMesh(this.boxGeo, mat, grp.ms.length)
+      for (let i = 0; i < grp.ms.length; i++) inst.setMatrixAt(i, grp.ms[i])
+      inst.instanceMatrix.needsUpdate = true
+      inst.castShadow = grp.cast
+      inst.receiveShadow = grp.recv
+      inst.frustumCulled = false // central + spread across instances; never cull the set
+      this.group.add(inst)
+    }
+    // Signs stay individual for their per-office colour (only 7 meshes).
+    for (const a of OFFICE_ANCHORS) {
       const signColor = [config.palette.cyan, config.palette.magenta, config.palette.orange, config.palette.lime][Math.abs((a.office.x + a.office.z) | 0) % 4]
       const sign = new THREE.Mesh(this.boxGeo, this.glow(signColor, 2.6))
-      sign.scale.set(W * 0.85, 0.9, 0.3); sign.position.set(0, H + 0.7, 0.2)
-      g.add(sign)
-      this.group.add(g)
+      sign.scale.set(W * 0.85, 0.9, 0.3)
+      sign.position.set(a.office.x, H + 0.7, a.office.z)
+      sign.rotation.y = a.face
+      sign.translateZ(0.2)
+      this.group.add(sign)
     }
   }
 
