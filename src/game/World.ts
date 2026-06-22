@@ -1456,17 +1456,20 @@ export class World {
         g.add(cbar)
       }
       // A tall window-lit tower rising behind the room so it reads as an office
-      // building from across the plaza, with a glowing sign band over the entrance.
-      const TOWER_H = 26
-      const tower = new THREE.Mesh(this.boxGeo, wallMat)
-      tower.scale.set(W + 1.2, TOWER_H, D + 0.6); tower.position.set(0, TOWER_H / 2 + H, -D / 2)
-      tower.castShadow = true
-      g.add(tower)
-      const winMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0a1422, emissive: 0xffe0a0, emissiveIntensity: 1.5, roughness: 0.5 }))
-      for (let row = 0; row < 6; row++) {
-        const band = new THREE.Mesh(this.boxGeo, winMat)
-        band.scale.set(W * 0.78, 1.1, 0.2); band.position.set(0, H + 2.6 + row * 3.7, 0.05)
-        g.add(band)
+      // building from across the plaza. Skipped on the low (mobile) tier to keep
+      // the draw count down - the lit room + sign + workers still read there.
+      if (config.tier.fxScale >= 0.6) {
+        const TOWER_H = 26
+        const tower = new THREE.Mesh(this.boxGeo, wallMat)
+        tower.scale.set(W + 1.2, TOWER_H, D + 0.6); tower.position.set(0, TOWER_H / 2 + H, -D / 2)
+        tower.castShadow = true
+        g.add(tower)
+        const winMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0a1422, emissive: 0xffe0a0, emissiveIntensity: 1.5, roughness: 0.5 }))
+        for (let row = 0; row < 6; row++) {
+          const band = new THREE.Mesh(this.boxGeo, winMat)
+          band.scale.set(W * 0.78, 1.1, 0.2); band.position.set(0, H + 2.6 + row * 3.7, 0.05)
+          g.add(band)
+        }
       }
       const signColor = [config.palette.cyan, config.palette.magenta, config.palette.orange, config.palette.lime][Math.abs((a.office.x + a.office.z) | 0) % 4]
       const sign = new THREE.Mesh(this.boxGeo, this.glow(signColor, 2.6))
@@ -1579,7 +1582,12 @@ export class World {
     this.zone = zone
     const z: ZoneCfg = config.zones[zone]
     const fogColor = new THREE.Color(z.fog)
-    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), zone === 'moon' ? 0.006 : 0.011)
+    // Thinner fog on stronger tiers so the (now much larger) city reads into the
+    // distance on desktop; mobile keeps thicker fog, which also spares it from
+    // drawing the far sprawl.
+    const fx = config.tier.fxScale
+    const earthFog = fx >= 0.9 ? 0.0072 : fx >= 0.6 ? 0.0095 : 0.012
+    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), zone === 'moon' ? 0.006 : earthFog)
     this.scene.background = fogColor.clone()
     this.groundMat.color.setHex(z.ground)
     this.ambient.color.setHex(z.ambient)
