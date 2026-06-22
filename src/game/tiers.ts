@@ -74,16 +74,16 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     dof: false,
     smaa: false, // MSAA already handles edges on this path
     shadows: true,
-    shadowMapSize: 2048,
+    shadowMapSize: 3072,
     softShadows: true,
     buildingShadows: true,
     maxSubSteps: 5,
-    densityScale: 1,
+    densityScale: 1.25, // busier streets on desktop (more crowd / traffic / drones)
     accentLights: true,
-    starCount: 1800,
-    anisotropy: 8,
-    drawDistance: 320,
-    envMapIntensity: 1.15,
+    starCount: 2600,
+    anisotropy: 16,
+    drawDistance: 460,
+    envMapIntensity: 1.22,
     fxScale: 1,
   },
   // Mid preset for capable laptops / tablets: desktop look, lighter post + density.
@@ -100,32 +100,32 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     softShadows: true,
     buildingShadows: false,
     maxSubSteps: 3,
-    densityScale: 0.7,
+    densityScale: 0.82,
     accentLights: true,
-    starCount: 1100,
-    anisotropy: 4,
-    drawDistance: 280,
-    envMapIntensity: 1.08,
+    starCount: 1400,
+    anisotropy: 8,
+    drawDistance: 340,
+    envMapIntensity: 1.12,
     fxScale: 0.65,
   },
   low: {
     name: 'low',
-    pixelRatioCap: 1.25, // fewer fragments on dense phone screens
+    pixelRatioCap: 1.2, // fewer fragments on dense phone screens
     msaaSamples: 0,
     bloom: true, // kept on - it is the whole neon look - but cheaper params
     ssao: false,
     dof: false,
     smaa: false, // skip the extra full-screen AA pass on mobile
     shadows: true,
-    shadowMapSize: 1024,
+    shadowMapSize: 512, // small contact-shadow map; only the player/vehicles cast
     softShadows: false,
     buildingShadows: false, // only the player/vehicles cast shadows on mobile
     maxSubSteps: 2,
-    densityScale: 0.45,
+    densityScale: 0.38, // fewer crowd/traffic/prop draws -> steadier mobile frame rate
     accentLights: false,
-    starCount: 500,
+    starCount: 320,
     anisotropy: 2,
-    drawDistance: 220,
+    drawDistance: 210,
     envMapIntensity: 1.0,
     fxScale: 0.4,
   },

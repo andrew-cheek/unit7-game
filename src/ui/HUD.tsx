@@ -1,5 +1,18 @@
-import { type CSSProperties } from 'react'
-import type { BlipKind, HudState } from '../game/types'
+import { useState, type CSSProperties } from 'react'
+import type { BlipKind, HudState, PlayerProfile } from '../game/types'
+import { ACHIEVEMENTS } from '../game/progression'
+
+// Friendly labels for the per-game W/L lines on a profile card.
+const GAME_LABELS: Record<string, string> = {
+  beamwars: 'BEAM WARS',
+  digduel: 'DIG DUEL',
+  merge2048: '2048',
+  invaders: 'INVADERS',
+  snake: 'SNAKE',
+  raceloop: 'RACE LOOP',
+  mecharena: 'MECH ARENA',
+  drivemad: 'DRIVE FRENZY',
+}
 
 const NEON = {
   cyan: '#27e7ff',
@@ -22,7 +35,33 @@ const BLIP_COLOR: Record<BlipKind, string> = {
   objective: NEON.lime,
 }
 
-export function HUD({ hud, touch, onRestart, onToggleMute, onPause }: { hud: HudState; touch: boolean; onRestart: () => void; onToggleMute: () => void; onPause: () => void }) {
+export function HUD({
+  hud,
+  touch,
+  onRestart,
+  onToggleMute,
+  onPause,
+  onChallenge,
+  onBuy,
+  onEquip,
+  onWarp,
+}: {
+  hud: HudState
+  touch: boolean
+  onRestart: () => void
+  onToggleMute: () => void
+  onPause: () => void
+  onChallenge?: (id: string) => void
+  onBuy?: (id: string) => void
+  onEquip?: (slot: 'trail' | 'accent', id: string) => void
+  onWarp?: () => void
+}) {
+  const [rosterOpen, setRosterOpen] = useState(false)
+  const [storeOpen, setStoreOpen] = useState(false)
+  const [viewing, setViewing] = useState<string | null>(null)
+  const [rosterSort, setRosterSort] = useState<'rank' | 'caught'>('rank')
+  const profiles = hud.profiles ?? []
+  const viewed = viewing === '__self__' ? profiles.find((p) => p.self) : viewing ? profiles.find((p) => p.id === viewing) : null
   return (
     <div style={wrap}>
       {/* top-left controls (restart replays the cinematic; pause is touch-only since desktop has Esc) */}
@@ -37,6 +76,7 @@ export function HUD({ hud, touch, onRestart, onToggleMute, onPause }: { hud: Hud
       {/* top-left meters */}
       <div style={{ ...panel, ...metersPos }}>
         <Logo />
+        <PilotProgress p={hud.progress} compact={touch} />
         <Bar label="STAMINA" value={hud.stamina} color={NEON.lime} />
         <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
         {hud.powerup && (
@@ -45,6 +85,7 @@ export function HUD({ hud, touch, onRestart, onToggleMute, onPause }: { hud: Hud
           </div>
         )}
         {hud.shield && <div style={{ ...chip, color: NEON.purple, borderColor: NEON.purple }}>SHIELD</div>}
+        <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />
       </div>
 
       {/* top-right stats + radar */}
@@ -63,6 +104,29 @@ export function HUD({ hud, touch, onRestart, onToggleMute, onPause }: { hud: Hud
           <Stat label="FPS" value={String(hud.fps)} color={hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta} />
         </div>
       </div>
+
+      {/* street-race status (top-center, above the objective) */}
+      {hud.race && hud.race.state !== 'idle' && !hud.minigame && (
+        <div style={raceStyle}>
+          {hud.race.state === 'countdown' ? (
+            <span style={{ color: NEON.lime }}>RACE STARTS {Math.ceil(hud.race.countdown)}</span>
+          ) : hud.race.state === 'done' ? (
+            <span style={{ color: NEON.orange }}>FINISH · {hud.race.result.toFixed(1)}s</span>
+          ) : (
+            <>
+              <span style={{ color: NEON.dim, marginRight: 8 }}>RACE</span>
+              <span style={{ color: NEON.lime }}>CP {hud.race.cp}/{hud.race.total}</span>
+              <span style={{ color: NEON.cyan, marginLeft: 10 }}>{hud.race.time.toFixed(1)}s</span>
+              {hud.race.best > 0 && <span style={{ color: NEON.dim, marginLeft: 10 }}>best {hud.race.best}s</span>}
+            </>
+          )}
+        </div>
+      )}
+      {hud.race && hud.race.near && !hud.minigame && (
+        <div style={{ ...promptStyle, bottom: '28%', borderColor: 'rgba(155,255,77,0.6)' }}>
+          <span style={{ color: NEON.lime }}>DRIVE THROUGH THE GATE TO RACE</span>
+        </div>
+      )}
 
       {/* current objective (top-center, persistent + readable). On touch it drops
           below the corner control row so it never collides with the PAUSE button. */}
@@ -104,15 +168,254 @@ export function HUD({ hud, touch, onRestart, onToggleMute, onPause }: { hud: Hud
       {/* control hints (desktop) */}
       {!touch && (
         <div style={hints}>
-          WASD move · SHIFT sprint · SPACE/J jetpack · H capture/fire · G enter · F boost · T transform · O chute · ESC pause
+          WASD move · SPACE jump (hold to fly) · SHIFT sprint · SCROLL zoom · H fire · G enter/ride · R warp · F boost · T transform · O chute · ESC pause
         </div>
       )}
+
       {/* control hints (touch) — desktop hides its legend on touch, so mirror a short one */}
       {touch && !hud.paused && (
         <div style={hints}>
           left stick move · drag right to look · tap actions · PAUSE top-left
         </div>
       )}
+
+      {/* pilots roster: open profiles + stats for yourself and everyone online.
+          On touch they move to the bottom-center so they clear the thumb-stick
+          (bottom-left) and the action cluster (bottom-right) in any orientation. */}
+      {!hud.minigame && !hud.intro && (
+        <button
+          style={touch ? { ...pilotsBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-104%)' } : pilotsBtn}
+          onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}
+        >
+          PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
+        </button>
+      )}
+      {!hud.minigame && !hud.intro && (
+        <button
+          style={touch ? { ...storeBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(4%)' } : storeBtn}
+          onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}
+        >
+          STORE
+        </button>
+      )}
+      {storeOpen && !hud.minigame && (
+        <CosmeticsStore p={hud.progress} onBuy={onBuy} onEquip={onEquip} onClose={() => setStoreOpen(false)} />
+      )}
+      {rosterOpen && !hud.minigame && (
+        <div style={rosterPanel}>
+          <div style={rosterHead}>
+            <span>PILOTS · {hud.online}</span>
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button style={{ ...sortTab, ...(rosterSort === 'rank' ? sortTabOn : {}) }} onClick={() => setRosterSort('rank')}>RANK</button>
+              <button style={{ ...sortTab, ...(rosterSort === 'caught' ? sortTabOn : {}) }} onClick={() => setRosterSort('caught')}>CAUGHT</button>
+              <button style={closeX} onClick={() => setRosterOpen(false)}>✕</button>
+            </span>
+          </div>
+          {[...profiles]
+            .sort((a, b) => (rosterSort === 'rank' ? b.rating - a.rating : b.aliens - a.aliens))
+            .map((p, i) => (
+              <button key={p.self ? '__self__' : p.id} style={{ ...rosterRow, ...(p.self ? { borderColor: 'rgba(39,231,255,0.4)' } : {}) }} onClick={() => setViewing(p.self ? '__self__' : p.id)}>
+                <span style={{ display: 'flex', gap: 7, alignItems: 'center', minWidth: 0 }}>
+                  <span style={{ color: i === 0 ? '#ffd24a' : NEON.dim, fontWeight: 800, width: 16 }}>{i + 1}</span>
+                  <span style={{ color: p.self ? NEON.cyan : NEON.text, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.name}{p.self ? ' (you)' : ''}
+                  </span>
+                </span>
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                  <span style={{ color: NEON.dim }}>LV{p.level}</span>
+                  <span style={{ color: p.duelTierColor, fontWeight: 700 }}>{p.duelTier.replace('CLASS ', '')}</span>
+                </span>
+              </button>
+            ))}
+          {hud.online <= 1 && <div style={rosterHint}>Solo right now. Others appear here when they join the shared world.</div>}
+        </div>
+      )}
+      {viewed && (
+        <div style={profileOverlay} onClick={() => setViewing(null)}>
+          <ProfileCard
+            profile={viewed}
+            achievements={viewed.self ? hud.progress.achievements : undefined}
+            onClose={() => setViewing(null)}
+            onChallenge={
+              !viewed.self && viewed.id && onChallenge
+                ? () => {
+                    onChallenge(viewed.id)
+                    setViewing(null)
+                    setRosterOpen(false)
+                  }
+                : undefined
+            }
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProfileCard({ profile, onClose, onChallenge, achievements }: { profile: PlayerProfile; onClose: () => void; onChallenge?: () => void; achievements?: string[] }) {
+  const [showBadges, setShowBadges] = useState(false)
+  const games = [...profile.games].filter((g) => g.played > 0).sort((a, b) => b.played - a.played)
+  const totalWon = games.reduce((s, g) => s + g.won, 0)
+  const totalLost = games.reduce((s, g) => s + g.lost, 0)
+  const rate = totalWon + totalLost > 0 ? Math.round((totalWon / (totalWon + totalLost)) * 100) : 0
+  return (
+    <div style={profileCard} onClick={(e) => e.stopPropagation()}>
+      <div style={profileHead}>
+        <span style={{ color: NEON.cyan, font: '800 18px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.12em' }}>
+          {profile.name}{profile.self ? ' (you)' : ''}
+        </span>
+        <button style={closeX} onClick={onClose}>✕</button>
+      </div>
+      <div style={statRow}>
+        <Stat label="PILOT LV" value={String(profile.level)} color={NEON.cyan} />
+        <Stat label="DUEL RANK" value={profile.duelTier.replace('CLASS ', '')} color={profile.duelTierColor} />
+        <Stat label="CAUGHT" value={String(profile.aliens)} color={NEON.magenta} />
+      </div>
+      <div style={statRow}>
+        <Stat label="W / L" value={`${totalWon} / ${totalLost}`} color={NEON.lime} />
+        <Stat label="WIN RATE" value={`${rate}%`} color={NEON.orange} />
+        <Stat label="BADGES" value={`${profile.badges}/${ACHIEVEMENTS.length}`} color={NEON.purple} />
+      </div>
+      {achievements && (
+        <button style={{ ...rosterRow, justifyContent: 'center', marginTop: 10, color: NEON.purple, borderColor: 'rgba(138,92,255,0.4)' }} onClick={() => setShowBadges((v) => !v)}>
+          {showBadges ? 'HIDE BADGES' : 'VIEW BADGES'}
+        </button>
+      )}
+      {achievements && showBadges && (
+        <div style={badgeGrid}>
+          {ACHIEVEMENTS.map((a) => {
+            const got = achievements.includes(a.id)
+            return (
+              <div key={a.id} style={{ ...badgeItem, opacity: got ? 1 : 0.32, borderColor: got ? a.color : 'rgba(255,255,255,0.1)' }} title={a.desc}>
+                <span style={{ color: got ? a.color : NEON.dim, fontWeight: 800, fontSize: 11 }}>{got ? '★' : '☆'} {a.name}</span>
+                <span style={{ color: NEON.dim, fontSize: 9 }}>{a.desc}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div style={{ ...microLabel, color: NEON.dim, marginTop: 12, marginBottom: 4 }}>BY GAME</div>
+      {games.length === 0 && <div style={rosterHint}>No games played yet.</div>}
+      {games.map((g) => (
+        <div key={g.game} style={profileGameRow}>
+          <span style={{ color: NEON.text, fontWeight: 700 }}>{GAME_LABELS[g.game] ?? g.game.toUpperCase()}</span>
+          <span style={{ color: NEON.dim }}>
+            {g.won}W · {g.lost}L{g.best > 0 ? ` · best ${g.best}` : ''}
+          </span>
+        </div>
+      ))}
+      {onChallenge && (
+        <button style={challengeBtn} onClick={onChallenge}>
+          ⚔ CHALLENGE TO BEAM WARS
+        </button>
+      )}
+    </div>
+  )
+}
+
+const DAILY_LABEL: Record<string, (t: number) => string> = {
+  capture: (t) => `Capture ${t} aliens`,
+  play: (t) => `Play ${t} arcade games`,
+  duelWins: (t) => `Win ${t} duels`,
+}
+
+function WarpChip({ w, touch, onTap }: { w: HudState['warp']; touch: boolean; onTap?: () => void }) {
+  const pct = Math.round(w.charge01 * 100)
+  const label = w.active ? `WARPED${touch ? '' : ' · R'}` : w.ready ? `WARP READY${touch ? '' : ' · R'}` : `WARP ${pct}%`
+  const color = w.active ? NEON.magenta : w.ready ? NEON.lime : NEON.dim
+  return (
+    <button
+      style={{ ...chip, marginTop: 4, color, borderColor: color, pointerEvents: 'auto', cursor: 'pointer', background: 'transparent', letterSpacing: '0.08em', position: 'relative', overflow: 'hidden', minWidth: 96, textAlign: 'left' }}
+      onClick={() => onTap?.()}
+    >
+      {!w.ready && !w.active && (
+        <span style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: 'rgba(155,255,77,0.16)' }} />
+      )}
+      <span style={{ position: 'relative' }}>⚡ {label}</span>
+    </button>
+  )
+}
+
+function PilotProgress({ p, compact }: { p: HudState['progress']; compact?: boolean }) {
+  const frac = p.xpSpan > 0 ? Math.max(0, Math.min(1, p.xpInto / p.xpSpan)) : 0
+  const d = p.daily
+  const dailyText = (DAILY_LABEL[d.kind] ?? ((t: number) => `Goal ${t}`))(d.target)
+  return (
+    <div style={{ width: compact ? 134 : 160, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+        <span style={{ ...microLabel, color: NEON.cyan }}>LV {p.level}</span>
+        {p.streak > 0 && <span style={{ ...microLabel, color: NEON.orange }}>🔥 {p.streak}d</span>}
+        {compact && <span style={{ ...microLabel, color: d.claimed ? NEON.lime : NEON.text }}>{Math.min(d.progress, d.target)}/{d.target}</span>}
+      </div>
+      <div style={barTrack}>
+        <div style={{ width: `${frac * 100}%`, height: '100%', background: NEON.cyan, boxShadow: `0 0 8px ${NEON.cyan}` }} />
+      </div>
+      {/* On phones the long daily line is dropped to keep the corner clear. */}
+      {!compact && (
+        <>
+          <div style={{ ...microLabel, color: NEON.dim, marginTop: 5, display: 'flex', justifyContent: 'space-between' }}>
+            <span>DAILY</span>
+            <span style={{ color: d.claimed ? NEON.lime : NEON.text }}>{Math.min(d.progress, d.target)}/{d.target}{d.claimed ? ' ✓' : ''}</span>
+          </div>
+          <div style={{ font: '600 9px/1.3 ui-monospace, Menlo, monospace', color: d.claimed ? NEON.lime : 'rgba(223,238,255,0.7)', letterSpacing: '0.04em' }}>
+            {d.claimed ? 'Daily complete!' : dailyText}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+const COSMETIC_SWATCHES: { id: string; name: string; css: string; cost: number }[] = [
+  { id: 'cyan', name: 'Cyan', css: '#27e7ff', cost: 0 },
+  { id: 'lime', name: 'Lime', css: '#9bff4d', cost: 300 },
+  { id: 'magenta', name: 'Magenta', css: '#ff2bd0', cost: 300 },
+  { id: 'orange', name: 'Ember', css: '#ff8a1e', cost: 500 },
+  { id: 'purple', name: 'Violet', css: '#8a5cff', cost: 500 },
+  { id: 'gold', name: 'Gold', css: '#ffd24a', cost: 900 },
+  { id: 'white', name: 'Pure', css: '#ffffff', cost: 1200 },
+  { id: 'red', name: 'Crimson', css: '#ff5c5c', cost: 1500 },
+]
+
+function CosmeticsStore({
+  p,
+  onBuy,
+  onEquip,
+  onClose,
+}: {
+  p: HudState['progress']
+  onBuy?: (id: string) => void
+  onEquip?: (slot: 'trail' | 'accent', id: string) => void
+  onClose: () => void
+}) {
+  return (
+    <div style={rosterPanel}>
+      <div style={rosterHead}>
+        <span>COLORS · {p.credits}c</span>
+        <button style={closeX} onClick={onClose}>✕</button>
+      </div>
+      <div style={rosterHint}>Your trail color shows in duels; your accent recolors your robot.</div>
+      <div style={swatchGrid}>
+        {COSMETIC_SWATCHES.map((c) => {
+          const owned = p.cosmetics.owned.includes(c.id)
+          const equipped = p.cosmetics.trail === c.id || p.cosmetics.accent === c.id
+          return (
+            <button
+              key={c.id}
+              style={{ ...swatch, borderColor: equipped ? c.css : 'rgba(255,255,255,0.14)', boxShadow: equipped ? `0 0 12px ${c.css}` : 'none' }}
+              onClick={() => (owned ? onEquip?.('trail', c.id) : onBuy?.(c.id))}
+              onContextMenu={(e) => { e.preventDefault(); if (owned) onEquip?.('accent', c.id) }}
+            >
+              <span style={{ width: 22, height: 22, borderRadius: 6, background: c.css, boxShadow: `0 0 8px ${c.css}` }} />
+              <span style={{ color: NEON.text, fontWeight: 700, fontSize: 10 }}>{c.name}</span>
+              <span style={{ color: owned ? (equipped ? NEON.lime : NEON.dim) : NEON.orange, fontSize: 9 }}>
+                {owned ? (equipped ? 'EQUIPPED' : 'tap: trail') : `${c.cost}c`}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div style={rosterHint}>Tap to buy / equip as trail. Right-click (or long-press) an owned color to set it as your robot accent.</div>
     </div>
   )
 }
@@ -280,6 +583,21 @@ const objectiveStyle: CSSProperties = {
   letterSpacing: '0.1em',
   boxShadow: '0 0 16px rgba(155,255,77,0.2)',
 }
+const raceStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: 46,
+  transform: 'translateX(-50%)',
+  padding: '6px 16px',
+  whiteSpace: 'nowrap',
+  background: 'rgba(6,10,22,0.74)',
+  border: '1px solid rgba(155,255,77,0.5)',
+  borderRadius: 999,
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+  boxShadow: '0 0 16px rgba(155,255,77,0.25)',
+  zIndex: 16,
+}
 const bannerStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
@@ -344,4 +662,198 @@ const hints: CSSProperties = {
   maxWidth: '96vw',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+}
+const pilotsBtn: CSSProperties = {
+  position: 'absolute',
+  right: 14,
+  bottom: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.72)',
+  border: '1px solid rgba(155,255,77,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 14px rgba(155,255,77,0.22)',
+  zIndex: 24,
+}
+const storeBtn: CSSProperties = {
+  position: 'absolute',
+  right: 110,
+  bottom: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.72)',
+  border: '1px solid rgba(255,138,30,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 14px rgba(255,138,30,0.22)',
+  zIndex: 24,
+}
+const swatchGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 6,
+  margin: '6px 0',
+}
+const sortTab: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '3px 8px',
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.55)',
+  font: '700 9px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+}
+const sortTabOn: CSSProperties = {
+  color: '#04121a',
+  background: 'rgba(39,231,255,0.85)',
+  borderColor: 'transparent',
+}
+const badgeGrid: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 5,
+  maxHeight: '34vh',
+  overflowY: 'auto',
+  marginTop: 8,
+  paddingRight: 2,
+}
+const badgeItem: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '6px 9px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: 8,
+  font: '600 11px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.03em',
+}
+const swatch: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  textAlign: 'left',
+  padding: '8px 10px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 8,
+  font: '600 10px/1.2 ui-monospace, Menlo, monospace',
+}
+const rosterPanel: CSSProperties = {
+  position: 'absolute',
+  right: 14,
+  bottom: 54,
+  width: 280,
+  maxHeight: '52vh',
+  overflowY: 'auto',
+  pointerEvents: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  padding: 12,
+  background: 'rgba(5,10,25,0.88)',
+  border: '1px solid rgba(90,255,255,0.4)',
+  borderRadius: 12,
+  boxShadow: '0 0 26px rgba(0,255,255,0.18)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  zIndex: 25,
+}
+const rosterHead: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  font: '800 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: NEON.cyan,
+  marginBottom: 6,
+}
+const rosterRow: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  textAlign: 'left',
+  padding: '7px 9px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 8,
+  font: '600 11px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.04em',
+}
+const rosterHint: CSSProperties = {
+  font: '600 10px/1.4 ui-monospace, Menlo, monospace',
+  color: 'rgba(223,238,255,0.5)',
+  letterSpacing: '0.04em',
+  padding: '4px 2px',
+}
+const closeX: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  background: 'transparent',
+  border: 'none',
+  color: 'rgba(223,238,255,0.7)',
+  font: '800 14px/1 ui-monospace, Menlo, monospace',
+}
+const profileOverlay: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'auto',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(2,4,10,0.55)',
+  zIndex: 40,
+}
+const profileCard: CSSProperties = {
+  width: 'min(360px, 88vw)',
+  padding: '18px 20px',
+  background: 'rgba(5,10,25,0.94)',
+  border: '1px solid rgba(90,255,255,0.5)',
+  borderRadius: 16,
+  boxShadow: '0 0 32px rgba(0,255,255,0.28)',
+  backdropFilter: 'blur(10px)',
+  WebkitBackdropFilter: 'blur(10px)',
+}
+const profileHead: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 14,
+}
+const profileGameRow: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '5px 0',
+  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  font: '600 11px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.04em',
+}
+const challengeBtn: CSSProperties = {
+  marginTop: 16,
+  width: '100%',
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '11px 0',
+  background: 'linear-gradient(180deg,#ff5cc6,#ff2bd0)',
+  border: 'none',
+  borderRadius: 10,
+  color: '#100410',
+  font: '800 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  boxShadow: '0 0 18px rgba(255,43,208,0.35)',
 }

@@ -120,7 +120,7 @@ export const config = {
 
   camera: {
     fov: 62,
-    distance: 8.5, // close enough that the robot reads big, not tiny
+    distance: 7.2, // close enough that the robot reads big (Roblox-ish framing)
     minDistance: 2.2,
     // Hard floor the wall-collision pull-in may reach (well below minDistance).
     // Kept just above the camera near plane so a tucked-in camera still renders
@@ -168,6 +168,10 @@ export const config = {
     // Colossal: ~50m tall, taller than the surrounding towers. Slow turn, big
     // top speed, and it transforms into a fast jet form.
     mechXL: { accel: 26, maxSpeed: 64, turn: 0.8, hoverHeight: 4, size: 10 },
+    // Pilotable giant "titans": the arcade guardian and the walkers that roam the
+    // outskirts. Big and weighty but controllable; they wander on their own until
+    // you climb in. Drive like the mechs (fly).
+    titan: { accel: 24, maxSpeed: 50, turn: 0.9, hoverHeight: 2.5, size: 7 },
     enterRange: 6,
   },
 
@@ -190,18 +194,18 @@ export const config = {
     fleeRadius: 9, // aliens scatter when the player gets this close
     quadrupeds: 4, // four-legged robot walkers patrolling
     mechs: 2, // big mech walkers patrolling slowly
-    giants: 2, // massive walker war-machines on the outskirts
+    giants: 0, // the outskirts giants are now the pilotable titans (Vehicles), not ambient patrols
     smallShips: 8, // small ships looping between the towers
     bigShipInterval: 20, // seconds between big-ship flyovers
     police: 3, // police cruisers patrolling staggered beats around the plaza
   },
 
   events: {
-    spaceshipInterval: 13, // seconds between landing-ship events (more alien life)
+    spaceshipInterval: 10, // seconds between landing-ship events (more alien life)
     aliensPerShip: 5,
-    powerupCount: 14,
-    droneCount: 16,
-    trafficCount: 14, // hovercar traffic streaming the avenues
+    powerupCount: 16,
+    droneCount: 24, // more drones buzzing the skyline
+    trafficCount: 22, // busier hovercar traffic streaming the avenues
   },
 
   // News-ticker headlines (edit here). Reactive "BREAKING" lines are injected at

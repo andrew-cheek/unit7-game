@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { config, type ZoneCfg } from './config'
 import { hash01 } from './utils'
 import { createSky, createWindowTexture, type SkyModel } from './procedural'
@@ -137,9 +138,25 @@ export class World {
   private tankGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12) // rooftop water tank
   private groundMat!: THREE.MeshStandardMaterial
   private windowTex: THREE.CanvasTexture[] = []
+  // Pools so lit towers SHARE window textures + materials instead of cloning one
+  // per building (which uploaded a separate GPU texture each). Keyed by base
+  // texture + repeat (tex) and + facade colour (material): count drops from
+  // hundreds to a few dozen.
+  private texPool = new Map<string, THREE.Texture>()
+  private litMatPool = new Map<string, THREE.MeshStandardMaterial>()
   private ownedMats: THREE.Material[] = []
   private ownedTex: THREE.Texture[] = []
   private ownedGeos: THREE.BufferGeometry[] = []
+  // Pooled dark-tower materials (by colour) so dark bodies sharing a colour can
+  // batch into one merged mesh, the same way lit facades already pool.
+  private darkPool = new Map<number, THREE.MeshStandardMaterial>()
+  // Static building bodies are accumulated per spatial chunk + material, then
+  // merged into one mesh per bucket. That collapses hundreds of per-building
+  // body draw calls into a few dozen, while chunking keeps coarse frustum
+  // culling (a whole chunk behind you is skipped) - the win the earlier
+  // merge-everything instancing experiment lost.
+  private mergeBuckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; shadow: boolean }>()
+  private static readonly MERGE_CHUNK = 120 // metres per merge chunk
   private billboards: Billboard[] = []
   private facadeMats: THREE.MeshStandardMaterial[] = [] // window-lit tower facades (dimmed by day)
   private accentLights: THREE.PointLight[] = []
@@ -168,11 +185,20 @@ export class World {
   private sunCoreMat!: THREE.SpriteMaterial
   private sunGlowMat!: THREE.SpriteMaterial
   private time = 0
+  private timeScale = 1 // clock speed multiplier (slowed during the scripted morning sunrise)
   private dawn = 0 // current day factor (0 night .. 1 full day)
 
   /** Day-cycle factor, 0 = night, 1 = full day. Used to time the invasion. */
   get dayFactor() {
     return this.dawn
+  }
+  /** Current clock position in seconds within the cycle. */
+  get clock() {
+    return this.time
+  }
+  /** Slow or speed the day/night clock (1 = normal). Used for the opening sunrise. */
+  setTimeScale(s: number) {
+    this.timeScale = s
   }
   /** Jump the day/night clock (debug: `?time=` seconds into the 120s cycle). */
   setDebugTime(t: number) {
@@ -206,6 +232,7 @@ export class World {
     this.buildStreetProps()
     this.buildCity()
     this.buildNearbyBuildings()
+    this.finalizeBuildingMerge()
     this.buildElevatedPlatform()
     this.buildDriveHighway()
     this.buildExtras()
@@ -239,6 +266,43 @@ export class World {
   }
   private glow(color: number, intensity = 3) {
     return this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: intensity, roughness: 0.4 }))
+  }
+
+  /** Queue a static body/base for chunked merging instead of adding it as its own
+   *  mesh. The transform (scale + position) is baked into a cloned geometry and
+   *  bucketed by chunk + material; finalizeBuildingMerge stitches each bucket. */
+  private mergeBody(baseGeo: THREE.BufferGeometry, mat: THREE.Material, cx: number, cz: number, sx: number, sy: number, sz: number, py: number, shadow: boolean) {
+    const C = World.MERGE_CHUNK
+    const key = `${Math.floor(cx / C)}_${Math.floor(cz / C)}|${mat.uuid}`
+    let b = this.mergeBuckets.get(key)
+    if (!b) { b = { mat, geos: [], shadow: false }; this.mergeBuckets.set(key, b) }
+    const g = baseGeo.clone()
+    this.scratchMat.compose(this.scratchPos.set(cx, py, cz), this.scratchQuat, this.scratchScale.set(sx, sy, sz))
+    g.applyMatrix4(this.scratchMat)
+    b.geos.push(g)
+    if (shadow) b.shadow = true
+  }
+
+  private scratchMat = new THREE.Matrix4()
+  private scratchPos = new THREE.Vector3()
+  private scratchQuat = new THREE.Quaternion()
+  private scratchScale = new THREE.Vector3()
+
+  /** Merge every queued bucket into one mesh per (chunk, material). */
+  private finalizeBuildingMerge() {
+    for (const b of this.mergeBuckets.values()) {
+      if (b.geos.length === 0) continue
+      const merged = BufferGeometryUtils.mergeGeometries(b.geos, false)
+      for (const g of b.geos) g.dispose() // temp clones, no longer needed
+      if (!merged) continue
+      this.ownedGeos.push(merged)
+      const mesh = new THREE.Mesh(merged, b.mat)
+      mesh.castShadow = b.shadow
+      mesh.receiveShadow = true
+      this.group.add(mesh)
+      this.solidMeshes.push(mesh) // camera collision raycasts the merged shell
+    }
+    this.mergeBuckets.clear()
   }
   /** Add a decorative neon mesh to the scene + register it with the NeonManager
    *  (so the density dial + distance LOD can thin it). */
@@ -278,19 +342,24 @@ export class World {
     const pitch = config.world.block + config.world.roadWidth
     const cells = Math.floor(half / pitch)
     const lineMat = this.glow(config.palette.cyan, 2.2)
-    const lineGeo = this.boxGeo
-    const make = (x: number, z: number, sx: number, sz: number) => {
-      const m = new THREE.Mesh(lineGeo, lineMat)
-      m.scale.set(sx, 0.05, sz)
-      m.position.set(x, 0.03, z)
-      this.group.add(m)
-    }
+    // All the avenue stripes share one material + the unit box, so draw the whole
+    // grid as a single InstancedMesh instead of dozens of meshes.
+    const lines: Array<[number, number, number, number]> = [] // x, z, sx, sz
     for (let i = -cells; i <= cells; i++) {
       const c = i * pitch + pitch / 2
       if (Math.abs(c) > half) continue
-      make(c, 0, 0.4, half * 2) // along Z
-      make(0, c, half * 2, 0.4) // along X
+      lines.push([c, 0, 0.4, half * 2]) // along Z
+      lines.push([0, c, half * 2, 0.4]) // along X
     }
+    const inst = new THREE.InstancedMesh(this.boxGeo, lineMat, lines.length)
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
+    lines.forEach(([x, z, sx, sz], k) => {
+      m.compose(pos.set(x, 0.03, z), q, scl.set(sx, 0.05, sz))
+      inst.setMatrixAt(k, m)
+    })
+    inst.instanceMatrix.needsUpdate = true
+    inst.frustumCulled = false
+    this.group.add(inst)
   }
 
   /**
@@ -351,40 +420,56 @@ export class World {
     let mat: THREE.MeshStandardMaterial
     if (dark) {
       const cset = [0x14171e, 0x191c24, 0x10131a, 0x1c2029, 0x21262f]
-      mat = this.own(new THREE.MeshStandardMaterial({
-        color: cset[Math.floor(hash01(seed * 1.7) * cset.length)],
-        metalness: 0.5,
-        roughness: 0.72,
-        envMapIntensity: config.tier.envMapIntensity,
-      }))
+      const dcolor = cset[Math.floor(hash01(seed * 1.7) * cset.length)]
+      let dm = this.darkPool.get(dcolor)
+      if (!dm) {
+        dm = this.own(new THREE.MeshStandardMaterial({ color: dcolor, metalness: 0.5, roughness: 0.72, envMapIntensity: config.tier.envMapIntensity }))
+        this.darkPool.set(dcolor, dm)
+      }
+      mat = dm
     } else {
       const fpal = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019, 0x0a1a1f, 0x161021, 0x1a1410, 0x101a16]
       const facade = fpal[Math.floor(hash01(seed * 1.7) * fpal.length)]
-      const tex = this.windowTex[Math.floor(hash01(seed * 2.3) * this.windowTex.length)].clone()
-      tex.needsUpdate = true
-      tex.anisotropy = config.tier.anisotropy
-      tex.repeat.set(Math.max(2, Math.round(fx / 6)), Math.max(3, Math.round(h / 8)))
-      // Per-building offset so neighbouring towers don't share the same lit pattern.
-      tex.offset.set(hash01(seed * 3.1), hash01(seed * 4.2))
-      this.ownedTex.push(tex)
-      mat = this.own(new THREE.MeshStandardMaterial({
-        color: facade,
-        metalness: 0.35,
-        roughness: 0.55,
-        emissive: 0xffffff,
-        emissiveMap: tex,
-        emissiveIntensity: WINDOW_NIGHT_I,
-        envMapIntensity: config.tier.envMapIntensity,
-      }))
-      this.facadeMats.push(mat) // only lit towers dim with the day cycle
+      // Pool the window texture by (base index, repeat) - towers of similar size
+      // reuse one GPU texture instead of each cloning its own.
+      const ti = Math.floor(hash01(seed * 2.3) * this.windowTex.length)
+      const rx = Math.max(2, Math.round(fx / 6))
+      const ry = Math.max(3, Math.round(h / 8))
+      const tkey = ti + '_' + rx + '_' + ry
+      let tex = this.texPool.get(tkey)
+      if (!tex) {
+        tex = this.windowTex[ti].clone()
+        tex.needsUpdate = true
+        tex.anisotropy = config.tier.anisotropy
+        tex.repeat.set(rx, ry)
+        tex.offset.set((ti * 0.137) % 1, (ti * 0.281) % 1)
+        this.texPool.set(tkey, tex)
+        this.ownedTex.push(tex)
+      }
+      // Pool the lit material by (texture, facade colour) too, so the renderer
+      // sees far fewer distinct materials.
+      const mkey = tkey + '_' + facade
+      let lm = this.litMatPool.get(mkey)
+      if (!lm) {
+        lm = this.own(new THREE.MeshStandardMaterial({
+          color: facade,
+          metalness: 0.35,
+          roughness: 0.55,
+          emissive: 0xffffff,
+          emissiveMap: tex,
+          emissiveIntensity: WINDOW_NIGHT_I,
+          envMapIntensity: config.tier.envMapIntensity,
+        }))
+        this.litMatPool.set(mkey, lm)
+        this.facadeMats.push(lm) // only lit towers dim with the day cycle
+      }
+      mat = lm
     }
-    const mesh = new THREE.Mesh(bodyGeo, mat)
-    mesh.scale.set(fx, h, fz)
-    mesh.position.set(cx, h / 2, cz)
-    mesh.castShadow = config.tier.buildingShadows // off on mobile (perf)
-    mesh.receiveShadow = true
-    this.group.add(mesh)
-    this.solidMeshes.push(mesh)
+    // Only the inner-core towers cast shadows: distant sprawl shadows aren't
+    // visible but would bloat the shadow pass in the now-much-larger world.
+    const castsShadow = config.tier.buildingShadows && Math.hypot(cx, cz) < 150
+    // Body is queued for chunked merging rather than added as its own mesh.
+    this.mergeBody(bodyGeo, mat, cx, cz, fx, h, fz, h / 2, castsShadow)
     this.landmarks.push({ x: cx, z: cz })
     this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - fx / 2, 0, cz - fz / 2), new THREE.Vector3(cx + fx / 2, h, cz + fz / 2)))
 
@@ -395,12 +480,7 @@ export class World {
       const bh = Math.min(h * 0.28, 15)
       const bw = fx * 1.5
       const bd = fz * 1.5
-      const base = new THREE.Mesh(this.boxGeo, mat)
-      base.scale.set(bw, bh, bd)
-      base.position.set(cx, bh / 2, cz)
-      base.castShadow = config.tier.buildingShadows
-      base.receiveShadow = true
-      this.group.add(base)
+      this.mergeBody(this.boxGeo, mat, cx, cz, bw, bh, bd, bh / 2, castsShadow)
       this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - bw / 2, 0, cz - bd / 2), new THREE.Vector3(cx + bw / 2, bh, cz + bd / 2)))
     }
     // Neon roofline trim on a minority of towers + a vertical spine up tall ones.
@@ -530,15 +610,19 @@ export class World {
         const cx = i * pitch
         const cz = j * pitch
         const seed = (i + 50) * 131 + (j + 50)
-        if (hash01(seed) < 0.1) continue
         const distNorm = Math.min(1, Math.hypot(i, j) / cells)
+        // Density falls off with distance from the core: a dense downtown that
+        // thins into sparse sprawl at the edges (skip ~8% near the centre,
+        // ~94% out at the rim).
+        if (hash01(seed) < 0.08 + Math.pow(distNorm, 1.6) * 0.86) continue
         const maxH = 120 * (1 - distNorm) + 20 // taller glowing towers
         // District neon rule (NeonManager): a tight inner commercial core is the
         // bright signage band; the plaza heart stays limited (the hub is the
         // hero), and the residential/industrial outskirts are calm + ambient.
         const neon = districtNeon(distNorm)
         const usable = config.world.block - config.world.sidewalk * 2
-        const n = hash01(seed * 7) < 0.45 ? 2 : 1
+        // Twin-tower blocks only in the inner half; the outskirts are single, low.
+        const n = distNorm < 0.5 && hash01(seed * 7) < 0.45 ? 2 : 1
         for (let k = 0; k < n; k++) {
           const fx = 16 + hash01(seed * 3 + k) * (usable - 16) * (n === 2 ? 0.55 : 1)
           const fz = 16 + hash01(seed * 5 + k) * (usable - 16) * (n === 2 ? 0.55 : 1)
@@ -1386,61 +1470,76 @@ export class World {
     const floorMat = this.own(new THREE.MeshStandardMaterial({ color: 0x14171f, metalness: 0.4, roughness: 0.7 }))
     const deskMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3142, metalness: 0.6, roughness: 0.5 }))
     const workerMat = this.own(new THREE.MeshStandardMaterial({ color: config.palette.robot, metalness: 0.7, roughness: 0.4 }))
-    // Warm interior glow so the office reads as lit and occupied.
-    const lightMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffe6b0 }))
+    const lightMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffe6b0 })) // warm interior glow
+    const monMat = this.glow(config.palette.cyan, 2.2)
+    const cbarMat = this.glow(config.palette.lime, 2.4)
+    const highTier = config.tier.fxScale >= 0.6
+    const winMat = highTier ? this.own(new THREE.MeshStandardMaterial({ color: 0x0a1422, emissive: 0xffe0a0, emissiveIntensity: 1.5, roughness: 0.5 })) : null
 
-    const W = 8, D = 6, H = 3.6
+    const W = 8, D = 6, H = 3.6, TOWER_H = 26
+    // Every office is structurally identical and differs only by its anchor
+    // transform, so the whole row is drawn with one InstancedMesh per material
+    // (~10 draw calls for all 7 offices instead of ~150 individual meshes) -
+    // identical look, far cheaper. Parts are defined once in office-local space.
+    interface Part { mat: THREE.Material; p: [number, number, number]; s: [number, number, number]; cast?: boolean; recv?: boolean }
+    const parts: Part[] = [
+      { mat: floorMat, p: [0, 0.1, -D / 2], s: [W, 0.2, D], recv: true },
+      { mat: wallMat, p: [0, H / 2, -D], s: [W, H, 0.3] },
+      { mat: wallMat, p: [-W / 2, H / 2, -D / 2], s: [0.3, H, D] },
+      { mat: wallMat, p: [W / 2, H / 2, -D / 2], s: [0.3, H, D] },
+      { mat: wallMat, p: [0, H, -D / 2], s: [W, 0.25, D], cast: true },
+      { mat: lightMat, p: [0, H - 0.2, -D / 2], s: [W * 0.7, 0.12, 0.5] },
+    ]
+    for (const dx of [-W / 3, 0, W / 3]) {
+      parts.push({ mat: deskMat, p: [dx, 1.05, -D + 1.4], s: [1.8, 0.12, 1.0] })
+      parts.push({ mat: monMat, p: [dx, 1.5, -D + 1.05], s: [0.9, 0.6, 0.08] })
+      parts.push({ mat: workerMat, p: [dx, 1.25, -D + 2.1], s: [0.5, 0.7, 0.4], cast: true })
+      parts.push({ mat: workerMat, p: [dx, 1.75, -D + 2.1], s: [0.3, 0.3, 0.3] })
+    }
+    for (const cz of [-D + 1.2, -D + 3.0]) {
+      parts.push({ mat: workerMat, p: [W / 2 - 0.6, 0.95, cz], s: [0.5, 1.5, 0.4], cast: true })
+      parts.push({ mat: cbarMat, p: [W / 2 - 0.15, 1.1, cz], s: [0.12, 1.0, 0.18] })
+    }
+    if (highTier && winMat) {
+      parts.push({ mat: wallMat, p: [0, TOWER_H / 2 + H, -D / 2], s: [W + 1.2, TOWER_H, D + 0.6], cast: true })
+      for (let row = 0; row < 6; row++) parts.push({ mat: winMat, p: [0, H + 2.6 + row * 3.7, 0.05], s: [W * 0.78, 1.1, 0.2] })
+    }
+
+    const q = new THREE.Quaternion(), ident = new THREE.Quaternion()
+    const officeM = new THREE.Matrix4(), localM = new THREE.Matrix4(), worldM = new THREE.Matrix4()
+    const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3(), sv = new THREE.Vector3()
+    const groups = new Map<THREE.Material, { ms: THREE.Matrix4[]; cast: boolean; recv: boolean }>()
     for (const a of OFFICE_ANCHORS) {
-      const g = new THREE.Group()
-      g.position.copy(a.office)
-      g.rotation.y = a.face
-      // Local space: open front at +Z, room extends to -Z.
-      const floor = new THREE.Mesh(this.boxGeo, floorMat)
-      floor.scale.set(W, 0.2, D); floor.position.set(0, 0.1, -D / 2)
-      floor.receiveShadow = true
-      g.add(floor)
-      const back = new THREE.Mesh(this.boxGeo, wallMat)
-      back.scale.set(W, H, 0.3); back.position.set(0, H / 2, -D)
-      g.add(back)
-      for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(this.boxGeo, wallMat)
-        side.scale.set(0.3, H, D); side.position.set(sx * W / 2, H / 2, -D / 2)
-        g.add(side)
+      q.setFromAxisAngle(up, a.face)
+      officeM.compose(a.office, q, one)
+      for (const part of parts) {
+        localM.compose(pv.set(part.p[0], part.p[1], part.p[2]), ident, sv.set(part.s[0], part.s[1], part.s[2]))
+        worldM.multiplyMatrices(officeM, localM)
+        let grp = groups.get(part.mat)
+        if (!grp) { grp = { ms: [], cast: false, recv: false }; groups.set(part.mat, grp) }
+        grp.ms.push(worldM.clone())
+        if (part.cast) grp.cast = true
+        if (part.recv) grp.recv = true
       }
-      const roof = new THREE.Mesh(this.boxGeo, wallMat)
-      roof.scale.set(W, 0.25, D); roof.position.set(0, H, -D / 2)
-      roof.castShadow = true
-      g.add(roof)
-      // Ceiling light strip.
-      const strip = new THREE.Mesh(this.boxGeo, lightMat)
-      strip.scale.set(W * 0.7, 0.12, 0.5); strip.position.set(0, H - 0.2, -D / 2)
-      g.add(strip)
-      // Two desks with a seated worker robot + glowing monitor each.
-      for (const dx of [-W / 4, W / 4]) {
-        const desk = new THREE.Mesh(this.boxGeo, deskMat)
-        desk.scale.set(2.0, 0.12, 1.0); desk.position.set(dx, 1.05, -D + 1.4)
-        g.add(desk)
-        const monitor = new THREE.Mesh(this.boxGeo, this.glow(config.palette.cyan, 2.2))
-        monitor.scale.set(1.0, 0.6, 0.08); monitor.position.set(dx, 1.5, -D + 1.05)
-        g.add(monitor)
-        // Seated worker: torso + head, facing the monitor (toward -Z).
-        const torso = new THREE.Mesh(this.boxGeo, workerMat)
-        torso.scale.set(0.5, 0.7, 0.4); torso.position.set(dx, 1.25, -D + 2.1)
-        torso.castShadow = true
-        g.add(torso)
-        const head = new THREE.Mesh(this.boxGeo, workerMat)
-        head.scale.set(0.3, 0.3, 0.3); head.position.set(dx, 1.75, -D + 2.1)
-        g.add(head)
-      }
-      // A spare worker robot charging against the side wall (glowing charge bar).
-      const charger = new THREE.Mesh(this.boxGeo, workerMat)
-      charger.scale.set(0.5, 1.5, 0.4); charger.position.set(W / 2 - 0.6, 0.95, -D + 1.2)
-      charger.castShadow = true
-      g.add(charger)
-      const cbar = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 2.4))
-      cbar.scale.set(0.12, 1.0, 0.18); cbar.position.set(W / 2 - 0.15, 1.1, -D + 1.2)
-      g.add(cbar)
-      this.group.add(g)
+    }
+    for (const [mat, grp] of groups) {
+      const inst = new THREE.InstancedMesh(this.boxGeo, mat, grp.ms.length)
+      for (let i = 0; i < grp.ms.length; i++) inst.setMatrixAt(i, grp.ms[i])
+      inst.instanceMatrix.needsUpdate = true
+      inst.castShadow = grp.cast
+      inst.receiveShadow = grp.recv
+      inst.frustumCulled = false // central + spread across instances; never cull the set
+      this.group.add(inst)
+    }
+    // Signs stay individual for their per-office colour (only 7 meshes).
+    for (const a of OFFICE_ANCHORS) {
+      const signColor = [config.palette.cyan, config.palette.magenta, config.palette.orange, config.palette.lime][Math.abs((a.office.x + a.office.z) | 0) % 4]
+      const sign = new THREE.Mesh(this.boxGeo, this.glow(signColor, 2.6))
+      sign.scale.set(W * 0.85, 0.9, 0.3)
+      sign.position.set(a.office.x, H + 0.7, a.office.z)
+      sign.rotation.y = a.face
+      sign.translateZ(0.2)
+      this.group.add(sign)
     }
   }
 
@@ -1547,7 +1646,12 @@ export class World {
     this.zone = zone
     const z: ZoneCfg = config.zones[zone]
     const fogColor = new THREE.Color(z.fog)
-    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), zone === 'moon' ? 0.006 : 0.011)
+    // Thinner fog on stronger tiers so the (now much larger) city reads into the
+    // distance on desktop; mobile keeps thicker fog, which also spares it from
+    // drawing the far sprawl.
+    const fx = config.tier.fxScale
+    const earthFog = fx >= 0.9 ? 0.0072 : fx >= 0.6 ? 0.0095 : 0.012
+    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), zone === 'moon' ? 0.006 : earthFog)
     this.scene.background = fogColor.clone()
     this.groundMat.color.setHex(z.ground)
     this.ambient.color.setHex(z.ambient)
@@ -1628,7 +1732,7 @@ export class World {
 
   /** Update the sky/sun/billboards. Always runs so the sky animates everywhere. */
   update(dt: number, focus: THREE.Vector3) {
-    this.time += dt
+    this.time += dt * this.timeScale
     this.neon.update(dt, focus.x, focus.z) // density + distance LOD on city neon
     this.sky.update(dt)
     this.sky.group.position.set(focus.x, 0, focus.z)

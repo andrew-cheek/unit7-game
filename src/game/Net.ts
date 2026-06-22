@@ -34,6 +34,21 @@ export interface ScoreRow {
   score: number
 }
 
+/** Compact per-game record on the wire: [played, won, lost, best]. */
+export type WireGames = Record<string, [number, number, number, number]>
+
+/** A pilot's profile as relayed by the server. */
+export interface NetProfile {
+  id: string
+  name: string
+  aliens: number
+  level: number
+  rating: number // duel rank points
+  badges: number // achievements unlocked
+  accent: number // equipped accent cosmetic color (hex int) - tints the remote avatar
+  games: WireGames
+}
+
 export interface NetHandlers {
   onWelcome(players: RemoteSnapshot[]): void
   onJoin(id: string, name: string): void
@@ -46,7 +61,17 @@ export interface NetHandlers {
   onAliens(list: AlienTuple[]): void
   onAlienGone(id: number, by: string, award: number): void
   onScores(board: ScoreRow[]): void
+  onProfiles(list: NetProfile[]): void
+  // Challenges + live Beam Wars duels.
+  onChallenged(fromId: string, name: string): void
+  onChallengeDeclined(name: string): void
+  onChallengeBusy(name: string): void
+  onMatchStart(info: { side: MatchSide; opp: string; oppId: string; cols: number; rows: number; a: [number, number]; b: [number, number]; trailA: number; trailB: number; startIn: number }): void
+  onMatchTick(a: [number, number], b: [number, number], aAlive: boolean, bAlive: boolean): void
+  onMatchEnd(winner: MatchSide | 'draw'): void
 }
+
+export type MatchSide = 'a' | 'b'
 
 /**
  * Resolve the realtime host. Priority: explicit arg, then `?mp=` query override
@@ -66,10 +91,13 @@ export function resolveHost(explicit?: string): string {
   return PROD_HOST
 }
 
-// TODO: set this to your deployed PartyKit host after `npx partykit deploy`.
-// Until then, multiplayer only connects on localhost dev or with a `?mp=host`
-// override, and the game runs fine single-player.
-export const PROD_HOST = 'play.humanoidrobots.com'
+// Production realtime host. Defaults to the deployed PartyKit host; override per
+// build with the `VITE_PARTYKIT_HOST` env var (Netlify: Site settings ->
+// environment variables) if the server moves.
+const ENV_HOST = (import.meta.env?.VITE_PARTYKIT_HOST as string | undefined)?.trim()
+export const PROD_HOST = ENV_HOST || 'play.humanoidrobots.com'
+/** A real production host is configured (not a placeholder). */
+export const HAS_PROD_HOST = !!PROD_HOST
 
 export class Net {
   private ws: WebSocket | null = null
@@ -149,6 +177,7 @@ export class Net {
         this.handlers.onWelcome((msg.players as RemoteSnapshot[]) ?? [])
         if (msg.scores) this.handlers.onScores(msg.scores as ScoreRow[])
         if (msg.aliens) this.handlers.onAliens(msg.aliens as AlienTuple[])
+        if (msg.profiles) this.handlers.onProfiles(msg.profiles as NetProfile[])
         break
       case 'aliens':
         this.handlers.onAliens((msg.list as AlienTuple[]) ?? [])
@@ -158,6 +187,38 @@ export class Net {
         break
       case 'scores':
         this.handlers.onScores((msg.board as ScoreRow[]) ?? [])
+        break
+      case 'profiles':
+        this.handlers.onProfiles((msg.list as NetProfile[]) ?? [])
+        break
+      case 'challenged':
+        this.handlers.onChallenged(msg.from as string, (msg.name as string) ?? 'PILOT')
+        break
+      case 'challengeDeclined':
+        this.handlers.onChallengeDeclined((msg.name as string) ?? 'PILOT')
+        break
+      case 'challengeBusy':
+        this.handlers.onChallengeBusy((msg.name as string) ?? 'PILOT')
+        break
+      case 'matchStart':
+        this.handlers.onMatchStart({
+          side: msg.side as MatchSide,
+          opp: (msg.opp as string) ?? 'PILOT',
+          oppId: (msg.oppId as string) ?? '',
+          cols: (msg.cols as number) ?? 64,
+          rows: (msg.rows as number) ?? 40,
+          a: (msg.a as [number, number]) ?? [0, 0],
+          b: (msg.b as [number, number]) ?? [0, 0],
+          trailA: (msg.trailA as number) ?? 0x27e7ff,
+          trailB: (msg.trailB as number) ?? 0xff2bd0,
+          startIn: (msg.startIn as number) ?? 1600,
+        })
+        break
+      case 'matchTick':
+        this.handlers.onMatchTick(msg.a as [number, number], msg.b as [number, number], !!msg.aAlive, !!msg.bAlive)
+        break
+      case 'matchEnd':
+        this.handlers.onMatchEnd(msg.winner as MatchSide | 'draw')
         break
       case 'join':
         this.handlers.onJoin(msg.id as string, msg.name as string)
@@ -194,6 +255,35 @@ export class Net {
   /** Try to claim a shared alien; the server decides first-claim-wins. */
   sendClaim(id: number) {
     this.send({ t: 'claim', id })
+  }
+
+  /** Publish our profile (captures, level, duel rating, badges, accent, per-game W/L) to the room. */
+  sendProfile(aliens: number, games: WireGames, level: number, rating: number, badges: number, accent: number) {
+    this.send({ t: 'profile', aliens, games, level, rating, badges, accent })
+  }
+
+  /** Challenge another pilot (by connection id) to a live Beam Wars duel. */
+  sendChallenge(to: string, trail = 0x27e7ff) {
+    this.send({ t: 'challenge', to, trail })
+  }
+
+  /** Accept / decline a duel offer from challenger `fromId`. */
+  sendAccept(fromId: string, trail = 0x27e7ff) {
+    this.send({ t: 'accept', from: fromId, trail })
+  }
+
+  sendDecline(fromId: string) {
+    this.send({ t: 'decline', from: fromId })
+  }
+
+  /** Steer our beam in the active duel. */
+  sendMatchDir(dx: number, dy: number) {
+    this.send({ t: 'matchDir', dir: [dx, dy] })
+  }
+
+  /** Forfeit / leave the active duel. */
+  sendMatchQuit() {
+    this.send({ t: 'matchQuit' })
   }
 
   get connected(): boolean {

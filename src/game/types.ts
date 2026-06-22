@@ -66,9 +66,72 @@ export interface HudState {
   online: number // players in the shared world incl. self (1 = solo / not connected)
   leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
   neon: 'low' | 'med' | 'high' // neon density / quality setting
+  profiles: PlayerProfile[] // roster of viewable pilot profiles (self first; networked others follow)
+  challenge: { fromId: string; name: string } | null // incoming duel offer awaiting accept/decline
+  match: MatchView | null // non-null while a live Beam Wars duel is on screen
+  progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
+  warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
+  race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
+  // non-null during the orbital drop-in opening: altimeter, ring count, and the
+  // parachute-deploy timing gauge (gauge/sweetLo/sweetHi drive the tap target).
+  drop: { alt: number; rings: number; total: number; speed: number; phase: 'fall' | 'window' | 'canopy' | 'land'; gauge: number | null; sweetLo: number; sweetHi: number; result: string | null } | null
 }
 
-export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena'
+/** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */
+export interface ProgressHud {
+  level: number
+  xpInto: number // XP into the current level
+  xpSpan: number // XP the current level spans
+  streak: number // daily login streak
+  daily: { kind: string; target: number; progress: number; claimed: boolean }
+  duelRating: number
+  duelTier: string
+  duelTierColor: string
+  duelStreak: number
+  credits: number
+  badges: number // achievements unlocked
+  achievements: string[] // unlocked achievement ids (for the badges view)
+  cosmetics: { trail: string; accent: string; owned: string[] }
+}
+
+/** Live duel state the HUD/PvP view renders, driven by the server. */
+export interface MatchView {
+  side: 'a' | 'b' // which beam is ours
+  opp: string // opponent callsign
+  cols: number
+  rows: number
+  a: [number, number] // beam A head cell
+  b: [number, number] // beam B head cell
+  aAlive: boolean
+  bAlive: boolean
+  status: 'ready' | 'play' | 'over'
+  winner: 'a' | 'b' | 'draw' | null
+  seq: number // increments each server tick (so the view appends trail cells)
+  oppId: string // opponent connection id (for one-tap rematch)
+  trailA: number // beam-A trail color (hex int), from that pilot's equipped cosmetic
+  trailB: number // beam-B trail color (hex int)
+  result: { delta: number; rating: number; tier: string; tierColor: string; streak: number } | null // filled on match end
+}
+
+/**
+ * A pilot's viewable profile: identity plus a compact win/loss record per
+ * competitive game and lifetime shared-world captures. `self` flags the local
+ * player. `id` is the network connection id (empty for the offline self).
+ */
+export interface PlayerProfile {
+  id: string
+  name: string
+  self: boolean
+  aliens: number // lifetime shared-world alien captures
+  level: number // pilot level
+  duelTier: string // duel rank tier name (e.g. CLASS B)
+  duelTierColor: string
+  rating: number // duel rank points (for the rankings sort)
+  badges: number // achievements unlocked
+  games: { game: string; played: number; won: number; lost: number; best: number }[]
+}
+
+export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena' | 'drivemad'
 
 /** Minimal command surface the HUD / mobile controls use to talk back to the engine. */
 export interface GameControls {
@@ -78,11 +141,25 @@ export interface GameControls {
   resume(): void
   pause(): void
   skipIntro(): void
+  dropDeploy(): void // pop the parachute during the orbital drop-in
+  adjustZoom(factor: number): void // pinch / scroll camera zoom (>1 = further out)
   requestPointerLock(): void
   exitMinigame(): void // leave a minigame and return to the city
   restartIntro(): void // replay the opening cinematic from the start
   toggleMute(): void // toggle game audio
   cycleNeon(): void // cycle neon density: low -> med -> high
+  // Challenges + live Beam Wars duels.
+  challengePilot(id: string): void // invite another online pilot to a duel
+  acceptChallenge(): void // accept the pending incoming duel offer
+  declineChallenge(): void // decline the pending incoming duel offer
+  matchDir(dx: number, dy: number): void // steer our beam in the active duel
+  quitMatch(): void // leave / forfeit the active duel
+  rematch(): void // re-challenge the same opponent after a duel ends
+  buyCosmetic(id: string): void // unlock a cosmetic with credits (then auto-equips)
+  equipCosmetic(slot: 'trail' | 'accent', id: string): void // equip an owned cosmetic
+  toggleWarp(): void // open/close the warp form picker (when charged)
+  warpInto(id: string): void // teleport into a chosen sci-fi form
+  warpRevert(): void // return to the robot form
 }
 
 export type GameAction =
@@ -96,3 +173,4 @@ export type GameAction =
   | 'dance'
   | 'bubble'
   | 'board'
+  | 'warp'

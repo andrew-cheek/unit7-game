@@ -4,8 +4,9 @@ import { World } from './World'
 import { Input } from './Input'
 import { Player } from './Player'
 import { Physics } from './Physics'
-import { Vehicles, isMech } from './Vehicles'
-import { createMechSuit, type VehicleModel } from './procedural'
+import { Vehicles, isMech, type Vehicle } from './Vehicles'
+import { type VehicleModel } from './procedural'
+import { WARP_FORMS, createWarpForm, isWarpForm, hoverOffset, type WarpFormModel } from './WarpForms'
 import { Missiles } from './Missiles'
 import { AudioManager } from './Audio'
 import { NPCManager } from './NPC'
@@ -15,20 +16,27 @@ import { AssetLoader } from './AssetLoader'
 import { Zones } from './Zones'
 import { Events } from './Events'
 import { Intro } from './Intro'
+import { DropIn } from './DropIn'
 import { CameraController } from './Camera'
-import { Net, type NetState, type ScoreRow } from './Net'
+import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
 import { RemotePlayers } from './RemotePlayers'
 import { SharedAliens } from './SharedAliens'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
 import { DawnShow } from './DawnShow'
+import { RobotFactory } from './RobotFactory'
+import { RaceActivity, type RaceHud } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp } from './utils'
 import { trackEvent } from '../lib/analytics'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, type Profile } from './storage'
-import type { HudState, MinigameKind, RadarBlip, Unit7Config, Zone } from './types'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, recordGameResult, type Profile } from './storage'
+import {
+  loadProgression, addXp, noteLogin, noteDaily, recordDuel, levelForXp, levelInfo, tierForRating, cosmeticById,
+  ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
+} from './progression'
+import type { HudState, MatchView, MinigameKind, PlayerProfile, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
 export interface Capturable {
@@ -79,12 +87,16 @@ export class Game {
   private fx = { speed: 0, shield: 0, score: 0 }
   private scoreMul = 1
   private intro: Intro | null = null
+  // Interactive orbital drop-in (the playable opening). Replaces the passive
+  // cinematic on the default Earth start.
+  private dropIn: DropIn | null = null
+  private savedFogDensity: number | null = null
   // Sit the sky/star dome around the cinematic's pocket of airspace.
   private introFocus = new THREE.Vector3(0, 50, -390)
 
   // zone transition (fade out -> swap -> fade in) + rocket launch sequence
   private trans: { phase: 'none' | 'out' | 'in'; t: number; target: Zone } = { phase: 'none', t: 0, target: 'earth' }
-  private launch = { active: false, t: 0, target: 'earth' as Zone }
+  private launch = { active: false, phase: 'ascend' as 'ascend' | 'descend', t: 0, target: 'earth' as Zone, rocket: null as Vehicle | null, land: new THREE.Vector3() }
   private travelCooldown = 0
   private bannerTimer = 0
   // Lightweight objective chain (config.missions). One active at a time.
@@ -113,6 +125,7 @@ export class Game {
   private netTimer = 0
   private missileCooldown = 0
   private invasionTriggered = false
+  private playClock = 0 // seconds of active gameplay (lets the peaceful morning play before the invasion)
   private profile: Profile = loadProfile()
   private credits = 0
   private unlocked = new Set<string>()
@@ -131,7 +144,10 @@ export class Game {
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
-  private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial } | null = null
+  private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial | null } | null = null
+  // The central plaza hero ring doubles as the Mars gateway: step into it to
+  // travel. Stored as a plain trigger so checkPortals can route it like a ring.
+  private plazaMars: { pos: THREE.Vector3; radius: number } | null = null
   private rocketGate: THREE.Group | null = null
   private inMinigame = false
   private activePortal = new THREE.Vector3()
@@ -145,6 +161,9 @@ export class Game {
   private exploration!: ExplorationPoints
   private playground!: Playground
   private dawnShow!: DawnShow
+  private robotFactory!: RobotFactory
+  private race!: RaceActivity
+  private raceHud: RaceHud = { state: 'idle', cp: 0, total: 0, time: 0, best: 0, countdown: 0, result: 0, near: false }
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
   private timeFromQuery = false // ?time= debug override present (skip morning start)
@@ -161,6 +180,21 @@ export class Game {
   private netAccum = 0
   private online = 1 // players in the world incl. self (1 = solo)
   private leaderboard: ScoreRow[] = []
+  private remoteProfiles: NetProfile[] = [] // other pilots' viewable profiles (networked)
+  private hudProfiles: PlayerProfile[] = [] // built roster (self + others) for the HUD
+  private profilesDirty = true // rebuild hudProfiles only when stats/roster change
+  private username = '' // callsign we joined the shared world under (empty when solo)
+  private incomingChallenge: { fromId: string; name: string } | null = null
+  private matchView: MatchView | null = null // live Beam Wars duel state (null when not dueling)
+  private progression: Progression = loadProgression()
+  private morningSunrise = false // true while the scripted opening sunrise is slowing the clock
+  // Warp ability: a charge fills over 30s of play; press R to open the picker and
+  // teleport into one of seven sci-fi forms.
+  private static readonly WARP_TIME = 30
+  private warpCharge = 0
+  private warpMenuOpen = false
+  private warpActive: string | null = null
+  private warpModel: WarpFormModel | null = null
 
   // --- analytics state (GA via trackEvent; never affects gameplay) ----------
   private multiplayerEnabled: boolean
@@ -181,6 +215,9 @@ export class Game {
     const tier = TIERS[tierName]
     config.quality = tierName
     config.tier = tier
+    // A much larger world on capable devices (it thins out toward the edges), but
+    // kept smaller on mobile so the draw count stays sane.
+    config.world.half = tier.fxScale >= 0.9 ? 480 : tier.fxScale >= 0.6 ? 384 : 248
 
     this.cfg = {
       startInIntro: userConfig.startInIntro ?? true,
@@ -193,10 +230,14 @@ export class Game {
 
     this.engine = new Engine(container, tier)
     this.world = new World(this.engine.scene, this.zone)
-    // Debug: jump the day/night clock with ?time=<seconds into the 120s cycle>.
+    // Debug: jump the day/night clock with ?time=<seconds into the 120s cycle>,
+    // and start on another world with ?zone=moon|mars.
     if (typeof location !== 'undefined') {
-      const t = new URLSearchParams(location.search).get('time')
+      const q = new URLSearchParams(location.search)
+      const t = q.get('time')
       if (t != null && !Number.isNaN(Number(t))) { this.world.setDebugTime(Number(t)); this.timeFromQuery = true }
+      const z = q.get('zone')
+      if (z === 'moon' || z === 'mars' || z === 'earth') this.zone = z
     }
     this.input = new Input(this.engine.renderer.domElement)
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
@@ -237,6 +278,16 @@ export class Game {
     this.playground = new Playground(this.engine.scene)
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
     this.dawnShow = new DawnShow(this.engine.scene, this.physics)
+    this.robotFactory = new RobotFactory(this.engine.scene, this.physics)
+    this.race = new RaceActivity(this.engine.scene, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    this.race.onSfx = (k) => this.audio.play(k === 'cp' ? 'ui' : 'objective')
+    this.race.onFinish = (credits, xp, isBest) => {
+      this.addCredits(credits)
+      this.awardXp(xp)
+      this.hud.banner = `RACE ${this.raceHud.result.toFixed(1)}s${isBest ? '  NEW BEST!' : ''}  +${credits}c`
+      this.bannerTimer = 3.2
+      vibrate(50)
+    }
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
     this.events.onSoak = () => {
       this.hud.banner = 'SPLASH!'
@@ -249,6 +300,7 @@ export class Game {
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
     this.camera.snap(this.player.position)
+    this.input.onZoom = (f) => this.camera.adjustZoom(f)
 
     this.buildArcadePortals()
 
@@ -263,7 +315,7 @@ export class Game {
     window.addEventListener('keydown', unlockAudio)
     window.addEventListener('touchstart', unlockAudio)
 
-    this.vehicles.onEnterRocket = () => this.startRocketLaunch()
+    this.vehicles.onEnterRocket = (rocket) => this.startRocketLaunch(rocket)
 
     // Load real CC0 assets if present; otherwise the procedural world stays.
     this.assets = new AssetLoader()
@@ -282,7 +334,9 @@ export class Game {
     this.engine.scene.add(this.netLine)
 
     this.input.onUnlock = () => {
-      if (!this.paused) this.setPaused(true)
+      // The warp picker frees the cursor on purpose (so its buttons are clickable
+      // on desktop); don't treat that as a pause request.
+      if (!this.paused && !this.warpMenuOpen) this.setPaused(true)
     }
 
     this.controls = {
@@ -292,14 +346,40 @@ export class Game {
       resume: () => this.setPaused(false),
       pause: () => this.setPaused(true),
       skipIntro: () => {
-        if (this.intro && !this.intro.done) trackEvent('intro_skipped')
+        if ((this.intro && !this.intro.done) || (this.dropIn && !this.dropIn.done)) trackEvent('intro_skipped')
         this.intro?.skip()
+        this.dropIn?.skip()
       },
+      dropDeploy: () => this.dropIn?.deploy(),
       requestPointerLock: () => this.input.requestLock(),
+      adjustZoom: (factor: number) => this.camera.adjustZoom(factor),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
+      challengePilot: (id: string) => this.net?.sendChallenge(id, this.equippedTrailColor()),
+      acceptChallenge: () => {
+        if (!this.incomingChallenge) return
+        this.net?.sendAccept(this.incomingChallenge.fromId, this.equippedTrailColor())
+        this.incomingChallenge = null
+      },
+      declineChallenge: () => {
+        if (!this.incomingChallenge) return
+        this.net?.sendDecline(this.incomingChallenge.fromId)
+        this.incomingChallenge = null
+      },
+      matchDir: (dx: number, dy: number) => this.net?.sendMatchDir(dx, dy),
+      quitMatch: () => this.leaveMatch(),
+      rematch: () => {
+        const oppId = this.matchView?.oppId
+        this.leaveMatch()
+        if (oppId) this.net?.sendChallenge(oppId, this.equippedTrailColor())
+      },
+      buyCosmetic: (id: string) => this.buyCosmetic(id),
+      equipCosmetic: (slot: 'trail' | 'accent', id: string) => this.equipCosmetic(slot, id),
+      toggleWarp: () => this.toggleWarp(),
+      warpInto: (id: string) => this.warpInto(id),
+      warpRevert: () => this.warpRevert(),
     }
 
     this.hud = {
@@ -315,9 +395,21 @@ export class Game {
       online: 1,
       leaderboard: [],
       neon: this.neonLevel,
+      profiles: [],
+      challenge: null,
+      match: null,
+      progress: this.buildProgressHud(),
+      warp: { charge01: 0, ready: false, active: null, menu: false },
+      race: { ...this.raceHud },
+      drop: null,
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
+    // Roll the daily objective / update the login streak, and apply the equipped
+    // accent cosmetic to the player's robot.
+    noteLogin()
+    this.refreshProgression()
+    this.applyAccentCosmetic()
 
     this.engine.onUpdate = this.update
     if (import.meta.env.DEV) (window as unknown as { __unit7?: Game }).__unit7 = this
@@ -329,23 +421,74 @@ export class Game {
       this.doTravel(z)
     }
 
-    // Factory assembly cinematic before gameplay (skippable).
-    if (this.cfg.startInIntro) {
-      this.intro = new Intro(this.engine.scene, this.engine.camera)
-      this.hud.intro = true
-      this.player.setVisible(false)
-      this.input.setLockEnabled(false)
-      // Hide the city's ambient life until the cinematic hands off.
-      this.patrols.setVisible(false)
-      this.sky.setVisible(false)
-      for (const p of this.arcadePortals) p.group.visible = false
-      if (this.arcadeRobot) this.arcadeRobot.group.visible = false
+    // The opening you play, not watch: an interactive orbital drop-in over the
+    // city (skippable). Off-world debug starts skip straight to gameplay.
+    if (this.cfg.startInIntro && this.zone === 'earth') {
+      this.beginDropIn()
     } else {
-      // No cinematic: drop straight into the morning arrival.
       this.startMorning()
       // Without multiplayer there's no join/solo prompt, so control begins now.
       if (!this.multiplayerEnabled) this.emitGameStart('solo')
     }
+  }
+
+  /**
+   * Begin the interactive drop-in: hide the player (the diver is the DropIn's own
+   * rig), brighten the sky to a lit sunrise (skipping the pitch-black pre-dawn),
+   * and lighten the fog so the city reads from altitude. The day clock runs on
+   * through the descent so you land as the sun finishes cresting.
+   */
+  private beginDropIn() {
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.robotFactory.roofPad, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
+    this.robotFactory.setPadGlow(true)
+    this.hud.intro = true // surfaces the SKIP button
+    this.player.setVisible(false)
+    this.input.setLockEnabled(true)
+    this.input.exitLock()
+    if (!this.timeFromQuery) {
+      this.world.setDebugTime(9) // mid-sunrise: gold and lit, not dark
+      this.world.setTimeScale(0.5)
+      this.morningSunrise = true
+    }
+    const fog = this.engine.scene.fog
+    if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
+    this.hud.banner = 'ORBITAL DROP'
+    this.bannerTimer = 2.5
+    this.hud.missionPopup = { title: 'DROP IN', body: 'Steer with WASD or the stick. Hold F / Space to dive. Thread the rings down to the city.' }
+    this.missionPopupTimer = 6
+  }
+
+  private finishDrop() {
+    // Reward the drop: rings threaded + how clean the parachute timing was.
+    const rings = this.dropIn?.hud.rings ?? 0
+    const q = this.dropIn?.chuteQuality ?? 0
+    const chuteBonus = q >= 0.85 ? 150 : q >= 0.55 ? 60 : 0
+    const credits = 100 + rings * 25 + chuteBonus
+    const xp = 40 + rings * 10 + (q >= 0.85 ? 40 : 0)
+    this.dropIn?.dispose()
+    this.dropIn = null
+    this.robotFactory.setPadGlow(false)
+    this.addCredits(credits)
+    this.awardXp(xp)
+    const grade = q >= 0.85 ? 'PERFECT LANDING' : q >= 0.55 ? 'CLEAN LANDING' : 'TOUCHDOWN'
+    this.hud.banner = `${grade}  ${rings} rings  +${credits}c`
+    this.bannerTimer = 3.4
+    this.hud.intro = false
+    this.hud.drop = null
+    // Land "inside" the factory: place the player on the floor among the robots.
+    this.player.exitVehicle(this.robotFactory.entrance.clone())
+    this.player.setVisible(true)
+    this.camera.snap(this.player.position)
+    this.input.setLockEnabled(true)
+    const fog = this.engine.scene.fog
+    if (fog instanceof THREE.FogExp2 && this.savedFogDensity != null) { fog.density = this.savedFogDensity; this.savedFogDensity = null }
+    // The drop ended on a brief fade; fade back in on the gameplay side so the
+    // hand-off to the follow camera reads as one continuous shot.
+    this.hud.fade = 1
+    this.trans = { phase: 'in', t: 0, target: this.zone }
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Inside the robot factory - units roll off the line and head into the city. Follow them out, or find the amber Mars gate.' }
+    this.missionPopupTimer = 6
   }
 
   /**
@@ -451,8 +594,27 @@ export class Game {
    */
   private startMorning() {
     if (this.timeFromQuery || this.zone !== 'earth') return
-    this.world.setDebugTime(7) // just into the 5s..15s dawn ramp
+    // Begin in pre-dawn dark, then run the sunrise at ~0.4x so the whole thing -
+    // night lifting to gold, the visible sun cresting, the shift fleet descending
+    // and workers filing into the offices - plays out over ~30s instead of being
+    // over in a blink. Normal clock speed resumes once it's full day.
+    this.world.setDebugTime(4) // just before the 5s..15s dawn ramp
+    this.world.setTimeScale(0.4)
+    this.morningSunrise = true
     this.dawnShow.resetClock()
+    this.hud.banner = 'DAWN OVER THE CITY'
+    this.bannerTimer = 3
+    this.hud.missionPopup = { title: 'SHIFT CHANGE', body: 'Dawn breaks. Watch the shuttles land and the crew head to work, then follow the neon route to the beam.' }
+    this.missionPopupTimer = 7
+  }
+
+  /** End the scripted slow sunrise once it's full day, restoring normal clock speed. */
+  private updateMorningSunrise() {
+    if (!this.morningSunrise) return
+    if (this.world.dayFactor >= 0.98) {
+      this.world.setTimeScale(1)
+      this.morningSunrise = false
+    }
   }
 
   // --- Arcade portals ------------------------------------------------------
@@ -463,13 +625,19 @@ export class Game {
     // transport beam) and drops you into its game - a 2D cabinet game, or a
     // planet (Mars / Moon) reskinned as just another cabinet.
     const A = config.palette
-    this.arcadePortals.push(this.buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-15, 0, 10)))
-    this.arcadePortals.push(this.buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-7.5, 0, 14)))
-    this.arcadePortals.push(this.buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(0, 0, 16)))
-    this.arcadePortals.push(this.buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(7.5, 0, 14)))
-    this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(15, 0, 10)))
-    this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-33, 0, 12)))
-    this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(33, 0, 12)))
+    // Cabinets are spread across a wide, deep plaza instead of one tight row, so
+    // the spawn view opens up (the central Mars portal is the hero) and you
+    // discover the arcades by walking out to them, not all at once. They stay
+    // clear of the spawn circle, the scattered plaza buildings, and the city
+    // grid (first towers sit at z=72).
+    this.arcadePortals.push(this.buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-18, 0, 12)))
+    this.arcadePortals.push(this.buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(18, 0, 12)))
+    this.arcadePortals.push(this.buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-46, 0, 26)))
+    this.arcadePortals.push(this.buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(46, 0, 26)))
+    this.arcadePortals.push(this.buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-34, 0, 46)))
+    this.arcadePortals.push(this.buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(34, 0, 46)))
+    this.arcadePortals.push(this.buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(-12, 0, 56)))
+    this.arcadePortals.push(this.buildCabinet('drivemad', A.lime, 'DRIVE FRENZY', new THREE.Vector3(12, 0, 56)))
     // Planet/moon travel stays as its own separate ring-portals (built in Zones),
     // NOT arcade cabinets: the arcade takes you to the mini-games, the portals
     // take you to other worlds.
@@ -544,23 +712,17 @@ export class Game {
    * "the arcade is a giant robot" read; the cabinets are the working portals.
    */
   private buildArcadeRobot() {
-    const SCALE = 13
-    const robot = createMechSuit({ scale: SCALE, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff })
+    // The colossal Unit-7 robot at the back of the arcade is now a real,
+    // pilotable TITAN (spawned in Vehicles at 0,0,44): walk up and press G to
+    // climb in and stomp around. Here we just hang the ARCADE marquee above it.
     const x = 0, z = 44
     const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
-    // The model's feet sit ~0.3 below its origin; lift by that x scale so the
-    // colossus stands on the ground rather than sinking into it.
-    robot.group.position.set(x, gy + 0.3 * SCALE, z)
-    robot.group.rotation.y = Math.PI // face -Z, toward the player / cabinets
-    this.engine.scene.add(robot.group)
-    this.arcadeRobot = robot
-    // ARCADE marquee floating in front of the robot's chest.
     const tex = this.makeLabelTexture('ARCADE', config.palette.cyan)
     this.arcadeTex.push(tex)
     const signMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
     this.arcadeMats.push(signMat)
     const sign = new THREE.Sprite(signMat)
-    sign.position.set(0, gy + 40, z - 8)
+    sign.position.set(0, gy + 30, z - 6)
     sign.scale.set(30, 7.5, 1)
     this.engine.scene.add(sign)
   }
@@ -577,28 +739,49 @@ export class Game {
     const g = new THREE.Group()
     const gy = this.physics.sampleGround(cx, cz, 40)?.y ?? 0
     g.position.set(cx, gy, cz)
-    // Big vertical hero ring.
-    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: 0x1aa6c4, fog: false })))
+    // Big vertical hero ring - the Mars gateway, in Mars amber/orange so it reads
+    // as "this is the way off-world" from across the plaza.
+    const mars = config.palette.orange
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(6, 0.5, 18, 56)), own(new THREE.MeshBasicMaterial({ color: mars, fog: false })))
     ring.position.y = 7
     g.add(ring)
-    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xc41f9e, fog: false })))
+    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(4.4, 0.28, 14, 48)), own(new THREE.MeshBasicMaterial({ color: 0xffd9a8, fog: false })))
     ring2.position.y = 7
     g.add(ring2)
-    // Tall sky beam, visible from across the map.
-    const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0x7fd7ff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    beam.position.y = 110
-    // Explicit renderOrder so this tall additive column always sorts after the
-    // city and in a stable slot, instead of swapping order with other
-    // transparent layers as the camera moves (the additive-flicker fix).
-    beam.renderOrder = 4
-    g.add(beam)
-    // Neon ground ring marking the plaza floor.
-    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    // Translucent portal disc filling the ring so it reads as an enterable gate.
+    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(5.7, 40)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.18, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    disc.position.y = 7
+    g.add(disc)
+    // Floating MARS label above the gate.
+    const labelTex = this.makeLabelTexture('MARS', mars)
+    this.arcadeTex.push(labelTex)
+    const label = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthWrite: false })))
+    label.position.set(0, 15, 0)
+    label.scale.set(9, 2.25, 1)
+    g.add(label)
+    // Tall sky beam, visible from across the map (Mars amber). It's a wide
+    // additive column right where the player looks at spawn, so it's skipped on
+    // the low (mobile) tier - the ring + disc + label still mark the gateway -
+    // saving that full-height overdraw on phones.
+    let beamMat: THREE.MeshBasicMaterial | null = null
+    if (config.tier.fxScale >= 0.6) {
+      const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      beam.position.y = 110
+      // Explicit renderOrder so this tall additive column always sorts after the
+      // city and in a stable slot, instead of swapping order with other
+      // transparent layers as the camera moves (the additive-flicker fix).
+      beam.renderOrder = 4
+      g.add(beam)
+      beamMat = beam.material as THREE.MeshBasicMaterial
+    }
+    // Neon ground ring marking the plaza floor (the stand-here Mars pad).
+    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(8, 9.2, 48)), own(new THREE.MeshBasicMaterial({ color: mars, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     decal.rotation.x = -Math.PI / 2
     decal.position.y = 0.15
     g.add(decal)
     this.engine.scene.add(g)
-    this.plazaHub = { group: g, ring, ring2, beamMat: beam.material as THREE.MeshBasicMaterial }
+    this.plazaHub = { group: g, ring, ring2, beamMat }
+    this.plazaMars = { pos: new THREE.Vector3(cx, gy, cz), radius: 4.5 }
   }
 
   /**
@@ -709,6 +892,7 @@ export class Game {
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
     this.minigamePlayed = true
+    this.warpRevert() // can't carry a warp form into a cabinet game
     this.minigameStartMs = typeof performance !== 'undefined' ? performance.now() : 0
     trackEvent('minigame_start', { game: kind })
     this.audio.play('portal')
@@ -742,7 +926,97 @@ export class Game {
     this.input.setLockEnabled(true)
     this.camera.snap(this.player.position)
     this.engine.start()
+    // Playing a cabinet counts toward XP + the daily "play" objective.
+    this.awardXp(15)
+    const d = noteDaily('play', 1)
+    if (d.completed && d.reward) this.grantDailyReward(d.reward)
+    this.refreshProgression()
     this.hudListener({ ...this.hud, radar: this.radar })
+    // A minigame may have changed our W/L record; refresh the shared profile.
+    this.publishProfile()
+  }
+
+  // --- warp ability -----------------------------------------------------------
+
+  /** Open/close the warp picker. Opens when charged or already warped (to switch
+   *  / revert); otherwise nudges that it's still charging. */
+  private toggleWarp() {
+    if (this.warpMenuOpen) { this.warpMenuOpen = false; this.input.requestLock(); return }
+    if (this.warpCharge >= Game.WARP_TIME || this.warpActive) {
+      this.warpMenuOpen = true
+      this.input.exitLock() // free the cursor so the picker is clickable on desktop
+      this.audio.play('ui')
+    } else {
+      this.hud.banner = `WARP CHARGING ${Math.floor((this.warpCharge / Game.WARP_TIME) * 100)}%`
+      this.bannerTimer = 1.1
+    }
+  }
+
+  /** Teleport into a chosen sci-fi form: hide the robot, show the form, apply its
+   *  speed, and pop a warp flash. Consumes the charge. */
+  private warpInto(id: string) {
+    const meta = WARP_FORMS.find((f) => f.id === id)
+    if (!meta || !isWarpForm(id)) return
+    if (this.warpCharge < Game.WARP_TIME) { this.warpMenuOpen = false; return } // not ready
+    this.warpCharge = 0
+    this.warpMenuOpen = false
+    this.clearWarpModel()
+    const m = createWarpForm(id)
+    this.warpModel = m
+    const p = this.player.position
+    m.group.position.set(p.x, p.y + hoverOffset(id), p.z)
+    this.engine.scene.add(m.group)
+    this.warpActive = id
+    this.player.setModelVisible(false)
+    this.player.warpSpeedMul = meta.speedMul
+    this.missiles.shockwave({ x: p.x, y: p.y + 1, z: p.z }, meta.color, 7, 0.8)
+    this.camera.shake(0.8)
+    this.audio.play('portal')
+    vibrate(45)
+    this.hud.banner = `WARPED · ${meta.name}`
+    this.bannerTimer = 2
+  }
+
+  /** Return to the robot form. */
+  private warpRevert() {
+    this.warpMenuOpen = false
+    if (!this.warpActive) return
+    this.clearWarpModel()
+    this.warpActive = null
+    this.player.warpSpeedMul = 1
+    this.player.setModelVisible(true)
+    const p = this.player.position
+    this.missiles.shockwave({ x: p.x, y: p.y + 1, z: p.z }, 0x27e7ff, 5, 0.6)
+    this.audio.play('portal')
+  }
+
+  private clearWarpModel() {
+    if (this.warpModel) {
+      this.engine.scene.remove(this.warpModel.group)
+      this.warpModel.dispose()
+      this.warpModel = null
+    }
+  }
+
+  /** Fill the warp charge and keep the active form glued to the player. */
+  private updateWarp(dt: number) {
+    this.warpCharge = Math.min(Game.WARP_TIME, this.warpCharge + dt)
+    if (this.warpActive && this.warpModel) {
+      const p = this.player.position
+      const grp = this.warpModel.group
+      grp.position.set(p.x, p.y + hoverOffset(this.warpActive), p.z)
+      grp.rotation.y = this.input.yaw
+      this.warpModel.update(dt)
+    }
+  }
+
+  /** Leave the live duel view: forfeit if still running, then return to the city. */
+  private leaveMatch() {
+    if (!this.matchView) return
+    if (this.matchView.status !== 'over') this.net?.sendMatchQuit()
+    this.matchView = null
+    this.input.consumePause() // drop any Escape pressed inside the duel view
+    this.input.setLockEnabled(true)
   }
 
   // --- zone travel ---------------------------------------------------------
@@ -755,6 +1029,7 @@ export class Game {
 
   /** Hard swap of surfaces, atmosphere, visible terrain and spawn for a zone. */
   private doTravel(zone: Zone) {
+    this.warpRevert() // drop any warp form on zone change
     if (this.vehicles.current) {
       this.player.exitVehicle(this.player.position)
     }
@@ -765,6 +1040,8 @@ export class Game {
     this.exploration.setActive(zone)
     this.playground.setActive(zone)
     this.dawnShow.setActive(zone)
+    this.robotFactory.setActive(zone === 'earth')
+    this.race.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -793,15 +1070,17 @@ export class Game {
     if (zone !== 'earth') this.world.pushHeadline(`UNIT 7 PILOT TOUCHES DOWN ON ${zone.toUpperCase()}`)
   }
 
-  private startRocketLaunch() {
+  private startRocketLaunch(rocket: Vehicle) {
     if (this.launch.active || this.trans.phase !== 'none') return
     trackEvent('vehicle_entered', { type: 'rocket' })
-    const order: Zone[] = ['earth', 'mars', 'moon']
+    // Earth -> Moon -> Mars -> Earth, matching the journey out and back.
+    const order: Zone[] = ['earth', 'moon', 'mars']
     const next = order[(order.indexOf(this.zone) + 1) % order.length]
-    this.launch = { active: true, t: 0, target: next }
+    this.launch = { active: true, phase: 'ascend', t: 0, target: next, rocket, land: new THREE.Vector3() }
     this.player.enterVehicle() // hide player; "boards" the rocket
-    this.hud.banner = 'LAUNCH SEQUENCE'
+    this.hud.banner = `LAUNCH · ${next.toUpperCase()}`
     this.bannerTimer = 3
+    this.audio.play('portal')
   }
 
   start() {
@@ -867,15 +1146,17 @@ export class Game {
     }
     if (v.kind === 'rocket') {
       trackEvent('ability_used', { ability: 'vehicle' }) // G = board the rocket
-      this.vehicles.onEnterRocket?.() // vehicle_entered fires in startRocketLaunch
+      this.warpRevert()
+      this.vehicles.onEnterRocket?.(v) // vehicle_entered fires in startRocketLaunch
     } else {
+      this.warpRevert() // step out of the warp form to pilot
       this.player.enterVehicle()
       this.vehicles.enter(v)
       trackEvent('ability_used', { ability: 'vehicle' }) // G = enter
       trackEvent('vehicle_entered', { type: v.kind })
-      // Mech boot-up moment: name banner, camera shake + an energy/steam burst
-      // so boarding the battle mech reads as a powered-up reward.
-      if (isMech(v.kind)) {
+      // Mech / titan boot-up moment: name banner, camera shake + an energy/steam
+      // burst so boarding a giant reads as a powered-up reward.
+      if (isMech(v.kind) || v.kind === 'titan') {
         this.hud.banner = `${v.name} ONLINE`
         this.bannerTimer = 1.6
         this.camera.shake(1.0)
@@ -952,6 +1233,7 @@ export class Game {
       this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
       vibrate(25)
       this.audio.play('capture')
+      this.awardCaptureProgress(1)
       // Let everyone else see the capture happen.
       this.net?.sendCapture([best.position.x, best.position.y, best.position.z], award)
     }
@@ -1151,6 +1433,7 @@ export class Game {
     }
     if (hits > 0) {
       vibrate(40)
+      this.awardCaptureProgress(hits)
       // One event per blast (not per target) so a big missile hit can't spam GA.
       trackEvent('npc_captured', { total: this.hud.captured })
     }
@@ -1177,26 +1460,67 @@ export class Game {
 
   private updateLaunch(dt: number) {
     this.launch.t += dt
-    const rocket = this.vehicles.list.find((v) => v.kind === 'rocket')
-    if (rocket) {
-      rocket.position.y += (4 + this.launch.t * this.launch.t * 9) * dt
-      rocket.model.group.position.copy(rocket.position)
-      rocket.model.update(dt, 1)
-      const cam = this.engine.camera
-      cam.position.set(rocket.position.x + 16, rocket.position.y + 5, rocket.position.z + 16)
-      cam.lookAt(rocket.position.x, rocket.position.y + 2, rocket.position.z)
-      this.focus.copy(rocket.position)
-    }
-    this.hud.fade = Math.max(0, (this.launch.t - 1.5) / 0.6)
-    this.world.update(dt, this.focus)
-    if (this.launch.t > 2.1) {
+    const rocket = this.launch.rocket
+    const cam = this.engine.camera
+    const smooth = (x: number) => { const t = x < 0 ? 0 : x > 1 ? 1 : x; return t * t * (3 - 2 * t) }
+
+    if (this.launch.phase === 'ascend') {
       if (rocket) {
-        rocket.position.y = this.physics.sampleGround(rocket.position.x, rocket.position.z, 80)?.y ?? 0
+        rocket.position.y += (4 + this.launch.t * this.launch.t * 9) * dt
         rocket.model.group.position.copy(rocket.position)
+        rocket.model.update(dt, 1)
+        cam.position.set(rocket.position.x + 16, rocket.position.y + 5, rocket.position.z + 16)
+        cam.lookAt(rocket.position.x, rocket.position.y + 2, rocket.position.z)
+        this.focus.copy(rocket.position)
       }
-      this.launch.active = false
-      this.doTravel(this.launch.target)
-      this.trans = { phase: 'in', t: 0, target: this.launch.target }
+      this.hud.fade = Math.max(0, (this.launch.t - 1.5) / 0.6)
+      this.world.update(dt, this.focus)
+      if (this.launch.t > 2.1) {
+        // Arrive: swap worlds, then re-board so the rocket self-lands on the pad.
+        this.doTravel(this.launch.target)
+        this.player.enterVehicle()
+        this.launch.phase = 'descend'
+        this.launch.t = 0
+        const sp = this.safeSpawn()
+        this.launch.land.set(sp.x + 8, this.physics.sampleGround(sp.x + 8, sp.z + 6, 200)?.y ?? sp.y, sp.z + 6)
+        if (rocket) {
+          rocket.position.set(this.launch.land.x, this.launch.land.y + 95, this.launch.land.z)
+          rocket.model.group.position.copy(rocket.position)
+          rocket.yaw = 0
+          rocket.model.group.rotation.set(0, 0, 0)
+        }
+        this.hud.fade = 1
+      }
+    } else {
+      // Descend: retro-burn down onto the pad (SpaceX-style final landing burn).
+      const k = smooth(Math.min(1, this.launch.t / 3))
+      if (rocket) {
+        const ease = 1 - (1 - k) * (1 - k) // decelerate into the pad
+        rocket.position.y = THREE.MathUtils.lerp(this.launch.land.y + 95, this.launch.land.y, ease)
+        rocket.model.group.position.copy(rocket.position)
+        rocket.model.update(dt, 1 - k) // throttle eases off as it settles
+        cam.position.set(rocket.position.x + 18, this.launch.land.y + 10 + (rocket.position.y - this.launch.land.y) * 0.3, rocket.position.z + 18)
+        cam.lookAt(rocket.position.x, rocket.position.y + 4, rocket.position.z)
+        this.focus.copy(rocket.position)
+      }
+      this.hud.fade = Math.max(0, 1 - this.launch.t / 0.6) // fade in on the new world
+      this.world.update(dt, this.focus)
+      if (this.launch.t > 3.2) {
+        if (rocket) {
+          rocket.position.y = this.launch.land.y
+          rocket.model.group.position.copy(rocket.position)
+          rocket.home.copy(rocket.position) // park where it landed
+        }
+        const sp = this.safeSpawn()
+        this.player.exitVehicle(sp)
+        this.player.setVisible(true)
+        this.camera.snap(this.player.position)
+        this.launch.active = false
+        this.launch.rocket = null
+        this.hud.banner = `ARRIVED · ${this.launch.target.toUpperCase()}`
+        this.bannerTimer = 2.4
+        this.audio.play('land')
+      }
     }
   }
 
@@ -1229,8 +1553,12 @@ export class Game {
     for (const p of this.zones.portalsFor(this.zone)) {
       if (Math.hypot(px - p.position.x, pz - p.position.z) < p.radius) {
         this.requestTravel(p.target)
-        break
+        return
       }
+    }
+    // The central plaza hero ring is the Earth->Mars gateway.
+    if (this.zone === 'earth' && this.plazaMars && Math.hypot(px - this.plazaMars.pos.x, pz - this.plazaMars.pos.z) < this.plazaMars.radius) {
+      this.requestTravel('mars')
     }
   }
 
@@ -1242,6 +1570,7 @@ export class Game {
    */
   connectMultiplayer(username: string, host?: string) {
     if (this.net) return // already connected/connecting
+    this.username = username
     this.emitGameStart('multiplayer')
     this.net = new Net(
       username,
@@ -1284,14 +1613,275 @@ export class Game {
             this.addCredits(Math.round(award * 0.5))
             vibrate(25)
             this.audio.play('capture')
+            this.publishProfile() // capture count changed; refresh shared profile
           }
         },
         onScores: (board) => {
           this.leaderboard = board
         },
+        onProfiles: (list) => {
+          this.remoteProfiles = list
+          this.profilesDirty = true
+          // Dress the remote avatars: accent colour + a nametag showing level + rank.
+          this.remotePlayers.applyProfiles(
+            list.map((p) => ({ id: p.id, name: p.name, accent: p.accent ?? 0x27e7ff, level: p.level ?? 1, tier: tierForRating(p.rating ?? 1000).name })),
+          )
+        },
+        onChallenged: (fromId, name) => {
+          // Ignore a new offer if one is already pending or we're mid-duel.
+          if (this.incomingChallenge || this.matchView) return
+          this.incomingChallenge = { fromId, name }
+          this.audio.play('ui')
+          vibrate(30)
+        },
+        onChallengeDeclined: (name) => {
+          this.hud.banner = `${name} DECLINED`
+          this.bannerTimer = 2
+        },
+        onChallengeBusy: (name) => {
+          this.hud.banner = `${name} IS BUSY`
+          this.bannerTimer = 2
+        },
+        onMatchStart: (info) => {
+          this.warpRevert() // duels are robot-only
+          this.incomingChallenge = null
+          this.matchView = {
+            side: info.side, opp: info.opp, oppId: info.oppId, cols: info.cols, rows: info.rows,
+            a: info.a, b: info.b, aAlive: true, bAlive: true, status: 'ready', winner: null, seq: 0,
+            trailA: info.trailA, trailB: info.trailB, result: null,
+          }
+          this.input.setLockEnabled(false)
+          this.audio.play('ui')
+        },
+        onMatchTick: (a, b, aAlive, bAlive) => {
+          if (!this.matchView) return
+          const m = this.matchView
+          m.a = a; m.b = b; m.aAlive = aAlive; m.bAlive = bAlive
+          if (m.status === 'ready') m.status = 'play'
+          m.seq += 1
+        },
+        onMatchEnd: (winner) => {
+          const m = this.matchView
+          if (!m) return
+          m.status = 'over'
+          m.winner = winner
+          if (winner !== 'draw') {
+            const won = winner === m.side
+            recordGameResult('beamwars', won ? 'win' : 'loss')
+            const r = recordDuel(won)
+            m.result = { delta: r.delta, rating: r.rating, tier: r.tier.name, tierColor: r.tier.color, streak: r.streak }
+            this.awardXp(won ? 60 : 15)
+            if (won) {
+              const d = noteDaily('duelWins', 1)
+              if (d.completed && d.reward) this.grantDailyReward(d.reward)
+            }
+          } else {
+            this.awardXp(20) // a draw still earns a little
+          }
+          this.refreshProgression()
+          this.publishProfile() // duel changed our W/L + level; refresh the shared profile
+        },
       },
       { host },
     )
+    // Publish our profile shortly after connecting (gives the socket time to
+    // open + the server to register us), then it refreshes on captures / game
+    // results via publishProfile().
+    setTimeout(() => this.publishProfile(), 800)
+  }
+
+  // --- progression / gamification ---------------------------------------------
+
+  /** Refresh the cached progression snapshot and mark the HUD roster dirty. */
+  private refreshProgression() {
+    this.progression = loadProgression()
+    this.profilesDirty = true
+    this.checkAchievements()
+  }
+
+  /** Evaluate achievements against the current state; toast any newly unlocked. */
+  private checkAchievements() {
+    const stats = loadStats()
+    const gamesPlayed = Object.values(stats.games).filter((g) => g.played > 0).length
+    const newly = evaluateAchievements({
+      level: levelForXp(this.progression.xp),
+      captures: this.profile.lifetimeCaptured + this.hud.captured,
+      duelWins: this.progression.duelWins,
+      bestDuelStreak: this.progression.bestDuelStreak,
+      duelRating: this.progression.duelRating,
+      loginStreak: this.progression.streak,
+      gamesPlayed,
+      colorsOwned: this.progression.cosmetics.owned.length,
+      dailyCompleted: this.progression.daily.claimed,
+    })
+    if (newly.length) {
+      this.progression = loadProgression() // pick up the newly persisted ids
+      this.hud.banner = `★ ${newly[0].name.toUpperCase()}`
+      this.bannerTimer = 2.8
+      this.audio.play('objective')
+      vibrate(50)
+    }
+  }
+
+  /** Banner + sting when a level boundary is crossed. */
+  private flashLevelUp(level: number) {
+    this.hud.banner = `PILOT LV ${level}`
+    this.bannerTimer = 2.2
+    this.audio.play('objective')
+    vibrate(60)
+  }
+
+  /** Grant the daily-objective reward (credits + the XP was already added). */
+  private grantDailyReward(reward: { credits: number; xp: number }) {
+    this.addCredits(reward.credits)
+    this.hud.banner = `DAILY DONE  +${reward.credits}c`
+    this.bannerTimer = 2.6
+    this.audio.play('objective')
+    vibrate(50)
+  }
+
+  /** Award XP (with level-up feedback) and refresh the cached snapshot. */
+  private awardXp(amount: number) {
+    const r = addXp(amount)
+    if (r.leveledUp) this.flashLevelUp(r.level)
+    this.refreshProgression()
+  }
+
+  /** One capture's worth of progress: XP + daily objective. */
+  private awardCaptureProgress(n = 1) {
+    this.awardXp(5 * n)
+    const d = noteDaily('capture', n)
+    if (d.completed && d.reward) this.grantDailyReward(d.reward)
+    this.refreshProgression()
+  }
+
+  /** Equipped trail color (hex int) for duels; defaults to cyan. */
+  private equippedTrailColor(): number {
+    return cosmeticById(this.progression.cosmetics.trail).color
+  }
+
+  /** Buy a cosmetic with credits, then auto-equip it (trail by default). */
+  private buyCosmetic(id: string) {
+    const c = cosmeticById(id)
+    if (this.progression.cosmetics.owned.includes(id)) return // already owned
+    if (this.credits < c.cost) {
+      this.hud.banner = 'NOT ENOUGH CREDITS'
+      this.bannerTimer = 1.8
+      this.audio.play('ui')
+      return
+    }
+    this.addCredits(-c.cost)
+    ownCosmetic(id)
+    equipCosmeticStore('trail', id)
+    equipCosmeticStore('accent', id)
+    this.refreshProgression()
+    this.applyAccentCosmetic()
+    this.hud.banner = `UNLOCKED ${c.name.toUpperCase()}`
+    this.bannerTimer = 2
+    this.audio.play('objective')
+    vibrate(40)
+  }
+
+  private equipCosmetic(slot: 'trail' | 'accent', id: string) {
+    equipCosmeticStore(slot, id)
+    this.refreshProgression()
+    if (slot === 'accent') this.applyAccentCosmetic()
+  }
+
+  /** Recolor the local robot avatar to the equipped accent cosmetic. */
+  private applyAccentCosmetic() {
+    const color = cosmeticById(this.progression.cosmetics.accent).color
+    this.player.setAccent(color)
+  }
+
+  /** Build our wire profile from persisted stats + lifetime captures and send it. */
+  private publishProfile() {
+    this.profilesDirty = true // our own stats changed; rebuild the HUD roster (solo + networked)
+    if (!this.net) return
+    const stats = loadStats()
+    const games: WireGames = {}
+    for (const [game, r] of Object.entries(stats.games)) {
+      games[game] = [r.played, r.won, r.lost, r.best]
+    }
+    this.net.sendProfile(
+      this.profile.lifetimeCaptured + this.hud.captured,
+      games,
+      levelForXp(this.progression.xp),
+      this.progression.duelRating,
+      this.progression.achievements.length,
+      cosmeticById(this.progression.cosmetics.accent).color,
+    )
+  }
+
+  /** Snapshot the gamification state for the HUD (level/streak/daily/rank/cosmetics). */
+  private buildProgressHud(): ProgressHud {
+    const p = this.progression
+    const li = levelInfo(p.xp)
+    const tier = tierForRating(p.duelRating)
+    return {
+      level: li.level,
+      xpInto: li.into,
+      xpSpan: li.span,
+      streak: p.streak,
+      daily: { kind: p.daily.kind, target: p.daily.target, progress: p.daily.progress, claimed: p.daily.claimed },
+      duelRating: p.duelRating,
+      duelTier: tier.name,
+      duelTierColor: tier.color,
+      duelStreak: p.duelStreak,
+      credits: this.credits,
+      badges: p.achievements.length,
+      achievements: [...p.achievements],
+      cosmetics: { trail: p.cosmetics.trail, accent: p.cosmetics.accent, owned: [...p.cosmetics.owned] },
+    }
+  }
+
+  /** Rebuild the HUD profile roster (self first, then networked pilots). */
+  private buildHudProfiles(): PlayerProfile[] {
+    const stats = loadStats()
+    const selfGames = Object.entries(stats.games).map(([game, r]) => ({
+      game,
+      played: r.played,
+      won: r.won,
+      lost: r.lost,
+      best: r.best,
+    }))
+    const selfTier = tierForRating(this.progression.duelRating)
+    const self: PlayerProfile = {
+      id: this.net?.myId ?? '',
+      name: this.username || stats.callsign || 'YOU',
+      self: true,
+      aliens: this.profile.lifetimeCaptured + this.hud.captured,
+      level: levelForXp(this.progression.xp),
+      duelTier: selfTier.name,
+      duelTierColor: selfTier.color,
+      rating: this.progression.duelRating,
+      badges: this.progression.achievements.length,
+      games: selfGames,
+    }
+    const others: PlayerProfile[] = this.remoteProfiles
+      .filter((p) => p.id !== this.net?.myId)
+      .map((p) => {
+        const t = tierForRating(p.rating ?? 1000)
+        return {
+          id: p.id,
+          name: p.name,
+          self: false,
+          aliens: p.aliens,
+          level: p.level ?? 1,
+          duelTier: t.name,
+          duelTierColor: t.color,
+          rating: p.rating ?? 1000,
+          badges: p.badges ?? 0,
+          games: Object.entries(p.games).map(([game, tup]) => ({
+            game,
+            played: tup[0] ?? 0,
+            won: tup[1] ?? 0,
+            lost: tup[2] ?? 0,
+            best: tup[3] ?? 0,
+          })),
+        }
+      })
+    return [self, ...others]
   }
 
   /**
@@ -1438,12 +2028,33 @@ export class Game {
   private update = (dt: number, _elapsed: number) => {
     this.input.update()
 
+    // Interactive drop-in owns the camera until you land / skip. The city lives
+    // and the sky brightens beneath you during the descent.
+    if (this.dropIn) {
+      this.dropIn.update(dt)
+      this.world.update(dt, this.world.spawn)
+      this.dawnShow.update(dt, this.world.dayFactor)
+      this.updateMorningSunrise()
+      this.hud.fade = this.dropIn.fade
+      const d = this.dropIn.hud
+      this.hud.drop = { alt: Math.round(d.alt), rings: d.rings, total: d.total, speed: Math.round(d.speed), phase: d.phase, gauge: d.gauge, sweetLo: d.sweetLo, sweetHi: d.sweetHi, result: d.result }
+      if (this.dropIn.done) this.finishDrop()
+      this.pushHud(dt)
+      return
+    }
+
     // Factory intro cinematic owns the camera until it finishes / is skipped.
     if (this.intro) {
       this.intro.update(dt)
       this.world.update(dt, this.introFocus)
       this.hud.fade = this.intro.fade // cinematic drives the black overlay
       if (this.intro.done) this.finishIntro()
+      this.pushHud(dt)
+      return
+    }
+
+    // A live duel owns the screen (overlay UI); freeze the city cheaply behind it.
+    if (this.matchView) {
       this.pushHud(dt)
       return
     }
@@ -1456,6 +2067,10 @@ export class Game {
 
     this.travelCooldown = Math.max(0, this.travelCooldown - dt)
     this.arcadeCooldown = Math.max(0, this.arcadeCooldown - dt)
+    this.updateMorningSunrise()
+    this.updateWarp(dt)
+    this.playClock += dt
+    if (this.input.consumeEdge('warp')) this.toggleWarp()
 
     if (this.launch.active) {
       this.updateLaunch(dt)
@@ -1531,9 +2146,10 @@ export class Game {
       if (onEarth && this.trans.phase === 'none') this.checkArcadePortals()
     }
 
-    // When the sun finishes rising, the aliens invade (once). In multiplayer the
-    // shared server swarm is the content, so the local invasion is suppressed.
-    if (onEarth && !this.net && !this.invasionTriggered && this.world.dayFactor >= 0.96) {
+    // Let the peaceful morning - sunrise, shuttle arrival, the crew filing into
+    // the offices - fully play out before the aliens invade (once). In
+    // multiplayer the shared server swarm is the content, so it's suppressed.
+    if (onEarth && !this.net && !this.invasionTriggered && !this.morningSunrise && this.playClock > 45 && this.world.dayFactor >= 0.96) {
       this.invasionTriggered = true
       this.events.startInvasion(this.player.position)
       this.hud.banner = 'ALIEN INVASION'
@@ -1570,6 +2186,8 @@ export class Game {
     this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
+    if (onEarth) this.robotFactory.update(dt)
+    if (onEarth) this.raceHud = this.race.update(dt, this.player.position.x, this.player.position.z)
     this.updateBootPuffs(dt)
     this.updateBubbleShots(dt)
     if (this.net) {
@@ -1599,7 +2217,7 @@ export class Game {
       if (onEarth) {
         this.plazaHub.ring.rotation.z += dt * 0.5
         this.plazaHub.ring2.rotation.z -= dt * 0.8
-        this.plazaHub.beamMat.opacity = 0.1 + Math.sin(_elapsed * 1.5) * 0.03
+        if (this.plazaHub.beamMat) this.plazaHub.beamMat.opacity = 0.1 + Math.sin(_elapsed * 1.5) * 0.03
       }
     }
 
@@ -1621,8 +2239,8 @@ export class Game {
       const sp = Math.hypot(v.velocity.x, v.velocity.z)
       const inv = sp > 0.1 ? 1 / sp : 0
       return {
-        // Mechs are tall; pull the camera back proportionally to frame them.
-        distanceScale: isMech(v.kind) ? Math.min(9, 1.8 + v.size * 0.55) : 1.8,
+        // Tall walkers (mechs / titans) need the camera pulled back to frame them.
+        distanceScale: isMech(v.kind) || v.kind === 'titan' ? Math.min(9, 1.8 + v.size * 0.55) : 1.8,
         followYaw: v.yaw,
         moveX: v.velocity.x * inv,
         moveZ: v.velocity.z * inv,
@@ -1680,6 +2298,11 @@ export class Game {
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') for (const p of this.arcadePortals) add(p.pos.x, p.pos.z, 'portal')
+    if (this.zone === 'earth' && this.plazaMars) add(this.plazaMars.pos.x, this.plazaMars.pos.z, 'portal') // Mars gateway
+    if (this.zone === 'earth') {
+      add(64, 8, 'objective') // race start gate
+      add(-110, 64, 'objective') // robot factory
+    }
     if (this.objTarget) add(this.objTarget.x, this.objTarget.z, 'objective') // guide blip
     return blips
   }
@@ -1704,6 +2327,10 @@ export class Game {
       const cur = this.vehicles.current!
       prompt = isMech(cur.kind)
         ? `${cur.name} - Space/J fly, H fire, T transform, G exit`
+        : cur.kind === 'titan'
+        ? `${cur.name} - WASD walk, Space/J rise, G exit`
+        : cur.kind === 'tram'
+        ? 'RIDING TRAM - G to hop off'
         : `Press G - Exit ${this.vehicles.currentName}`
     } else if (this.player.mode === 'robot') {
       const near = this.vehicles.nearest(this.player.position)
@@ -1711,6 +2338,12 @@ export class Game {
         if (isMech(near.kind) && !this.isUnlocked(near.kind)) {
           const cost = MECH_COST[near.kind] ?? 0
           prompt = this.credits >= cost ? `G - Unlock ${near.name} (${cost} CR)` : `${near.name} LOCKED - need ${cost} CR`
+        } else if (near.kind === 'rocket') {
+          const order: Zone[] = ['earth', 'moon', 'mars']
+          const next = order[(order.indexOf(this.zone) + 1) % order.length]
+          prompt = `Press G - RIDE TO ${next.toUpperCase()}`
+        } else if (near.kind === 'tram') {
+          prompt = 'Press G - RIDE TRAM'
         } else {
           prompt = `Press G - ${near.name}`
         }
@@ -1761,6 +2394,21 @@ export class Game {
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
     this.hud.online = this.online
     this.hud.leaderboard = this.leaderboard
+    if (this.profilesDirty) {
+      this.hudProfiles = this.buildHudProfiles()
+      this.profilesDirty = false
+    }
+    this.hud.profiles = this.hudProfiles
+    this.hud.challenge = this.incomingChallenge
+    this.hud.match = this.matchView ? { ...this.matchView } : null
+    this.hud.progress = this.buildProgressHud()
+    this.hud.warp = {
+      charge01: Math.min(1, this.warpCharge / Game.WARP_TIME),
+      ready: this.warpCharge >= Game.WARP_TIME,
+      active: this.warpActive,
+      menu: this.warpMenuOpen,
+    }
+    this.hud.race = this.raceHud
 
     this.hudListener({ ...this.hud, powerup: this.hud.powerup ? { ...this.hud.powerup } : null })
   }
@@ -1772,6 +2420,7 @@ export class Game {
     this.profile.lifetimeCaptured += this.hud.captured
     this.profile.credits = this.credits
     saveProfile(this.profile)
+    this.clearWarpModel()
     this.net?.close()
     this.remotePlayers.dispose()
     this.sharedAliens.dispose()
@@ -1779,6 +2428,8 @@ export class Game {
     this.exploration.dispose()
     this.playground.dispose()
     this.dawnShow.dispose()
+    this.robotFactory.dispose()
+    this.race.dispose()
     for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
     this.bootPuffs = []
     this.bootGeo.dispose()
@@ -1797,6 +2448,7 @@ export class Game {
     this.zones.dispose()
     this.events.dispose()
     this.intro?.dispose()
+    this.dropIn?.dispose()
     this.assets.dispose()
     const m = this.netLine.material as THREE.Material
     this.netLine.geometry.dispose()

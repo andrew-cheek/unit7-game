@@ -1,8 +1,10 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
 import { trackEvent } from './lib/analytics'
 import type { GameControls, HudState, Unit7Config } from './game/types'
+import { loadCallsign, saveCallsign } from './game/storage'
+import { WARP_FORMS } from './game/WarpForms'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
@@ -17,6 +19,8 @@ const Invaders = lazy(() => import('./ui/Invaders').then((m) => ({ default: m.In
 const Snake = lazy(() => import('./ui/Snake').then((m) => ({ default: m.Snake })))
 const RaceLoop = lazy(() => import('./ui/RaceLoop').then((m) => ({ default: m.RaceLoop })))
 const MechArena = lazy(() => import('./ui/MechArena').then((m) => ({ default: m.MechArena })))
+const DriveMad = lazy(() => import('./ui/DriveMad').then((m) => ({ default: m.DriveMad })))
+const BeamWarsLive = lazy(() => import('./ui/BeamWarsLive').then((m) => ({ default: m.BeamWarsLive })))
 
 export interface Unit7GameProps {
   config?: Unit7Config
@@ -127,16 +131,20 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{err}</pre>
         </div>
       )}
-      {hud && !hud.intro && !hud.minigame && (
+      {hud && !hud.intro && !hud.minigame && !hud.match && (
         <HUD
           hud={hud}
           touch={touch}
           onRestart={() => controlsRef.current?.restartIntro()}
           onToggleMute={() => controlsRef.current?.toggleMute()}
           onPause={() => controlsRef.current?.pause()}
+          onChallenge={(id) => controlsRef.current?.challengePilot(id)}
+          onBuy={(id) => controlsRef.current?.buyCosmetic(id)}
+          onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
+          onWarp={() => controlsRef.current?.toggleWarp()}
         />
       )}
-      {touch && hud && !hud.intro && !hud.minigame && !hud.paused && controlsRef.current && (
+      {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}
       {touch && !coachDone && hud && !hud.intro && !hud.minigame && !hud.paused && (mpJoined || !multiplayer) && (
@@ -145,6 +153,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {multiplayer && !mpJoined && hud && !hud.intro && (
         <JoinWorld
           onJoin={(name) => {
+            saveCallsign(name)
             gameRef.current?.connectMultiplayer(name, config?.multiplayerHost)
             setMpJoined(true)
           }}
@@ -156,7 +165,16 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       )}
       {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
       {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && <Leaderboard rows={hud.leaderboard} />}
-      {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
+      {hud?.intro && hud.drop && (
+        <DropOverlay
+          drop={hud.drop}
+          touch={touch}
+          onSkip={() => controlsRef.current?.skipIntro()}
+          onDeploy={() => controlsRef.current?.dropDeploy()}
+          onSteer={(x, y) => controlsRef.current?.setVirtualMove(x, y)}
+        />
+      )}
+      {hud?.intro && !hud.drop && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} onCycleNeon={() => controlsRef.current?.cycleNeon()} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
         <Suspense fallback={null}>
@@ -193,14 +211,128 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           <MechArena touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
+      {hud?.minigame === 'drivemad' && controlsRef.current && (
+        <Suspense fallback={null}>
+          <DriveMad touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
+        </Suspense>
+      )}
+      {hud?.match && controlsRef.current && (
+        <Suspense fallback={null}>
+          <BeamWarsLive
+            match={hud.match}
+            touch={touch}
+            onDir={(dx, dy) => controlsRef.current?.matchDir(dx, dy)}
+            onQuit={() => controlsRef.current?.quitMatch()}
+            onRematch={() => controlsRef.current?.rematch()}
+          />
+        </Suspense>
+      )}
+      {hud?.challenge && !hud.match && !hud.minigame && controlsRef.current && (
+        <ChallengePopup
+          name={hud.challenge.name}
+          onAccept={() => controlsRef.current?.acceptChallenge()}
+          onDecline={() => controlsRef.current?.declineChallenge()}
+        />
+      )}
+      {hud?.warp.menu && !hud.match && !hud.minigame && controlsRef.current && (
+        <WarpMenu
+          warp={hud.warp}
+          onPick={(id) => controlsRef.current?.warpInto(id)}
+          onRevert={() => controlsRef.current?.warpRevert()}
+          onClose={() => controlsRef.current?.toggleWarp()}
+        />
+      )}
       {/* Rotate-to-landscape nudge (on top of everything except a minigame). */}
       {touch && portrait && hud && !hud.minigame && <OrientationPrompt />}
     </div>
   )
 }
 
+function WarpMenu({
+  warp,
+  onPick,
+  onRevert,
+  onClose,
+}: {
+  warp: { ready: boolean; active: string | null }
+  onPick: (id: string) => void
+  onRevert: () => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Note: R is handled by the engine (toggleWarp) so it both opens and closes;
+      // don't also close here or the two toggles cancel out. Escape closes.
+      if (e.key === 'Escape') { onClose(); e.preventDefault(); return }
+      const n = parseInt(e.key, 10)
+      if (n >= 1 && n <= WARP_FORMS.length && warp.ready) { onPick(WARP_FORMS[n - 1].id); e.preventDefault() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onPick, onClose, warp.ready])
+  const hex = (n: number) => '#' + (n & 0xffffff).toString(16).padStart(6, '0')
+  return (
+    <div style={warpWrap} onClick={onClose}>
+      <div style={warpCard} onClick={(e) => e.stopPropagation()}>
+        <div style={{ color: '#27e7ff', font: '800 16px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.2em', marginBottom: 4 }}>WARP GATE</div>
+        <div style={{ color: 'rgba(223,238,255,0.6)', font: '600 11px/1.4 ui-monospace, Menlo, monospace', marginBottom: 14 }}>
+          {warp.ready ? 'Pick a form to teleport into (1-7 or tap).' : 'Charge not ready - keep playing to recharge.'}
+        </div>
+        <div style={warpGrid}>
+          {WARP_FORMS.map((f, i) => (
+            <button
+              key={f.id}
+              style={{ ...warpItem, borderColor: warp.active === f.id ? hex(f.color) : 'rgba(255,255,255,0.14)', opacity: warp.ready ? 1 : 0.4, cursor: warp.ready ? 'pointer' : 'not-allowed' }}
+              onClick={() => warp.ready && onPick(f.id)}
+            >
+              <span style={{ width: 26, height: 26, borderRadius: 7, background: hex(f.color), boxShadow: `0 0 12px ${hex(f.color)}`, flexShrink: 0 }} />
+              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ color: '#eaf4ff', fontWeight: 800, fontSize: 11 }}>{i + 1}. {f.name}</span>
+                <span style={{ color: 'rgba(223,238,255,0.55)', fontSize: 9 }}>{f.desc}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, justifyContent: 'center' }}>
+          {warp.active && <button style={warpRevertBtn} onClick={onRevert}>RETURN TO ROBOT</button>}
+          <button style={warpCloseBtn} onClick={onClose}>CLOSE</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ChallengePopup({ name, onAccept, onDecline }: { name: string; onAccept: () => void; onDecline: () => void }) {
+  // Keyboard accept/decline so it works even while the mouse pointer is locked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') { onAccept(); e.preventDefault() }
+      else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') { onDecline(); e.preventDefault() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onAccept, onDecline])
+  return (
+    <div style={challengeWrap}>
+      <div style={challengeCard}>
+        <div style={{ color: '#ff2bd0', font: '800 14px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.2em', marginBottom: 8 }}>DUEL CHALLENGE</div>
+        <div style={{ color: '#dff0ff', font: '700 16px/1.4 ui-monospace, Menlo, monospace', marginBottom: 16 }}>
+          <span style={{ color: '#27e7ff' }}>{name}</span> wants to face you in Beam Wars
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button style={challengeAccept} onClick={onAccept}>ACCEPT ▸</button>
+          <button style={challengeDecline} onClick={onDecline}>DECLINE</button>
+        </div>
+        <div style={{ marginTop: 10, color: 'rgba(223,238,255,0.45)', font: '600 10px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.12em' }}>
+          press Y to accept · N to decline
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function JoinWorld({ onJoin, onSolo }: { onJoin: (name: string) => void; onSolo: () => void }) {
-  const [name, setName] = useState('')
+  const [name, setName] = useState(() => loadCallsign())
   const submit = () => {
     const n = name.trim()
     if (n) onJoin(n)
@@ -266,12 +398,83 @@ function IntroOverlay({ onSkip }: { onSkip: () => void }) {
         <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
         <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ASSEMBLY SEQUENCE</div>
       </div>
-      <button style={skipBtn} onClick={onSkip}>
-        SKIP ▸
-      </button>
+      <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
     </>
   )
 }
+
+type DropState = NonNullable<HudState['drop']>
+
+/**
+ * Orbital drop-in HUD: altimeter + ring count, the parachute-deploy timing gauge
+ * (tap when the marker is in the green to pop a clean canopy), a DEPLOY button,
+ * and on touch a full-screen drag-to-steer layer behind the buttons.
+ */
+function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropState; touch: boolean; onSkip: () => void; onDeploy: () => void; onSteer: (x: number, y: number) => void }) {
+  const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
+  const onDown = (e: ReactPointerEvent) => {
+    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
+  }
+  const onMove = (e: ReactPointerEvent) => {
+    const d = dragRef.current
+    if (!d || e.pointerId !== d.id) return
+    // Normalize a small drag into a full steer vector; +y forward is up-drag.
+    const x = clampN((e.clientX - d.x) / 90)
+    const y = clampN((d.y - e.clientY) / 90)
+    onSteer(x, y)
+  }
+  const onUp = () => { dragRef.current = null; onSteer(0, 0) }
+
+  const label = drop.phase === 'fall' ? 'FREEFALL' : drop.phase === 'window' ? 'DEPLOY NOW' : drop.phase === 'canopy' ? 'GLIDE TO THE PAD' : 'TOUCHDOWN'
+  const armed = drop.gauge != null
+  return (
+    <>
+      {/* touch steer pad sits behind the buttons */}
+      {touch && (
+        <div
+          style={{ position: 'absolute', inset: 0, zIndex: 12, touchAction: 'none' }}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+        />
+      )}
+      <div style={introTitle}>
+        <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
+        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ORBITAL DROP</div>
+      </div>
+
+      <div style={dropReadout}>
+        <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
+        <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · RINGS {drop.rings}/{drop.total}</div>
+        <div style={{ fontSize: 12, letterSpacing: '0.28em', color: 'rgba(223,238,255,0.7)', marginTop: 6 }}>{label}</div>
+      </div>
+
+      {/* deploy timing gauge */}
+      {armed && (
+        <div style={gaugeWrap}>
+          <div style={gaugeBar}>
+            <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${drop.sweetLo * 100}%`, width: `${(drop.sweetHi - drop.sweetLo) * 100}%`, background: 'rgba(157,255,90,0.45)', borderLeft: '2px solid #9dff5a', borderRight: '2px solid #9dff5a' }} />
+            <div style={{ position: 'absolute', top: -4, bottom: -4, left: `calc(${(drop.gauge ?? 0) * 100}% - 2px)`, width: 4, background: '#fff', boxShadow: '0 0 10px #fff' }} />
+          </div>
+          <div style={{ fontSize: 12, letterSpacing: '0.25em', color: '#fff', marginTop: 8, textAlign: 'center' }}>
+            {touch ? 'TAP DEPLOY IN THE GREEN' : 'SPACE / TAP DEPLOY IN THE GREEN'}
+          </div>
+        </div>
+      )}
+      {drop.result && (
+        <div style={{ ...gaugeWrap, top: '38%' }}>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.12em', textAlign: 'center', color: drop.result.startsWith('PERFECT') ? '#9dff5a' : drop.result.startsWith('GOOD') ? '#27e7ff' : '#ff8a1e', textShadow: '0 0 18px currentColor' }}>{drop.result}</div>
+        </div>
+      )}
+
+      <button style={{ ...deployBtn, opacity: armed ? 1 : 0.5, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
+      <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
+    </>
+  )
+}
+
+function clampN(v: number) { return Math.max(-1, Math.min(1, v)) }
 
 /** Portrait nudge for touch devices. The 3D HUD is built landscape-first, so
  * portrait squeezes the world into a thin strip; this asks the player to rotate. */
@@ -321,6 +524,48 @@ const introTitle: CSSProperties = {
   font: '800 34px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.16em',
   pointerEvents: 'none',
+}
+const dropReadout: CSSProperties = {
+  position: 'absolute',
+  top: 18,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 15,
+  textAlign: 'center',
+  pointerEvents: 'none',
+  fontFamily: 'ui-monospace, Menlo, monospace',
+}
+const gaugeWrap: CSSProperties = {
+  position: 'absolute',
+  top: '46%',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 15,
+  width: 'min(440px, 76vw)',
+  pointerEvents: 'none',
+}
+const gaugeBar: CSSProperties = {
+  position: 'relative',
+  height: 18,
+  borderRadius: 999,
+  background: 'rgba(8,12,24,0.78)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  overflow: 'hidden',
+}
+const deployBtn: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: 30,
+  transform: 'translateX(-50%)',
+  zIndex: 16,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '16px 40px',
+  font: '800 18px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.2em',
+  background: 'rgba(8,12,24,0.7)',
+  border: '2px solid #9dff5a',
+  borderRadius: 999,
 }
 const skipBtn: CSSProperties = {
   position: 'absolute',
@@ -418,6 +663,106 @@ const boardBox: CSSProperties = {
   border: '1px solid rgba(39,231,255,0.3)',
   borderRadius: 10,
   pointerEvents: 'none',
+}
+const challengeWrap: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: 90,
+  transform: 'translateX(-50%)',
+  zIndex: 42,
+  pointerEvents: 'auto',
+}
+const challengeCard: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  textAlign: 'center',
+  padding: '18px 24px',
+  maxWidth: '88vw',
+  borderRadius: 14,
+  background: 'rgba(8,12,24,0.94)',
+  border: '1px solid rgba(255,43,208,0.5)',
+  boxShadow: '0 0 30px rgba(255,43,208,0.25)',
+}
+const challengeAccept: CSSProperties = {
+  cursor: 'pointer',
+  padding: '10px 20px',
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: '#04121a',
+  background: 'linear-gradient(180deg,#5cf0ff,#27e7ff)',
+  border: 'none',
+  borderRadius: 10,
+}
+const challengeDecline: CSSProperties = {
+  cursor: 'pointer',
+  padding: '10px 18px',
+  font: '700 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  color: 'rgba(223,238,255,0.8)',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderRadius: 10,
+}
+const warpWrap: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  zIndex: 43,
+  pointerEvents: 'auto',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(2,4,10,0.5)',
+}
+const warpCard: CSSProperties = {
+  width: 'min(440px, 92vw)',
+  padding: '20px 22px',
+  textAlign: 'center',
+  borderRadius: 16,
+  background: 'rgba(6,10,22,0.95)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  boxShadow: '0 0 34px rgba(39,231,255,0.25)',
+  backdropFilter: 'blur(10px)',
+  WebkitBackdropFilter: 'blur(10px)',
+}
+const warpGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+}
+const warpItem: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  textAlign: 'left',
+  pointerEvents: 'auto',
+  padding: '9px 11px',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 10,
+  font: 'inherit',
+}
+const warpRevertBtn: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '9px 16px',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(155,255,77,0.6)',
+  borderRadius: 999,
+  color: '#9bff4d',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+}
+const warpCloseBtn: CSSProperties = {
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '9px 16px',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.8)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
 }
 const KEYFRAMES = `@keyframes unit7pulse{0%,100%{opacity:0.4}50%{opacity:1}}@keyframes unit7rotate{0%,15%{transform:rotate(0deg)}55%,78%{transform:rotate(90deg)}100%{transform:rotate(0deg)}}`
 const errStyle: CSSProperties = {

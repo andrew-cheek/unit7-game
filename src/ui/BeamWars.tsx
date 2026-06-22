@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { miniSfx } from './miniSound'
+import { recordGameResult } from '../game/storage'
 
 /**
  * Beam Wars - a self-contained lightcycle / trail minigame (the BeamWars genre):
@@ -254,6 +255,8 @@ export function BeamWars({ onExit, touch }: { onExit: () => void; touch: boolean
     phaseRef.current = ph
     setPhase(ph)
     miniSfx(ph === 'won' ? 'lap' : 'gameover')
+    // Tally the result into the persistent player profile (beam wars W/L).
+    if (ph === 'won' || ph === 'dead') recordGameResult('beamwars', ph === 'won' ? 'win' : 'loss')
     if (timer.current) {
       clearInterval(timer.current)
       timer.current = null
