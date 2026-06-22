@@ -95,7 +95,7 @@ export function resolveHost(explicit?: string): string {
 // build with the `VITE_PARTYKIT_HOST` env var (Netlify: Site settings ->
 // environment variables) if the server moves.
 const ENV_HOST = (import.meta.env?.VITE_PARTYKIT_HOST as string | undefined)?.trim()
-export const PROD_HOST = ENV_HOST || 'play.humanoidrobots.com'
+export const PROD_HOST = ENV_HOST || 'party.humanoidrobots.com'
 /** A real production host is configured (not a placeholder). */
 export const HAS_PROD_HOST = !!PROD_HOST
 
