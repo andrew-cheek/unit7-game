@@ -187,10 +187,33 @@ export class CameraController {
     // A wall can pull the camera closer than minDistance; only a small hard floor
     // keeps it off the subject. Clamping back up to minDistance here is what used
     // to shove the camera through the wall and black out the screen.
+    const desired = want // pre-collision target distance, for the relief blend
     want = Math.max(config.camera.collisionMinDistance, nearest)
 
-    // Snap in toward walls immediately, ease back out when clear.
-    this.dist = want < this.dist ? want : damp(this.dist, want, config.camera.returnLambda, dt)
+    // How hard the collision is pulling us in: 0 = clear, 1 = jammed to the floor.
+    const span = Math.max(0.001, desired - config.camera.collisionMinDistance)
+    const closeFrac = THREE.MathUtils.clamp((desired - want) / span, 0, 1)
+
+    // Pull in fast (but damped, not a single-frame snap) toward walls; ease back
+    // out when clear. The snap used to pop visibly on thin obstacles (lampposts).
+    // dt <= 0 is a snap() (teleport / zone change): place instantly, no easing.
+    if (dt <= 0) {
+      this.dist = want
+    } else {
+      const inLambda = config.camera.collisionInLambda
+      this.dist = want < this.dist
+        ? damp(this.dist, want, inLambda, dt)
+        : damp(this.dist, want, config.camera.returnLambda, dt)
+    }
+
+    // Relief tilt: when jammed close, raise the view angle so the camera rises
+    // above the subject instead of staring at its back from ground level. Only
+    // the render direction changes (input.pitch, the player's look, is untouched).
+    if (closeFrac > 0.01) {
+      const liftPitch = Math.min(config.camera.pitchMax, pitch + closeFrac * config.camera.collisionPitchLift)
+      const cosL = Math.cos(liftPitch)
+      this.offsetDir.set(-Math.sin(yaw) * cosL, Math.sin(liftPitch), -Math.cos(yaw) * cosL)
+    }
 
     this.camPos.copy(this.currentTarget).addScaledVector(this.offsetDir, this.dist)
 

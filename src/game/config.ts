@@ -148,8 +148,14 @@ export const config = {
     lookAheadLambda: 6,
     // Pull the camera back when moving fast (sprint / boost).
     speedPullback: 1.28,
-    // Collision pull-in eases back out at this rate; snaps in instantly.
+    // Collision pull-in eases back out at returnLambda; pulls in fast (but no
+    // longer a single-frame snap, which read as a jarring pop on thin obstacles).
     returnLambda: 7,
+    collisionInLambda: 24,
+    // When a wall directly behind jams the camera in close, tilt the view up by
+    // up to this many radians so the subject + scene stay framed instead of the
+    // camera shoving down to ground level. Scales with how close it's forced.
+    collisionPitchLift: 0.4,
     // Keep the camera at least this far above whatever ground is below it.
     minGroundClearance: 0.6,
   },
