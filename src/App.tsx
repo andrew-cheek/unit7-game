@@ -1,10 +1,9 @@
 import Unit7Game from './Unit7Game'
 
-// Local dev harness only. Lovable never imports this file - it imports
-// Unit7Game.tsx directly. Use it to exercise the component's `config` prop.
+// App entry rendered by main.tsx.
 //
-// Handy dev query params (all optional):
-//   ?intro        play the opening cinematic (off by default here for fast iter)
+// Handy query params (all optional):
+//   ?nodrop       skip the interactive orbital drop-in and start on the ground
 //   ?tier=low     force the mobile quality tier (detectTier honors this)
 //   ?tier=high    force the desktop quality tier
 //   ?touch        show the on-screen touch controls on desktop
@@ -14,9 +13,9 @@ export default function App() {
   return (
     <Unit7Game
       config={{
-        // Cinematic is the component default (true); the dev harness opts out
-        // unless ?intro is present so iteration stays fast.
-        startInIntro: params.has('intro'),
+        // The interactive orbital drop-in is the default opening (the thing you
+        // play in the first two seconds). Opt out with ?nodrop for fast iteration.
+        startInIntro: !params.has('nodrop'),
         initialZone: 'earth',
       }}
     />

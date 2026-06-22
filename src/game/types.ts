@@ -72,6 +72,7 @@ export interface HudState {
   progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
   warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
   race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
+  drop: { alt: number; rings: number; total: number } | null // non-null during the orbital drop-in opening
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */

@@ -135,7 +135,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       )}
       {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
       {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && <Leaderboard rows={hud.leaderboard} />}
-      {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
+      {hud?.intro && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} drop={hud.drop} />}
       {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} onCycleNeon={() => controlsRef.current?.cycleNeon()} />}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
         <Suspense fallback={null}>
@@ -350,13 +350,21 @@ function Leaderboard({ rows }: { rows: { name: string; score: number }[] }) {
   )
 }
 
-function IntroOverlay({ onSkip }: { onSkip: () => void }) {
+function IntroOverlay({ onSkip, drop }: { onSkip: () => void; drop: { alt: number; rings: number; total: number } | null }) {
   return (
     <>
       <div style={introTitle}>
         <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
-        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ASSEMBLY SEQUENCE</div>
+        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>
+          {drop ? 'ORBITAL DROP' : 'ASSEMBLY SEQUENCE'}
+        </div>
       </div>
+      {drop && (
+        <div style={dropReadout}>
+          <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
+          <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>RINGS {drop.rings}/{drop.total}</div>
+        </div>
+      )}
       <button style={skipBtn} onClick={onSkip}>
         SKIP ▸
       </button>
@@ -383,6 +391,16 @@ const introTitle: CSSProperties = {
   font: '800 34px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.16em',
   pointerEvents: 'none',
+}
+const dropReadout: CSSProperties = {
+  position: 'absolute',
+  top: 18,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 15,
+  textAlign: 'center',
+  pointerEvents: 'none',
+  fontFamily: 'ui-monospace, Menlo, monospace',
 }
 const skipBtn: CSSProperties = {
   position: 'absolute',

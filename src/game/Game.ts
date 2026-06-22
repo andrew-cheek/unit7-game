@@ -16,6 +16,7 @@ import { AssetLoader } from './AssetLoader'
 import { Zones } from './Zones'
 import { Events } from './Events'
 import { Intro } from './Intro'
+import { DropIn } from './DropIn'
 import { CameraController } from './Camera'
 import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
 import { RemotePlayers } from './RemotePlayers'
@@ -85,6 +86,10 @@ export class Game {
   private fx = { speed: 0, shield: 0, score: 0 }
   private scoreMul = 1
   private intro: Intro | null = null
+  // Interactive orbital drop-in (the playable opening). Replaces the passive
+  // cinematic on the default Earth start.
+  private dropIn: DropIn | null = null
+  private savedFogDensity: number | null = null
   // Sit the sky/star dome around the cinematic's pocket of airspace.
   private introFocus = new THREE.Vector3(0, 50, -390)
 
@@ -324,7 +329,7 @@ export class Game {
       pressAction: (a: Parameters<Input['pressAction']>[0], down: boolean) => this.input.pressAction(a, down),
       resume: () => this.setPaused(false),
       pause: () => this.setPaused(true),
-      skipIntro: () => this.intro?.skip(),
+      skipIntro: () => { this.intro?.skip(); this.dropIn?.skip() },
       requestPointerLock: () => this.input.requestLock(),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
@@ -374,6 +379,7 @@ export class Game {
       progress: this.buildProgressHud(),
       warp: { charge01: 0, ready: false, active: null, menu: false },
       race: { ...this.raceHud },
+      drop: null,
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -393,21 +399,58 @@ export class Game {
       this.doTravel(z)
     }
 
-    // Factory assembly cinematic before gameplay (skippable).
-    if (this.cfg.startInIntro) {
-      this.intro = new Intro(this.engine.scene, this.engine.camera)
-      this.hud.intro = true
-      this.player.setVisible(false)
-      this.input.setLockEnabled(false)
-      // Hide the city's ambient life until the cinematic hands off.
-      this.patrols.setVisible(false)
-      this.sky.setVisible(false)
-      for (const p of this.arcadePortals) p.group.visible = false
-      if (this.arcadeRobot) this.arcadeRobot.group.visible = false
+    // The opening you play, not watch: an interactive orbital drop-in over the
+    // city (skippable). Off-world debug starts skip straight to gameplay.
+    if (this.cfg.startInIntro && this.zone === 'earth') {
+      this.beginDropIn()
     } else {
-      // No cinematic: drop straight into the morning arrival.
       this.startMorning()
     }
+  }
+
+  /**
+   * Begin the interactive drop-in: hide the player (the diver is the DropIn's own
+   * rig), brighten the sky to a lit sunrise (skipping the pitch-black pre-dawn),
+   * and lighten the fog so the city reads from altitude. The day clock runs on
+   * through the descent so you land as the sun finishes cresting.
+   */
+  private beginDropIn() {
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : 'portal')
+    this.hud.intro = true // surfaces the SKIP button
+    this.player.setVisible(false)
+    this.input.setLockEnabled(true)
+    this.input.exitLock()
+    if (!this.timeFromQuery) {
+      this.world.setDebugTime(9) // mid-sunrise: gold and lit, not dark
+      this.world.setTimeScale(0.5)
+      this.morningSunrise = true
+    }
+    const fog = this.engine.scene.fog
+    if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
+    this.hud.banner = 'ORBITAL DROP'
+    this.bannerTimer = 2.5
+    this.hud.missionPopup = { title: 'DROP IN', body: 'Steer with WASD or the stick. Hold F / Space to dive. Thread the rings down to the city.' }
+    this.missionPopupTimer = 6
+  }
+
+  private finishDrop() {
+    this.dropIn?.dispose()
+    this.dropIn = null
+    this.hud.intro = false
+    this.hud.drop = null
+    this.player.exitVehicle(this.world.spawn.clone())
+    this.player.setVisible(true)
+    this.camera.snap(this.player.position)
+    this.input.setLockEnabled(true)
+    const fog = this.engine.scene.fog
+    if (fog instanceof THREE.FogExp2 && this.savedFogDensity != null) { fog.density = this.savedFogDensity; this.savedFogDensity = null }
+    // The drop ended on a brief fade; fade back in on the gameplay side so the
+    // hand-off to the follow camera reads as one continuous shot.
+    this.hud.fade = 1
+    this.trans = { phase: 'in', t: 0, target: this.zone }
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Touchdown. The amber ring ahead is the Mars gate - or head out and explore.' }
+    this.missionPopupTimer = 5
   }
 
   /** Replay the opening cinematic from the top (triggered by the HUD button). */
@@ -1850,6 +1893,20 @@ export class Game {
   private update = (dt: number, _elapsed: number) => {
     this.input.update()
 
+    // Interactive drop-in owns the camera until you land / skip. The city lives
+    // and the sky brightens beneath you during the descent.
+    if (this.dropIn) {
+      this.dropIn.update(dt)
+      this.world.update(dt, this.world.spawn)
+      this.dawnShow.update(dt, this.world.dayFactor)
+      this.updateMorningSunrise()
+      this.hud.fade = this.dropIn.fade
+      this.hud.drop = { alt: Math.round(this.dropIn.hud.alt), rings: this.dropIn.hud.rings, total: this.dropIn.hud.total }
+      if (this.dropIn.done) this.finishDrop()
+      this.pushHud(dt)
+      return
+    }
+
     // Factory intro cinematic owns the camera until it finishes / is skipped.
     if (this.intro) {
       this.intro.update(dt)
@@ -2240,6 +2297,7 @@ export class Game {
     this.zones.dispose()
     this.events.dispose()
     this.intro?.dispose()
+    this.dropIn?.dispose()
     this.assets.dispose()
     const m = this.netLine.material as THREE.Material
     this.netLine.geometry.dispose()
