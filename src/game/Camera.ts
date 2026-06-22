@@ -49,6 +49,10 @@ export class CameraController {
   private up = new THREE.Vector3()
   private initialized = false
   private shakeAmt = 0
+  // Pull the camera in on mobile so the robot reads big. Portrait widens the
+  // vertical FOV (to keep the horizontal view), which shrinks the subject, so the
+  // low/medium tiers sit closer to compensate.
+  private tierDist = config.tier.name === 'low' ? 0.72 : config.tier.name === 'medium' ? 0.86 : 1
   // Player zoom (pinch on touch, scroll on desktop). 1 = the configured default;
   // clamped so you can pull in close or back off without losing the subject.
   private zoom = 1
@@ -122,7 +126,7 @@ export class CameraController {
     // zoom floor and is applied to the desired distance only - a collision hit
     // below is allowed to tuck the camera closer than this so it never sits
     // inside a wall.
-    let want = config.camera.distance * distanceScale * this.zoom * (1 + (config.camera.speedPullback - 1) * speed01)
+    let want = config.camera.distance * this.tierDist * distanceScale * this.zoom * (1 + (config.camera.speedPullback - 1) * speed01)
     want = Math.max(config.camera.minDistance, want)
 
     // --- collision: center + 4 offset probes, take the nearest blocker ---
