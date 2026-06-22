@@ -172,6 +172,7 @@ export class Game {
   private lastCaughtMs = -1e9 // throttles player_caught during balloon barrages
   private prevJetHeld = false // jetpack rising-edge debounce
   private prevBoostHeld = false // boost rising-edge debounce
+  private minigameStartMs = 0 // perf.now() on arcade entry, for minigame_end duration
 
   constructor(container: HTMLElement, userConfig: Unit7Config, hudListener: (s: HudState) => void) {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
@@ -290,11 +291,14 @@ export class Game {
       pressAction: (a: Parameters<Input['pressAction']>[0], down: boolean) => this.input.pressAction(a, down),
       resume: () => this.setPaused(false),
       pause: () => this.setPaused(true),
-      skipIntro: () => this.intro?.skip(),
+      skipIntro: () => {
+        if (this.intro && !this.intro.done) trackEvent('intro_skipped')
+        this.intro?.skip()
+      },
       requestPointerLock: () => this.input.requestLock(),
       exitMinigame: () => this.exitMinigame(),
       restartIntro: () => this.restartIntro(),
-      toggleMute: () => { this.hud.muted = this.audio.toggleMute() },
+      toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
     }
 
@@ -705,6 +709,8 @@ export class Game {
   private enterMinigame(kind: MinigameKind, pos: THREE.Vector3) {
     this.inMinigame = true
     this.minigamePlayed = true
+    this.minigameStartMs = typeof performance !== 'undefined' ? performance.now() : 0
+    trackEvent('minigame_start', { game: kind })
     this.audio.play('portal')
     this.hud.minigame = kind
     this.activePortal.copy(pos)
@@ -717,6 +723,12 @@ export class Game {
   private exitMinigame() {
     if (!this.inMinigame) return
     this.inMinigame = false
+    // Report which arcade game was played and for how long, before clearing it.
+    if (this.hud.minigame) {
+      const now = typeof performance !== 'undefined' ? performance.now() : 0
+      const duration_seconds = this.minigameStartMs ? Math.round((now - this.minigameStartMs) / 1000) : 0
+      trackEvent('minigame_end', { game: this.hud.minigame, duration_seconds })
+    }
     this.hud.minigame = null
     // Step the robot out of the doorway (toward spawn) so it doesn't re-trigger.
     const out = this.scratchFwd.subVectors(this.world.spawn, this.activePortal)
@@ -1329,6 +1341,7 @@ export class Game {
     this.neonLevel = order[i]
     saveHighScore('neon', i + 1) // low=1, med=2, high=3 (0/unset -> high default)
     this.applyNeon()
+    trackEvent('neon_changed', { level: this.neonLevel })
     this.hud.banner = `NEON: ${this.neonLevel.toUpperCase()}`
     this.bannerTimer = 1.2
   }

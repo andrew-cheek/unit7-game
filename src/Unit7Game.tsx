@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
+import { trackEvent } from './lib/analytics'
 import type { GameControls, HudState, Unit7Config } from './game/types'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
@@ -67,6 +68,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     } catch (e) {
       // Surface a startup crash on-screen instead of a silent black page.
       console.error('[Unit7] startup failed:', e)
+      const message = String((e as Error)?.message || e).slice(0, 300)
+      trackEvent('startup_error', { message })
       setErr(String((e as Error)?.stack || (e as Error)?.message || e))
       return
     }
