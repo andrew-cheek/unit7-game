@@ -53,11 +53,11 @@ export class ArcadeSystem {
       return
     }
     if (!ctx.canTrigger) return
-    // The stand-here pad sits 2.2 in front of the cabinet (toward -Z).
+    // p.pos is the stand-here pad in front of each arcade door; trigger on it.
     for (const p of ctx.portals) {
       const dx = ctx.playerPos.x - p.pos.x
-      const dz = ctx.playerPos.z - (p.pos.z - 2.2)
-      if (dx * dx + dz * dz < 2.2 * 2.2) {
+      const dz = ctx.playerPos.z - p.pos.z
+      if (dx * dx + dz * dz < 2.0 * 2.0) {
         this.start(p.pos, p.kind, ctx)
         return
       }
@@ -65,13 +65,12 @@ export class ArcadeSystem {
   }
 
   private start(pos: THREE.Vector3, kind: MinigameKind, ctx: ArcadeContext) {
-    const padZ = pos.z - 2.2
     const geo = new THREE.CylinderGeometry(1.5, 1.5, 16, 20, 1, true)
     this.sinkGeos.push(geo)
     const mat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
     this.sinkMats.push(mat)
     const beam = new THREE.Mesh(geo, mat)
-    beam.position.set(pos.x, 8, padZ)
+    beam.position.set(pos.x, pos.y + 8, pos.z)
     beam.renderOrder = 5
     this.scene.add(beam)
     ctx.onSfx()

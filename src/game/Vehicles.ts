@@ -119,11 +119,12 @@ export class Vehicles {
     // The colossus stands further out (it's ~50m wide at the feet) but towers
     // over the skyline so it's unmistakable from the portals.
     this.spawn('mechXL', createMechSuit({ scale: mx.size, armor: 0x1f6e3a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(60, 0, 60), mx.hoverHeight, 2.0 * mx.size, 'fly', mx.size)
-    // Pilotable titans. The arcade guardian stands at the back of the cabinet row
-    // facing the player; two more roam the outskirts and can be boarded on sight.
+    // Pilotable titans. The arcade guardian stands BESIDE the arcade building
+    // (the building occupies z~31-53 around x=0), facing spawn; two more roam the
+    // outskirts and can be boarded on sight.
     const tt = config.vehicle.titan
-    const arcade = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(0, 0, 44), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
-    arcade.yaw = Math.PI // face -Z, toward the player / cabinets
+    const arcade = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(30, 0, 36), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
+    arcade.yaw = Math.PI // face -Z, toward the player / arcade
     const roam1 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x394b2a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(-95, 0, -78), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
     const roam2 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x4a2330, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(100, 0, 86), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
     roam1.wander = true

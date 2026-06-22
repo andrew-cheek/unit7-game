@@ -305,7 +305,7 @@ export class Game {
 
     // Hub fixtures (arcade cabinets, plaza ring, rocket gate) are built in
     // Landmarks.ts; Game keeps the data + the per-frame behaviour.
-    const lm = buildLandmarks(this.engine.scene, this.physics)
+    const lm = buildLandmarks(this.engine.scene, this.physics, this.world.solidMeshes)
     this.arcadePortals = lm.arcadePortals
     this.plazaHub = lm.plazaHub
     this.plazaMars = lm.plazaMars

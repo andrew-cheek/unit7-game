@@ -4,18 +4,17 @@ import type { Physics } from './Physics'
 import type { MinigameKind } from './types'
 
 /**
- * Static hub fixtures: the arcade cabinet row (each bound to a 2D minigame), the
- * colossal ARCADE marquee, the Portal Plaza hero ring, and the rocket launch
- * gate. Pure construction, built once at startup and added to the scene.
+ * Static hub fixtures: a walk-in neon ARCADE building (the games are doors you
+ * step into, each with a stylized preview + name), the Portal Plaza hero ring,
+ * and the rocket launch gate. Built once at startup and added to the scene.
  *
- * Extracted out of Game.ts (which was a 2,400-line god object). Game owns the
- * data and the per-frame behaviour (proximity, pulsing, travel); this module
- * only builds the meshes. Created geometries/materials/textures are returned in
- * `geos`/`mats`/`texs` so Game's existing disposal path can free them.
+ * Game owns the data + per-frame behaviour; this only builds meshes. Created
+ * geos/mats/texs are returned so Game's disposal path frees them. Building wall
+ * meshes are pushed into `solids` so the third-person camera collides with them.
  */
 export interface ArcadeCabinet {
   kind: MinigameKind
-  pos: THREE.Vector3
+  pos: THREE.Vector3 // stand-here trigger point in front of the door
   group: THREE.Group
   screenMat: THREE.MeshStandardMaterial
 }
@@ -30,11 +29,22 @@ export interface LandmarksResult {
   plazaHub: PlazaHub
   plazaMars: { pos: THREE.Vector3; radius: number }
   rocketGate: THREE.Group
-  // Disposal sinks — Game pushes these into its arcade dispose arrays.
   mats: THREE.Material[]
   geos: THREE.BufferGeometry[]
   texs: THREE.CanvasTexture[]
 }
+
+/** The eight cabinet games, in door order (kind, accent color, marquee name). */
+const GAMES: { kind: MinigameKind; color: number; name: string }[] = [
+  { kind: 'beamwars', color: 0x27e7ff, name: 'BEAM WARS' },
+  { kind: 'snake', color: 0x8a5cff, name: 'SNAKE' },
+  { kind: 'invaders', color: 0x9bff4d, name: 'INVADERS' },
+  { kind: 'raceloop', color: 0xff2bd0, name: 'RACE LOOP' },
+  { kind: 'digduel', color: 0xff8a1e, name: 'DIG DUEL' },
+  { kind: 'mecharena', color: 0xff8a1e, name: 'MECH ARENA' },
+  { kind: 'merge2048', color: 0xff2bd0, name: '2048' },
+  { kind: 'drivemad', color: 0x9bff4d, name: 'DRIVE FRENZY' },
+]
 
 /** A neon text label baked to a canvas texture for a billboard sprite. */
 function makeLabelTexture(text: string, color = 0x27e7ff): THREE.CanvasTexture {
@@ -43,8 +53,6 @@ function makeLabelTexture(text: string, color = 0x27e7ff): THREE.CanvasTexture {
   cv.height = 128
   const ctx = cv.getContext('2d')!
   ctx.clearRect(0, 0, cv.width, cv.height)
-  // Shrink the font until the label fits the canvas, so longer signage
-  // ("LAUNCH -> MARS / MOON") doesn't clip at the edges.
   let size = 72
   ctx.font = `800 ${size}px ui-monospace, Menlo, monospace`
   while (size > 30 && ctx.measureText(text).width > cv.width - 36) {
@@ -62,95 +70,228 @@ function makeLabelTexture(text: string, color = 0x27e7ff): THREE.CanvasTexture {
   return tex
 }
 
-export function buildLandmarks(scene: THREE.Scene, physics: Physics): LandmarksResult {
+/** A stylized "screenshot" of a game: an iconic motif in its accent color. */
+function arcadeThumbnail(kind: MinigameKind, color: number): THREE.CanvasTexture {
+  const cv = document.createElement('canvas')
+  cv.width = 256
+  cv.height = 192
+  const ctx = cv.getContext('2d')!
+  const col = '#' + color.toString(16).padStart(6, '0')
+  ctx.fillStyle = '#070b12'
+  ctx.fillRect(0, 0, 256, 192)
+  ctx.strokeStyle = col
+  ctx.lineWidth = 6
+  ctx.strokeRect(5, 5, 246, 182)
+  ctx.save()
+  ctx.translate(128, 92)
+  ctx.strokeStyle = col
+  ctx.fillStyle = col
+  ctx.lineWidth = 6
+  ctx.lineCap = 'round'
+  const box = (x: number, y: number, w: number, h: number) => ctx.fillRect(x, y, w, h)
+  switch (kind) {
+    case 'beamwars': {
+      ctx.beginPath(); ctx.moveTo(-95, -55); ctx.lineTo(95, 55); ctx.moveTo(-95, 55); ctx.lineTo(95, -55); ctx.stroke()
+      ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.arc(0, 0, 9, 0, 7); ctx.fill()
+      break
+    }
+    case 'snake': {
+      const s = 18
+      const cells = [[-3, 1], [-2, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1], [2, -1]]
+      cells.forEach(([cx, cy]) => box(cx * s, cy * s, s - 3, s - 3))
+      ctx.fillStyle = '#ff5050'; box(3 * s, -1 * s, s - 3, s - 3) // apple
+      break
+    }
+    case 'invaders': {
+      const s = 20
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++) box(-90 + c * s + 3, -50 + r * s, s - 7, s - 9)
+      ctx.fillStyle = '#eaf6ff'; box(-8, 55, 16, 8) // cannon
+      break
+    }
+    case 'raceloop': {
+      ctx.beginPath(); ctx.ellipse(0, 0, 90, 50, 0, 0, 7); ctx.stroke()
+      ctx.lineWidth = 18; ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.ellipse(0, 0, 90, 50, 0, 0, 7); ctx.stroke()
+      ctx.fillStyle = '#eaf6ff'; box(78, -8, 16, 16) // car
+      break
+    }
+    case 'digduel': {
+      ctx.fillStyle = '#5a3a1c'; ctx.fillRect(-100, 10, 200, 70) // dirt
+      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-20, -40); ctx.lineTo(20, -40); ctx.lineTo(0, 30); ctx.closePath(); ctx.fill() // drill
+      break
+    }
+    case 'mecharena': {
+      box(-22, -45, 44, 50)        // torso
+      box(-30, -58, 60, 16)        // shoulders
+      box(-12, -78, 24, 20)        // head
+      box(-30, 8, 16, 40); box(14, 8, 16, 40) // legs
+      break
+    }
+    case 'merge2048': {
+      const vals = ['2', '4', '8', '16']; const s = 52
+      ctx.font = '800 26px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      let i = 0
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
+        const x = -s + c * s, y = -s + r * s
+        ctx.fillStyle = ['#27e7ff', '#8a5cff', '#ff8a1e', '#ff2bd0'][i]
+        ctx.fillRect(x + 4, y + 4, s - 8, s - 8)
+        ctx.fillStyle = '#0b0e16'; ctx.fillText(vals[i], x + s / 2, y + s / 2)
+        i++
+      }
+      break
+    }
+    case 'drivemad': {
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 4
+      ctx.beginPath(); ctx.moveTo(-90, 60); ctx.lineTo(-30, -60); ctx.moveTo(90, 60); ctx.lineTo(30, -60); ctx.stroke() // road
+      ctx.setLineDash([14, 14]); ctx.beginPath(); ctx.moveTo(0, 60); ctx.lineTo(0, -60); ctx.stroke(); ctx.setLineDash([])
+      ctx.fillStyle = col; box(-18, 12, 36, 40) // car
+      break
+    }
+  }
+  ctx.restore()
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THREE.Object3D[]): LandmarksResult {
   const mats: THREE.Material[] = []
   const geos: THREE.BufferGeometry[] = []
   const texs: THREE.CanvasTexture[] = []
   const own = <T extends THREE.Material>(m: T) => { mats.push(m); return m }
   const ownG = <T extends THREE.BufferGeometry>(g: T) => { geos.push(g); return g }
 
-  /**
-   * Builds the cabinet fixture: a dark body with a glowing screen and marquee
-   * facing the approaching player (toward -Z / the spawn), a control lip, and a
-   * faint stand-here floor pad. Returns the group and the screen material so the
-   * update loop can pulse it.
-   */
-  const makeCabinet = (color: number, label: string, pos: THREE.Vector3) => {
-    const gy = physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0
-    pos.y = gy
-    const g = new THREE.Group()
-    g.position.set(pos.x, gy, pos.z)
-    const bodyMat = own(new THREE.MeshStandardMaterial({ color: 0x0b0e16, metalness: 0.5, roughness: 0.5 }))
-    const trimMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 1.6, roughness: 0.4 }))
-    const screenMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 1.5, roughness: 0.3 }))
+  const arcadePortals: ArcadeCabinet[] = []
 
-    const body = new THREE.Mesh(ownG(new THREE.BoxGeometry(3.2, 4.2, 1.8)), bodyMat)
-    body.position.y = 2.1
-    g.add(body)
-    // Glowing screen, tilted back slightly, on the front (-Z) face.
-    const tex = makeLabelTexture(label, color)
-    texs.push(tex)
-    const screenFace = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.4, roughness: 0.3 }))
-    const screen = new THREE.Mesh(ownG(new THREE.PlaneGeometry(2.5, 1.6)), screenFace)
-    screen.position.set(0, 2.6, -0.92)
-    screen.rotation.x = 0.12
-    g.add(screen)
-    // Marquee header strip.
-    const marquee = new THREE.Mesh(ownG(new THREE.BoxGeometry(3.0, 0.5, 0.2)), trimMat)
-    marquee.position.set(0, 4.0, -0.85)
-    g.add(marquee)
-    // Side neon trim.
-    for (const sx of [-1.55, 1.55]) {
-      const strip = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.12, 3.6, 0.12)), trimMat)
-      strip.position.set(sx, 2.2, -0.86)
-      g.add(strip)
-    }
-    // Stand-here floor pad.
-    const pad = new THREE.Mesh(ownG(new THREE.RingGeometry(1.4, 1.8, 28)), own(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-    pad.rotation.x = -Math.PI / 2
-    pad.position.set(0, 0.06, -2.2)
-    g.add(pad)
-    // Keep the body from being walked through.
-    physics.colliders.push(new THREE.Box3(
-      new THREE.Vector3(pos.x - 1.6, 0, pos.z - 0.9),
-      new THREE.Vector3(pos.x + 1.6, 4.2, pos.z + 0.9),
-    ))
-    scene.add(g)
-    return { group: g, screenMat }
-  }
-
-  const buildCabinet = (kind: MinigameKind, color: number, label: string, pos: THREE.Vector3): ArcadeCabinet => {
-    const { group, screenMat } = makeCabinet(color, label, pos)
-    return { kind, pos: pos.clone(), group, screenMat }
-  }
-
-  const A = config.palette
-  const arcadePortals: ArcadeCabinet[] = [
-    buildCabinet('beamwars', A.cyan, 'BEAM WARS', new THREE.Vector3(-18, 0, 12)),
-    buildCabinet('snake', A.purple, 'SNAKE', new THREE.Vector3(18, 0, 12)),
-    buildCabinet('digduel', A.orange, 'DIG DUEL', new THREE.Vector3(-46, 0, 26)),
-    buildCabinet('invaders', A.lime, 'INVADERS', new THREE.Vector3(46, 0, 26)),
-    buildCabinet('raceloop', A.magenta, 'RACE LOOP', new THREE.Vector3(-34, 0, 46)),
-    buildCabinet('mecharena', A.orange, 'MECH ARENA', new THREE.Vector3(34, 0, 46)),
-    buildCabinet('merge2048', A.magenta, '2048', new THREE.Vector3(-12, 0, 56)),
-    buildCabinet('drivemad', A.lime, 'DRIVE FRENZY', new THREE.Vector3(12, 0, 56)),
-  ]
-
-  // ARCADE marquee sprite above the (Vehicles-owned) titan at the back.
+  // ===========================================================================
+  // ARCADE BUILDING — the walk-in hub. Doors = games. Sits just north of spawn
+  // so it's the first thing you see; the Mars ring (below) is in front of it.
+  // ===========================================================================
   {
-    const x = 0, z = 44
-    const gy = physics.sampleGround(x, z, 60)?.y ?? 0
-    const tex = makeLabelTexture('ARCADE', config.palette.cyan)
-    texs.push(tex)
-    const signMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
-    mats.push(signMat)
-    const sign = new THREE.Sprite(signMat)
-    sign.position.set(0, gy + 30, z - 6)
-    sign.scale.set(30, 7.5, 1)
-    scene.add(sign)
+    const CX = 0, CZ = 42 // building center
+    const W = 30, D = 24, H = 10, t = 0.7 // footprint + wall height + thickness
+    const gy = physics.sampleGround(CX, CZ, 60)?.y ?? 0
+    const frontZ = CZ - D / 2, backZ = CZ + D / 2
+    const leftX = CX - W / 2, rightX = CX + W / 2
+    const ENTRANCE = 9 // wide front opening (walk + camera room)
+
+    const wallMat = own(new THREE.MeshStandardMaterial({ color: 0x14171f, metalness: 0.4, roughness: 0.6 }))
+    const trimMat = own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+    const trimMagenta = own(new THREE.MeshBasicMaterial({ color: config.palette.magenta, fog: false }))
+    const floorMat = own(new THREE.MeshStandardMaterial({ color: 0x0c1019, metalness: 0.6, roughness: 0.35 }))
+
+    const wall = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(ownG(new THREE.BoxGeometry(w, h, d)), wallMat)
+      m.position.set(x, gy + y, z)
+      m.castShadow = true; m.receiveShadow = true
+      scene.add(m)
+      solids.push(m) // camera collides with the building
+      physics.colliders.push(new THREE.Box3(
+        new THREE.Vector3(x - w / 2, gy, z - d / 2),
+        new THREE.Vector3(x + w / 2, gy + h, z + d / 2),
+      ))
+      return m
+    }
+    // back + side walls
+    wall(W, H, t, CX, H / 2, backZ)
+    wall(t, H, D, leftX, H / 2, CZ)
+    wall(t, H, D, rightX, H / 2, CZ)
+    // front wall as two segments flanking the entrance
+    const segW = (W - ENTRANCE) / 2
+    wall(segW, H, t, CX - (ENTRANCE / 2 + segW / 2), H / 2, frontZ)
+    wall(segW, H, t, CX + (ENTRANCE / 2 + segW / 2), H / 2, frontZ)
+    // lintel over the entrance
+    const lintel = new THREE.Mesh(ownG(new THREE.BoxGeometry(ENTRANCE + 1, H - 6, t)), wallMat)
+    lintel.position.set(CX, gy + 6 + (H - 6) / 2, frontZ)
+    lintel.castShadow = true
+    scene.add(lintel)
+
+    // floor
+    const floor = new THREE.Mesh(ownG(new THREE.BoxGeometry(W - t, 0.1, D - t)), floorMat)
+    floor.position.set(CX, gy + 0.05, CZ)
+    floor.receiveShadow = true
+    scene.add(floor)
+
+    // Interior lighting so the room + doors read (cheap, no shadows).
+    const lampA = new THREE.PointLight(0x9fe8ff, 1.8, 46, 2); lampA.position.set(CX, gy + 8.5, CZ); scene.add(lampA)
+    const lampB = new THREE.PointLight(0xff2bd0, 0.9, 30, 2); lampB.position.set(CX, gy + 5, frontZ + 5); scene.add(lampB)
+    const lampC = new THREE.PointLight(0x27e7ff, 0.9, 30, 2); lampC.position.set(CX, gy + 5, backZ - 5); scene.add(lampC)
+
+    // roof: open frame (perimeter beams + a couple crossbeams) so the third-person
+    // camera has headroom inside but it still reads as a roofed building.
+    const beam = (w: number, d: number, x: number, z: number) => {
+      const m = new THREE.Mesh(ownG(new THREE.BoxGeometry(w, 0.6, d)), wallMat)
+      m.position.set(x, gy + H, z); scene.add(m)
+    }
+    beam(W, t, CX, frontZ); beam(W, t, CX, backZ)
+    beam(t, D, leftX, CZ); beam(t, D, rightX, CZ)
+    beam(t, D, CX - W / 4, CZ); beam(t, D, CX + W / 4, CZ)
+
+    // neon trim along the top edge of the front + a big ARCADE marquee
+    const frontTrim = new THREE.Mesh(ownG(new THREE.BoxGeometry(W, 0.4, 0.4)), trimMat)
+    frontTrim.position.set(CX, gy + H - 0.4, frontZ - 0.2); scene.add(frontTrim)
+    const entryGlowL = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.4, 6, 0.4)), trimMagenta)
+    entryGlowL.position.set(CX - ENTRANCE / 2, gy + 3, frontZ - 0.2); scene.add(entryGlowL)
+    const entryGlowR = entryGlowL.clone(); entryGlowR.position.x = CX + ENTRANCE / 2; scene.add(entryGlowR)
+
+    const marqueeTex = makeLabelTexture('ARCADE', config.palette.cyan); texs.push(marqueeTex)
+    const marquee = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: marqueeTex, transparent: true, depthWrite: false })))
+    marquee.position.set(CX, gy + H + 3, frontZ - 0.5)
+    marquee.scale.set(20, 5, 1); scene.add(marquee)
+
+    // ---- doors: 4 on each side wall, facing inward ----
+    const perSide = 4
+    const z0 = frontZ + 4, z1 = backZ - 3
+    const doorThumbGeo = ownG(new THREE.PlaneGeometry(2.6, 2.0))
+    const padGeo = ownG(new THREE.RingGeometry(1.3, 1.7, 24))
+    for (let i = 0; i < GAMES.length; i++) {
+      const g = GAMES[i]
+      const side = i < perSide ? -1 : 1 // left wall first, then right
+      const idx = i % perSide
+      const z = THREE.MathUtils.lerp(z0, z1, idx / (perSide - 1))
+      const wallX = side === -1 ? leftX + t / 2 : rightX - t / 2
+      const inward = -side // doors on the left wall face +X, etc.
+      const door = new THREE.Group()
+      door.position.set(wallX, gy, z)
+
+      // recessed door frame
+      const frame = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.3, 4.2, 3.2)), own(new THREE.MeshStandardMaterial({ color: 0x05070c, metalness: 0.5, roughness: 0.4 })))
+      frame.position.set(inward * 0.16, 2.4, 0)
+      door.add(frame)
+      // neon trim around the door (the screen material Game pulses)
+      const screenMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: g.color, emissiveIntensity: 1.6, roughness: 0.4 }))
+      const trimTop = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.34, 0.18, 3.3)), screenMat)
+      trimTop.position.set(inward * 0.17, 4.4, 0); door.add(trimTop)
+      for (const sz of [-1.6, 1.6]) {
+        const post = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.34, 4.4, 0.18)), screenMat)
+        post.position.set(inward * 0.17, 2.3, sz); door.add(post)
+      }
+      // stylized preview "screenshot" panel set in the doorway, facing inward
+      const thumbTex = arcadeThumbnail(g.kind, g.color); texs.push(thumbTex)
+      const thumb = new THREE.Mesh(doorThumbGeo, own(new THREE.MeshBasicMaterial({ map: thumbTex, toneMapped: false })))
+      thumb.position.set(inward * 0.2, 2.5, 0)
+      thumb.rotation.y = inward > 0 ? Math.PI / 2 : -Math.PI / 2
+      door.add(thumb)
+      // game name above the door
+      const nameTex = makeLabelTexture(g.name, g.color); texs.push(nameTex)
+      const name = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: nameTex, transparent: true, depthWrite: false })))
+      name.position.set(inward * 0.3, 5.2, 0)
+      name.scale.set(4.2, 1.05, 1); door.add(name)
+      scene.add(door)
+
+      // stand-here pad + trigger point in front of the door (toward room center)
+      const padX = wallX + inward * 2.4
+      const pad = new THREE.Mesh(padGeo, own(new THREE.MeshBasicMaterial({ color: g.color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      pad.rotation.x = -Math.PI / 2
+      pad.position.set(padX, gy + 0.12, z)
+      scene.add(pad)
+
+      arcadePortals.push({ kind: g.kind, pos: new THREE.Vector3(padX, gy, z), group: door, screenMat })
+    }
   }
 
-  // Portal Plaza hero landmark: big glowing Mars gateway ring, sky beam, ground ring.
+  // ===========================================================================
+  // PORTAL PLAZA hero ring (Mars gateway) — sits in front of the arcade.
+  // ===========================================================================
   let plazaHub: PlazaHub
   let plazaMars: { pos: THREE.Vector3; radius: number }
   {
@@ -174,12 +315,11 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics): LandmarksR
     label.position.set(0, 15, 0)
     label.scale.set(9, 2.25, 1)
     g.add(label)
-    // Tall sky beam — skipped on the low (mobile) tier to save full-height overdraw.
     let beamMat: THREE.MeshBasicMaterial | null = null
     if (config.tier.fxScale >= 0.6) {
       const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(1.4, 2.6, 220, 20, 1, true)), own(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
       beam.position.y = 110
-      beam.renderOrder = 4 // stable sort slot (additive-flicker fix)
+      beam.renderOrder = 4
       g.add(beam)
       beamMat = beam.material as THREE.MeshBasicMaterial
     }
@@ -192,7 +332,9 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics): LandmarksR
     plazaMars = { pos: new THREE.Vector3(cx, gy, cz), radius: 4.5 }
   }
 
-  // Rocket launch gate: ground ring + tall sign on the parked rocket.
+  // ===========================================================================
+  // ROCKET launch gate.
+  // ===========================================================================
   let rocketGate: THREE.Group
   {
     const x = 2, z = -20
