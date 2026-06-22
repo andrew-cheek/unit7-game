@@ -78,7 +78,7 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     softShadows: true,
     buildingShadows: true,
     maxSubSteps: 5,
-    densityScale: 1,
+    densityScale: 1.25, // busier streets on desktop (more crowd / traffic / drones)
     accentLights: true,
     starCount: 2600,
     anisotropy: 16,
@@ -100,7 +100,7 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     softShadows: true,
     buildingShadows: false,
     maxSubSteps: 3,
-    densityScale: 0.7,
+    densityScale: 0.82,
     accentLights: true,
     starCount: 1400,
     anisotropy: 8,

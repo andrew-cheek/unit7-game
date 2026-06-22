@@ -201,11 +201,11 @@ export const config = {
   },
 
   events: {
-    spaceshipInterval: 13, // seconds between landing-ship events (more alien life)
+    spaceshipInterval: 10, // seconds between landing-ship events (more alien life)
     aliensPerShip: 5,
-    powerupCount: 14,
-    droneCount: 16,
-    trafficCount: 14, // hovercar traffic streaming the avenues
+    powerupCount: 16,
+    droneCount: 24, // more drones buzzing the skyline
+    trafficCount: 22, // busier hovercar traffic streaming the avenues
   },
 
   // News-ticker headlines (edit here). Reactive "BREAKING" lines are injected at
