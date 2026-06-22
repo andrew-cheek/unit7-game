@@ -395,7 +395,10 @@ export class World {
     const mesh = new THREE.Mesh(bodyGeo, mat)
     mesh.scale.set(fx, h, fz)
     mesh.position.set(cx, h / 2, cz)
-    mesh.castShadow = config.tier.buildingShadows // off on mobile (perf)
+    // Only the inner-core towers cast shadows: distant sprawl shadows aren't
+    // visible but would bloat the shadow pass in the now-much-larger world.
+    const castsShadow = config.tier.buildingShadows && Math.hypot(cx, cz) < 150
+    mesh.castShadow = castsShadow
     mesh.receiveShadow = true
     this.group.add(mesh)
     this.solidMeshes.push(mesh)
@@ -412,7 +415,7 @@ export class World {
       const base = new THREE.Mesh(this.boxGeo, mat)
       base.scale.set(bw, bh, bd)
       base.position.set(cx, bh / 2, cz)
-      base.castShadow = config.tier.buildingShadows
+      base.castShadow = castsShadow
       base.receiveShadow = true
       this.group.add(base)
       this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - bw / 2, 0, cz - bd / 2), new THREE.Vector3(cx + bw / 2, bh, cz + bd / 2)))

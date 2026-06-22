@@ -80,6 +80,17 @@ export class Vehicles {
     this.spawn('rocket', createRocket({ scale: 2.4, flaps: true, hull: 0xd8dee8, accent: 0x27e7ff }), new THREE.Vector3(-14, 0, -24), 0, 3.0, 'rocket', 1.2)
     this.spawn('rocket', createRocket({ scale: 3.0, hull: 0xb8c0cc, accent: config.palette.orange }), new THREE.Vector3(2, 0, -26), 0, 3.6, 'rocket', 1.5)
     this.spawn('rocket', createRocket({ scale: 1.7, hull: 0xc8ccd6, accent: 0xff4d6d }), new THREE.Vector3(16, 0, -24), 0, 2.4, 'rocket', 0.9)
+    // Extra rides scattered across the (now much larger) city so exploring always
+    // turns up something to hop into. Earth-only, like the other cars.
+    const hh = config.vehicle.hovercar.hoverHeight, sh = config.vehicle.speeder.hoverHeight
+    const extras: Array<['hovercar' | 'speeder', number, number]> = [
+      ['hovercar', -118, 64], ['speeder', 96, -92], ['hovercar', 150, 118],
+      ['speeder', -150, -44], ['hovercar', -64, -150], ['speeder', 132, 34],
+    ]
+    for (const [kind, x, z] of extras) {
+      const model = kind === 'speeder' ? createSpeederBike() : createHovercar()
+      this.spawn(kind, model, new THREE.Vector3(x, 0, z), kind === 'speeder' ? sh : hh, kind === 'speeder' ? 1.1 : 1.7, 'hover')
+    }
     // Drivable cars sitting up on the elevated highway (deck at z=-36, y~9).
     // sampleGround in spawn() lands them on the deck surface.
     this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
