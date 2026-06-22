@@ -69,6 +69,7 @@ interface Match {
   ax: number; ay: number; adx: number; ady: number; aAlive: boolean; aq: Dir | null
   bx: number; by: number; bdx: number; bdy: number; bAlive: boolean; bq: Dir | null
   loop: ReturnType<typeof setInterval> | null
+  startTimer: ReturnType<typeof setTimeout> | null
 }
 
 type ClientMsg =
@@ -110,7 +111,12 @@ export default class WorldServer implements Party.Server {
   onClose(conn: Party.Connection) {
     this.players.delete(conn.id)
     this.profiles.delete(conn.id)
+    // Drop any pending challenge this player owned, and any challenge aimed *at*
+    // them (otherwise a stale offer keeps the challenger flagged as busy).
     this.challenges.delete(conn.id)
+    for (const [from, offer] of this.challenges) {
+      if (offer.to === conn.id) this.challenges.delete(from)
+    }
     // If they were mid-duel, the opponent wins by forfeit.
     const mid = this.inMatch.get(conn.id)
     if (mid) this.endMatch(mid, conn.id === this.matches.get(mid)?.a ? 'b' : 'a')
@@ -236,9 +242,20 @@ export default class WorldServer implements Party.Server {
     if (msg.t === 'state') {
       const snap = this.players.get(sender.id)
       if (!snap) return
-      snap.p = msg.p; snap.y = msg.y; snap.m = msg.m; snap.v = msg.v; snap.z = msg.z; snap.s = msg.s; snap.g = msg.g
+      // Validate/clamp before trusting client transform: reject non-finite or
+      // wildly out-of-bounds positions so one bad/hostile client can't poison the
+      // relay (NaN propagating into everyone's scene, teleport spam, etc.).
+      const p = vec3(msg.p)
+      if (!p) return
+      snap.p = p
+      snap.y = clampFinite(msg.y, -Math.PI * 2, Math.PI * 2, 0)
+      snap.m = tag(msg.m, 'robot')
+      snap.v = msg.v == null ? null : tag(msg.v, 'car')
+      snap.z = tag(msg.z, 'earth')
+      snap.s = clampFinite(msg.s, 0, 1e4, 0)
+      snap.g = !!msg.g
       this.room.broadcast(
-        JSON.stringify({ t: 'state', id: sender.id, p: msg.p, y: msg.y, m: msg.m, v: msg.v, z: msg.z, s: msg.s, g: msg.g }),
+        JSON.stringify({ t: 'state', id: sender.id, p: snap.p, y: snap.y, m: snap.m, v: snap.v, z: snap.z, s: snap.s, g: snap.g }),
         [sender.id],
       )
       return
@@ -347,6 +364,7 @@ export default class WorldServer implements Party.Server {
       ax, ay, adx: 1, ady: 0, aAlive: true, aq: null,
       bx, by, bdx: -1, bdy: 0, bAlive: true, bq: null,
       loop: null,
+      startTimer: null,
     }
     this.matches.set(id, m)
     this.inMatch.set(aId, id)
@@ -356,8 +374,11 @@ export default class WorldServer implements Party.Server {
     const base = { cols: C, rows: R, a: [ax, ay], b: [bx, by], trailA: aTrail, trailB: bTrail, startIn: WorldServer.BW_START_MS }
     this.room.getConnection(aId)?.send(JSON.stringify({ t: 'matchStart', side: 'a', opp: m.bn, oppId: bId, ...base }))
     this.room.getConnection(bId)?.send(JSON.stringify({ t: 'matchStart', side: 'b', opp: m.an, oppId: aId, ...base }))
-    // Begin stepping after the "get ready" beat.
-    setTimeout(() => {
+    // Begin stepping after the "get ready" beat. Track the handle so a forfeit
+    // during the beat (endMatch) cancels it instead of starting a loop for a
+    // match that no longer exists.
+    m.startTimer = setTimeout(() => {
+      m.startTimer = null
       if (this.matches.get(id) !== m) return
       m.loop = setInterval(() => this.stepMatch(m), WorldServer.BW_TICK_MS)
     }, WorldServer.BW_START_MS)
@@ -397,6 +418,7 @@ export default class WorldServer implements Party.Server {
     const m = this.matches.get(id)
     if (!m) return
     if (m.loop) clearInterval(m.loop)
+    if (m.startTimer) clearTimeout(m.startTimer)
     this.matches.delete(id)
     this.inMatch.delete(m.a)
     this.inMatch.delete(m.b)
@@ -448,6 +470,32 @@ function colorOf(v: unknown): number {
 
 function round(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+/** A finite number clamped to [lo, hi], else the fallback. */
+function clampFinite(v: unknown, lo: number, hi: number, fallback: number): number {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(lo, Math.min(hi, n))
+}
+
+/** Validate a wire Vec3: all-finite and within the world bounds, else null. */
+function vec3(v: unknown): Vec3 | null {
+  if (!Array.isArray(v) || v.length !== 3) return null
+  const LIMIT = 1e5 // generous: covers Earth/Moon/Mars zones, rejects garbage
+  const out: number[] = []
+  for (const c of v) {
+    const n = Number(c)
+    if (!Number.isFinite(n) || Math.abs(n) > LIMIT) return null
+    out.push(n)
+  }
+  return out as Vec3
+}
+
+/** Short, safe enum-ish string tag (model/vehicle/zone id) with a fallback. */
+function tag(v: unknown, fallback: string): string {
+  const s = typeof v === 'string' ? v.replace(/[^\w-]/g, '').slice(0, 16) : ''
+  return s || fallback
 }
 
 function sanitizeName(raw: unknown): string {

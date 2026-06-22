@@ -275,6 +275,10 @@ export class Vehicles {
 
   update(dt: number, input: Input) {
     for (const v of this.list) {
+      // Skip vehicles hidden in the current zone (e.g. the dozens of rockets/cars
+      // that aren't on this world). The one you're piloting is always visible, so
+      // its physics still runs. Big win when most of the fleet is off-zone.
+      if (v !== this.current && !v.model.group.visible) continue
       // Ease the mech transform and drive the model's morph pose.
       if (v.morph !== v.morphTarget) {
         v.morph += (v.morphTarget - v.morph) * Math.min(1, dt * 6)

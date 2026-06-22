@@ -6,7 +6,7 @@
 
 import * as THREE from 'three'
 import { config } from './config'
-import { loadHighScore, saveHighScore } from './storage'
+import { loadBestTime, saveBestTime } from './storage'
 
 export interface RaceHud {
   state: 'idle' | 'countdown' | 'racing' | 'done'
@@ -45,7 +45,7 @@ export class RaceActivity {
   private cp = 0
   private time = 0
   private countdown = 0
-  private best = loadHighScore('race')
+  private best = loadBestTime('race')
   private result = 0
   private cooldown = 0
   private stray = 0
@@ -168,7 +168,7 @@ export class RaceActivity {
   private finish() {
     this.result = this.time
     const isBest = this.best === 0 || this.time < this.best
-    if (isBest) { this.best = Math.floor(this.time * 10) / 10; saveHighScore('race', Math.ceil(this.time)) }
+    if (isBest) { this.best = Math.round(this.time * 10) / 10; saveBestTime('race', this.time) }
     // Reward scales with how clean the run was; a best run pays a bonus.
     const credits = 150 + (isBest ? 150 : 0)
     this.onFinish?.(credits, 120, isBest)

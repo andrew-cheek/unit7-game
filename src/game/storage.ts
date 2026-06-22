@@ -139,3 +139,28 @@ export function saveHighScore(key: string, value: number) {
     /* ignore */
   }
 }
+
+// Best *time* records, where lower is better (e.g. a race lap). Stored as
+// integer tenths of a second so the saved value and the in-memory value agree
+// to one decimal place on reload. Returns seconds (0 = no record yet).
+export function loadBestTime(key: string): number {
+  try {
+    const t = Number(localStorage.getItem('unit7.bt.' + key))
+    return Number.isFinite(t) && t > 0 ? t / 10 : 0
+  } catch {
+    return 0
+  }
+}
+
+export function saveBestTime(key: string, seconds: number) {
+  try {
+    if (!Number.isFinite(seconds) || seconds <= 0) return
+    const tenths = Math.round(seconds * 10)
+    const prev = Number(localStorage.getItem('unit7.bt.' + key))
+    if (!Number.isFinite(prev) || prev <= 0 || tenths < prev) {
+      localStorage.setItem('unit7.bt.' + key, String(tenths))
+    }
+  } catch {
+    /* ignore */
+  }
+}
