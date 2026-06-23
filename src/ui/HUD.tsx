@@ -149,6 +149,18 @@ export function HUD({
         </div>
       )}
 
+      {/* perf overlay (?debug only): live draw calls + GPU memory. Watch geos/texs
+          climb across zone + minigame switches to spot leaks. */}
+      {hud.perf && (
+        <div style={perfStyle}>
+          <span style={{ color: hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta }}>{hud.fps} fps</span>
+          <span style={{ color: NEON.text }}>{hud.perf.draws} draws</span>
+          <span style={{ color: NEON.dim }}>{(hud.perf.tris / 1000).toFixed(0)}k tris</span>
+          <span style={{ color: NEON.text }}>geo {hud.perf.geos}</span>
+          <span style={{ color: NEON.text }}>tex {hud.perf.texs}</span>
+        </div>
+      )}
+
       {/* style combo meter (right-center): climbs while you keep expressive
           traversal going, then banks. Colour ramps with the multiplier. */}
       {hud.combo.active && !hud.minigame && (
@@ -625,6 +637,20 @@ const objectiveStyle: CSSProperties = {
   font: '700 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.1em',
   boxShadow: '0 0 16px rgba(155,255,77,0.2)',
+}
+const perfStyle: CSSProperties = {
+  position: 'absolute',
+  left: 'max(10px, env(safe-area-inset-left))',
+  bottom: 'max(10px, env(safe-area-inset-bottom))',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '6px 10px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 8,
+  font: '600 11px/1.3 ui-monospace, Menlo, monospace',
+  pointerEvents: 'none',
 }
 const comboStyle: CSSProperties = {
   position: 'absolute',

@@ -35,7 +35,7 @@ import { RobotFactory } from './RobotFactory'
 import { RaceActivity, type RaceHud } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
-import { clamp, vibrate } from './utils'
+import { clamp, damp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
 import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
 import {
@@ -165,6 +165,9 @@ export class Game {
   private raceHud: RaceHud = { state: 'idle', cp: 0, total: 0, time: 0, best: 0, countdown: 0, result: 0, near: false }
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private currentDistrict = '' // last district name shown (toasts on crossing)
+  private fovBoostCur = 0 // smoothed sprint/speed FOV punch (degrees)
+  // Dev or ?debug: surfaces the on-screen perf overlay (draws / tris / memory).
+  private readonly debug = import.meta.env.DEV || (typeof window !== 'undefined' && /[?&]debug\b/.test(window.location.search))
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
   private timeFromQuery = false // ?time= debug override present (skip morning start)
   // Neon density/quality setting (persisted): scales city neon + bloom.
@@ -401,6 +404,7 @@ export class Game {
       mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
       shards: { found: 0, total: 0 },
       combo: { active: false, points: 0, mult: 1 },
+      perf: null,
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
@@ -975,8 +979,9 @@ export class Game {
       this.addCredits(Math.round(award * 0.5))
       this.hud.captured += 1
       trackEvent('npc_captured', { total: this.hud.captured })
-      // Juice: a quick cyan ring pop where the target was netted.
+      // Juice: a quick cyan ring pop + micro freeze-frame where the target netted.
       this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
+      this.engine.triggerHitstop(0.035)
       vibrate(25)
       this.audio.play('capture')
       this.awardCaptureProgress(1)
@@ -1039,6 +1044,7 @@ export class Game {
     if (this.mechAirborne && grounded && v.velocity.y < -3) {
       this.missiles.shockwave({ x: v.position.x, y: gy, z: v.position.z }, 0xbfe6ff, 7 + v.size * 1.6, 0.6)
       this.camera.shake(0.6)
+      this.engine.triggerHitstop(0.07) // STOMP weight: a heavier freeze than a capture
       vibrate(50)
       this.audio.play('land')
     }
@@ -1777,10 +1783,20 @@ export class Game {
    */
   private renderFrame = (frameDt: number) => {
     this.input.drainLook()
-    if (this.dropIn || this.intro || this.mp.inMatch || this.paused || this.inMinigame || this.launch.active) return
+    if (this.dropIn || this.intro || this.mp.inMatch || this.paused || this.inMinigame || this.launch.active) {
+      // Drop any speed FOV punch so cinematics / menus frame at the base fov.
+      if (this.fovBoostCur !== 0) { this.fovBoostCur = 0; this.engine.setFovBoost(0) }
+      return
+    }
     this.camera.update(frameDt, this.input, this.focus, this.buildFollowState())
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
+    // Sprint FOV punch: a subtle widen as speed climbs, eased so it never snaps.
+    const sp = this.vehicles.current ? this.vehicles.currentSpeed : this.player.speed
+    const maxSp = this.vehicles.current ? 52 : config.player.runSpeed
+    const targetBoost = clamp(sp / maxSp, 0, 1) * 5
+    this.fovBoostCur = damp(this.fovBoostCur, targetBoost, 6, frameDt)
+    this.engine.setFovBoost(this.fovBoostCur)
   }
 
   /** Nearest live capturable alien to a point, across both the local roamers and
@@ -1965,6 +1981,11 @@ export class Game {
     const mp = this.mp.hudSnapshot()
     this.hud.shards = this.collectibles.counts()
     this.hud.combo = this.traversal.combo()
+    // Debug-only perf overlay: live draw calls + GPU memory (spot leaks on switch).
+    if (this.debug) {
+      const m = this.engine.memoryInfo()
+      this.hud.perf = { draws: this.engine.drawCalls, tris: this.engine.triangles, geos: m.geometries, texs: m.textures }
+    }
     this.hud.online = mp.online
     this.hud.leaderboard = mp.leaderboard
     this.hud.profiles = mp.profiles

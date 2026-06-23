@@ -89,6 +89,15 @@ export class Engine {
   private renderScale = 1
   private adaptTimer = 0
   private static readonly SCALE_FLOOR = 0.6
+  // Hitstop: a brief sim-time slowdown for impact weight. We scale the wall-clock
+  // time fed into the fixed-step accumulator (NOT the fixed dt itself), so every
+  // simulation step is still exactly 1/60 and gameplay stays deterministic - we
+  // just feed the accumulator fewer steps for a few real milliseconds.
+  private hitstop = 0
+  private hitstopScale = 0.06
+  // Additive FOV (degrees) layered on the adaptive base, e.g. a sprint punch.
+  private baseFov = config.camera.fov
+  private fovBoost = 0
   // Bloom render-target scale relative to the frame. Half-res = soft, cheap,
   // and free of the sub-pixel shimmer full-res bloom amplifies on far neon.
   // Mobile (low) drops to 0.4 for a cheaper blur that still reads as neon glow.
@@ -243,6 +252,28 @@ export class Engine {
     if (u) u.value = THREE.MathUtils.clamp(d, 4, 120)
   }
 
+  /** Trigger a brief freeze-frame for impact weight (capped so rapid hits don't
+   *  stack into a long stall). Deterministic: only the sim-time intake slows. */
+  triggerHitstop(duration: number, scale = 0.06) {
+    this.hitstop = Math.min(0.12, Math.max(this.hitstop, duration))
+    this.hitstopScale = scale
+  }
+
+  /** Layer an additive FOV (degrees) on the adaptive base, e.g. a sprint punch.
+   *  Cheap; only touches the projection matrix when the value actually changes. */
+  setFovBoost(deg: number) {
+    if (Math.abs(deg - this.fovBoost) < 0.02) return
+    this.fovBoost = deg
+    this.camera.fov = this.baseFov + this.fovBoost
+    this.camera.updateProjectionMatrix()
+  }
+
+  /** Live GPU memory counts (geometries / textures) for the debug overlay. */
+  memoryInfo(): { geometries: number; textures: number } {
+    const m = this.renderer.info.memory
+    return { geometries: m.geometries, textures: m.textures }
+  }
+
   start() {
     if (this.running || this.disposed) return
     this.running = true
@@ -268,6 +299,12 @@ export class Engine {
     this.fps += ((1 / Math.max(raw, 1e-4)) - this.fps) * 0.1
     let frame = raw
     if (frame > config.render.maxFrameDelta) frame = config.render.maxFrameDelta
+    // Hitstop counts down in real time but throttles the sim intake, so the
+    // freeze lasts a fixed wall-clock duration regardless of frame rate.
+    if (this.hitstop > 0) {
+      this.hitstop = Math.max(0, this.hitstop - raw)
+      frame *= this.hitstopScale
+    }
     this.accumulator += frame
 
     const fixed = config.render.fixedDelta
@@ -361,12 +398,13 @@ export class Engine {
     const refAspect = 1.5
     const baseV = config.camera.fov
     if (aspect >= refAspect) {
-      this.camera.fov = baseV
-      return
+      this.baseFov = baseV
+    } else {
+      const hRef = 2 * Math.atan(Math.tan((baseV * Math.PI) / 360) * refAspect)
+      const v = (2 * Math.atan(Math.tan(hRef / 2) / Math.max(0.35, aspect)) * 180) / Math.PI
+      this.baseFov = Math.min(100, v)
     }
-    const hRef = 2 * Math.atan(Math.tan((baseV * Math.PI) / 360) * refAspect)
-    const v = (2 * Math.atan(Math.tan(hRef / 2) / Math.max(0.35, aspect)) * 180) / Math.PI
-    this.camera.fov = Math.min(100, v)
+    this.camera.fov = this.baseFov + this.fovBoost
   }
 
   resize = () => {
