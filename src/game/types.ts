@@ -41,6 +41,7 @@ export interface HudState {
   best: number // best score this device (persisted)
   credits: number // spendable currency (persisted)
   captured: number
+  shards: { found: number; total: number } // data shards collected this session / total in zone
   speed: number // m/s
   altitude: number // m above ground
   heading: number // camera yaw, radians (for the compass)

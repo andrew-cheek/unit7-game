@@ -25,6 +25,7 @@ import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
 import { FxPool } from './FxPool'
+import { Collectibles } from './Collectibles'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -147,6 +148,8 @@ export class Game {
   private systems = new SystemRegistry()
   // Pooled transient FX (mech boot steam, energy bursts). No per-spawn alloc.
   private fxPool!: FxPool
+  // Data-shard discovery layer (instanced pickups across the city).
+  private collectibles!: Collectibles
   // Shared-world multiplayer (net socket, remote players, shared aliens, duels,
   // roster). No-ops cleanly when solo; owns its own net state.
   private mp!: MultiplayerManager
@@ -248,6 +251,14 @@ export class Game {
     // Shared-world multiplayer: owns the net socket + remote/shared renderers and
     // talks back through the host callbacks below. Registered for update/dispose.
     this.mp = this.systems.register(new MultiplayerManager(this.engine.scene, this.multiplayerHost()))
+    // Data-shard discovery layer: scattered pickups that reward exploration +
+    // flight. Reads player/zone/ground through accessors; rewards via onCollect.
+    this.collectibles = this.systems.register(new Collectibles(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      getZone: () => this.zone,
+      getPlayer: () => this.player.position,
+      onCollect: (value, x, y, z) => this.onShardCollected(value, x, y, z),
+    }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
@@ -374,6 +385,7 @@ export class Game {
 
     this.hud = {
       mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
+      shards: { found: 0, total: 0 },
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
@@ -761,6 +773,7 @@ export class Game {
       this.player.exitVehicle(this.player.position)
     }
     this.zones.setActive(zone)
+    this.systems.setZone(zone) // collectibles (+ future systems) react to the zone
     this.world.cityVisible(zone === 'earth')
     this.world.applyZone(zone)
     this.worldEvents.setZone(zone)
@@ -1248,6 +1261,7 @@ export class Game {
       gamesPlayed,
       colorsOwned: this.progression.cosmetics.owned.length,
       dailyCompleted: this.progression.daily.claimed,
+      shardsFound: this.profile.shardsFound,
     })
     if (newly.length) {
       this.progression = loadProgression() // pick up the newly persisted ids
@@ -1280,6 +1294,21 @@ export class Game {
     const r = addXp(amount)
     if (r.leveledUp) this.flashLevelUp(r.level)
     this.refreshProgression()
+  }
+
+  /** A data shard was collected: pay out, persist the lifetime count, juice it. */
+  private onShardCollected(value: number, x: number, y: number, z: number) {
+    this.addCredits(value)
+    this.profile.shardsFound += 1
+    saveProfile(this.profile)
+    const c = this.collectibles.counts()
+    this.hud.banner = `DATA SHARD  ${c.found}/${c.total}  +${value}c`
+    this.bannerTimer = 1.4
+    this.audio.play('capture')
+    this.missiles.shockwave({ x, y, z }, 0x8a5cff, 2.2, 0.35)
+    this.fxPool.puff(x, y, z, { color: 0xbfa8ff, count: 4, spread: 0.8, rise: 2.2, ttl: 0.7, scale: 0.5, opacity: 0.6, additive: true })
+    vibrate(12)
+    this.awardXp(4) // also refreshes progression -> re-checks shard achievements
   }
 
   /** One capture's worth of progress: XP + daily objective. */
@@ -1807,6 +1836,8 @@ export class Game {
       let alienCount = 0
       this.events.forEachAlien((x, z) => { if (alienCount < 6) { add(x, z, 'alien'); alienCount++ } })
       this.patrols.forEach((x, z, big) => add(x, z, big ? 'alien' : 'vehicle'))
+      // Nearby uncollected data shards (capped) so the radar guides exploration.
+      this.collectibles.forEachNearby(px, pz, range, 8, (x, z) => add(x, z, 'powerup'))
     }
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
@@ -1907,6 +1938,7 @@ export class Game {
     this.hud.powerup =
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
     const mp = this.mp.hudSnapshot()
+    this.hud.shards = this.collectibles.counts()
     this.hud.online = mp.online
     this.hud.leaderboard = mp.leaderboard
     this.hud.profiles = mp.profiles

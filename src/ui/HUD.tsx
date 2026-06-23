@@ -114,6 +114,7 @@ export function HUD({
               <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
               <Stat label="CREDITS" value={String(hud.credits)} color={NEON.orange} />
               <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
+              {hud.shards.total > 0 && <Stat label="SHARDS" value={`${hud.shards.found}/${hud.shards.total}`} color={NEON.purple} />}
             </div>
             <div style={statRow}>
               <Stat label="BEST" value={String(hud.best)} color={NEON.purple} />
