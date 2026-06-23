@@ -458,15 +458,17 @@ export class Player {
 
   private integrateAndCollide(dt: number, physics: Physics) {
     const pos = this.object.position
+    const prevY = pos.y // height before this step (for swept rooftop landing)
     pos.x += this.velocity.x * dt
     pos.y += this.velocity.y * dt
     pos.z += this.velocity.z * dt
 
     physics.resolveHorizontal(pos, this.velocity, config.player.radius, config.player.height)
     // Landing surface = the higher of the terrain below and any building roof
-    // whose footprint we're over, so you can touch down on and run across rooftops.
+    // whose footprint we're over. Use the PRE-step height so a fast fall that
+    // crosses a whole roof in one frame still catches it (no tunnelling through).
     const ground = physics.sampleGround(pos.x, pos.z, pos.y + 2.5)
-    const roof = physics.topSupport(pos.x, pos.z, pos.y)
+    const roof = physics.topSupport(pos.x, pos.z, Math.max(prevY, pos.y))
     let surfaceY = ground ? ground.y : -Infinity
     if (roof !== null && roof > surfaceY) surfaceY = roof
     const hasSurface = surfaceY > -Infinity

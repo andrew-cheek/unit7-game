@@ -68,6 +68,7 @@ export class DropIn {
   private phase: DropHud['phase'] = 'dive'
   private quality = 0
   private pendingDeploy = false
+  private wantCut = false // cut the canopy back to free-fall
   private resultT = 0
 
   // Destination beacon + optional target orbs.
@@ -92,9 +93,9 @@ export class DropIn {
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
 
-  private static readonly STEER = 44
-  private static readonly H_DAMP = 1.5
-  private static readonly H_MAX = 50
+  private static readonly STEER = 60 // strong horizontal control over the long fall
+  private static readonly H_DAMP = 1.4
+  private static readonly H_MAX = 68
 
   constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number) {
     this.scene = scene
@@ -198,7 +199,19 @@ export class DropIn {
 
   /** Called by the DEPLOY button / a screen tap. Only arms once low enough. */
   deploy() {
-    if (this.phase === 'dive') this.pendingDeploy = true // deploy at any altitude
+    // Context action: in free-fall it pops the chute (any altitude); under canopy
+    // it CUTS the chute and drops you back into the dive.
+    if (this.phase === 'dive') this.pendingDeploy = true
+    else if (this.phase === 'canopy') this.wantCut = true
+  }
+
+  private cutCanopy() {
+    this.phase = 'dive'
+    this.chute.visible = false
+    this.chute.scale.setScalar(0.1)
+    this.rb.setFlyPose(1)
+    this.hud.result = null
+    this.wantCut = false
   }
 
   skip() {
@@ -218,7 +231,11 @@ export class DropIn {
     const alt = this.pos.y - ground
 
     const chute = this.input.consumeEdge('chute')
-    if (chute && this.phase === 'dive') this.pendingDeploy = true // any altitude
+    if (chute) {
+      if (this.phase === 'dive') this.pendingDeploy = true // deploy at any altitude
+      else if (this.phase === 'canopy') this.wantCut = true // cut back to free-fall
+    }
+    if (this.wantCut && this.phase === 'canopy') this.cutCanopy()
 
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
@@ -241,7 +258,7 @@ export class DropIn {
     this.hVel.x *= damp
     this.hVel.z *= damp
     const hs = Math.hypot(this.hVel.x, this.hVel.z)
-    const hMax = this.phase === 'canopy' ? 24 : DropIn.H_MAX
+    const hMax = this.phase === 'canopy' ? 32 : DropIn.H_MAX
     if (hs > hMax) { this.hVel.x *= hMax / hs; this.hVel.z *= hMax / hs }
 
     // --- phase machine ---

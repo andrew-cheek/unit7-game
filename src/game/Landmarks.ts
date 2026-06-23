@@ -243,42 +243,65 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     marquee.position.set(CX, gy + H + 4, frontZ - 0.5)
     marquee.scale.set(30, 7.5, 1); scene.add(marquee)
 
-    // A VERY TALL neon tower above the hall so the arcade reads as a distinct
-    // landmark from across the city (not just another dark district tower).
-    const TOWER_H = 84
+    // The arcade is a full SKYSCRAPER rising from the walk-in hall: a tall mass
+    // over almost the whole footprint, neon-banded so it's unmistakable from
+    // anywhere in the city.
+    const TOWER_H = 168
     const towerTopY = gy + H + TOWER_H
-    const towerMat = own(new THREE.MeshStandardMaterial({ color: 0x0a0c16, emissive: config.palette.magenta, emissiveIntensity: 1.7, metalness: 0.5, roughness: 0.4 }))
-    const tower = new THREE.Mesh(ownG(new THREE.BoxGeometry(W * 0.62, TOWER_H, 7)), towerMat)
-    tower.position.set(CX, gy + H + TOWER_H / 2, backZ - 1.5)
+    const towerW = W * 0.88, towerD = D * 0.66
+    const towerMat = own(new THREE.MeshStandardMaterial({ color: 0x0a0c16, emissive: config.palette.purple, emissiveIntensity: 0.7, metalness: 0.55, roughness: 0.4 }))
+    const tower = new THREE.Mesh(ownG(new THREE.BoxGeometry(towerW, TOWER_H, towerD)), towerMat)
+    tower.position.set(CX, gy + H + TOWER_H / 2, CZ)
     tower.castShadow = true
     scene.add(tower); solids.push(tower)
+    // Collider starts at the hall CEILING (gy + H), not the ground, so the
+    // walk-in hall below stays clear - the tower mass is only solid above it.
     physics.colliders.push(new THREE.Box3(
-      new THREE.Vector3(CX - W * 0.31, gy, backZ - 5),
-      new THREE.Vector3(CX + W * 0.31, towerTopY, backZ + 2),
+      new THREE.Vector3(CX - towerW / 2, gy + H, CZ - towerD / 2),
+      new THREE.Vector3(CX + towerW / 2, towerTopY, CZ + towerD / 2),
     ))
-    // Alternating cyan/magenta neon bands up the tower face (toward spawn).
-    for (let k = 0; k < 7; k++) {
-      const band = new THREE.Mesh(ownG(new THREE.BoxGeometry(W * 0.64, 0.7, 0.5)), k % 2 ? trimMat : trimMagenta)
-      band.position.set(CX, gy + H + 8 + k * 11, backZ - 5.1)
+    const towerFrontZ = CZ - towerD / 2 - 0.1 // face toward spawn
+    // Stacked horizontal neon bands up the full height (alternating hues).
+    const bands = Math.floor(TOWER_H / 12)
+    for (let k = 0; k < bands; k++) {
+      const band = new THREE.Mesh(ownG(new THREE.BoxGeometry(towerW + 0.4, 0.8, 0.4)), k % 2 ? trimMat : trimMagenta)
+      band.position.set(CX, gy + H + 8 + k * 12, towerFrontZ)
       scene.add(band)
     }
-    // Crowning hero sign high up, readable from afar (camera-facing sprite).
+    // Vertical neon pin-stripes framing the facade.
+    for (const sx of [-towerW / 2 + 1, 0, towerW / 2 - 1]) {
+      const stripe = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.6, TOWER_H - 4, 0.4)), trimMat)
+      stripe.position.set(CX + sx, gy + H + TOWER_H / 2, towerFrontZ)
+      scene.add(stripe)
+    }
+    // Two giant glowing "screen" panels on the facade so it reads as an arcade.
+    for (const yy of [gy + H + TOWER_H * 0.35, gy + H + TOWER_H * 0.68]) {
+      const screen = new THREE.Mesh(ownG(new THREE.BoxGeometry(towerW * 0.6, 18, 0.6)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 1.8, roughness: 0.4 })))
+      screen.position.set(CX, yy, towerFrontZ - 0.3)
+      scene.add(screen)
+    }
+    // Crowning hero sign high up + a glowing roof ring beacon.
     const topTex = makeLabelTexture('ARCADE', config.palette.magenta); texs.push(topTex)
     const topSign = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: topTex, transparent: true, depthWrite: false })))
-    topSign.position.set(CX, towerTopY - 12, backZ - 5.5)
-    topSign.scale.set(30, 15, 1); scene.add(topSign)
-    // A glowing roof ring on top of the tower as a beacon cap.
+    topSign.position.set(CX, towerTopY - 16, towerFrontZ - 1)
+    topSign.scale.set(34, 17, 1); scene.add(topSign)
     const capMat = own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
-    const cap = new THREE.Mesh(ownG(new THREE.TorusGeometry(W * 0.34, 0.6, 8, 28)), capMat)
+    const cap = new THREE.Mesh(ownG(new THREE.TorusGeometry(towerW * 0.4, 0.7, 8, 30)), capMat)
     cap.rotation.x = Math.PI / 2
-    cap.position.set(CX, towerTopY + 0.5, backZ - 1.5)
+    cap.position.set(CX, towerTopY + 0.5, CZ)
     scene.add(cap)
 
-    // ---- doors: 4 on each side wall, facing inward ----
+    // Big back-wall header so the hall reads as "pick a game".
+    const headerTex = makeLabelTexture('SELECT A GAME', config.palette.cyan); texs.push(headerTex)
+    const header = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: headerTex, transparent: true, depthWrite: false })))
+    header.position.set(CX, gy + H - 2.4, backZ - 1.2)
+    header.scale.set(20, 5, 1); scene.add(header)
+
+    // ---- doors: 4 on each side wall, facing inward. Big lit preview screens. ----
     const perSide = 4
-    const z0 = frontZ + 4, z1 = backZ - 3
-    const doorThumbGeo = ownG(new THREE.PlaneGeometry(2.6, 2.0))
-    const padGeo = ownG(new THREE.RingGeometry(1.3, 1.7, 24))
+    const z0 = frontZ + 5, z1 = backZ - 4
+    const doorThumbGeo = ownG(new THREE.PlaneGeometry(4.8, 3.6))
+    const padGeo = ownG(new THREE.RingGeometry(1.8, 2.4, 28))
     for (let i = 0; i < GAMES.length; i++) {
       const g = GAMES[i]
       const side = i < perSide ? -1 : 1 // left wall first, then right
@@ -291,33 +314,33 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
       door.name = 'arcade-door-' + g.kind
       door.userData.minigameKind = g.kind
 
-      // recessed door frame
-      const frame = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.3, 4.2, 3.2)), own(new THREE.MeshStandardMaterial({ color: 0x05070c, metalness: 0.5, roughness: 0.4 })))
-      frame.position.set(inward * 0.16, 2.4, 0)
+      // recessed door frame (big arcade-cabinet portal)
+      const frame = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.4, 7, 5)), own(new THREE.MeshStandardMaterial({ color: 0x05070c, metalness: 0.5, roughness: 0.4 })))
+      frame.position.set(inward * 0.16, 3.6, 0)
       door.add(frame)
-      // neon trim around the door (the screen material Game pulses)
-      const screenMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: g.color, emissiveIntensity: 1.6, roughness: 0.4 }))
-      const trimTop = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.34, 0.18, 3.3)), screenMat)
-      trimTop.position.set(inward * 0.17, 4.4, 0); door.add(trimTop)
-      for (const sz of [-1.6, 1.6]) {
-        const post = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.34, 4.4, 0.18)), screenMat)
-        post.position.set(inward * 0.17, 2.3, sz); door.add(post)
+      // bright neon trim around the door (the screen material Game pulses)
+      const screenMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: g.color, emissiveIntensity: 2.2, roughness: 0.4 }))
+      const trimTop = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.44, 0.28, 5.1)), screenMat)
+      trimTop.position.set(inward * 0.18, 7.1, 0); door.add(trimTop)
+      for (const sz of [-2.5, 2.5]) {
+        const post = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.44, 7, 0.28)), screenMat)
+        post.position.set(inward * 0.18, 3.5, sz); door.add(post)
       }
-      // stylized preview "screenshot" panel set in the doorway, facing inward
+      // large preview "screenshot" panel set in the doorway, facing inward
       const thumbTex = arcadeThumbnail(g.kind, g.color); texs.push(thumbTex)
       const thumb = new THREE.Mesh(doorThumbGeo, own(new THREE.MeshBasicMaterial({ map: thumbTex, toneMapped: false })))
-      thumb.position.set(inward * 0.2, 2.5, 0)
+      thumb.position.set(inward * 0.22, 3.7, 0)
       thumb.rotation.y = inward > 0 ? Math.PI / 2 : -Math.PI / 2
       door.add(thumb)
-      // game name above the door
+      // game name above the door (bigger)
       const nameTex = makeLabelTexture(g.name, g.color); texs.push(nameTex)
       const name = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: nameTex, transparent: true, depthWrite: false })))
-      name.position.set(inward * 0.3, 5.2, 0)
-      name.scale.set(4.2, 1.05, 1); door.add(name)
+      name.position.set(inward * 0.3, 8.0, 0)
+      name.scale.set(6.4, 1.6, 1); door.add(name)
       scene.add(door)
 
       // stand-here pad + trigger point in front of the door (toward room center)
-      const padX = wallX + inward * 2.4
+      const padX = wallX + inward * 3.0
       const pad = new THREE.Mesh(padGeo, own(new THREE.MeshBasicMaterial({ color: g.color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
       pad.rotation.x = -Math.PI / 2
       pad.position.set(padX, gy + 0.12, z)

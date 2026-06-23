@@ -206,10 +206,21 @@ export class CameraController {
         : damp(this.dist, want, config.camera.returnLambda, dt)
     }
 
-    // Relief tilt: when jammed close, raise the view angle so the camera rises
-    // above the subject instead of staring at its back from ground level. Only
-    // the render direction changes (input.pitch, the player's look, is untouched).
-    if (closeFrac > 0.01) {
+    // Enclosed-space check: is there a ceiling just above (a room, or under an
+    // elevated road)? If so, raising the view would jam it into the ceiling, so
+    // instead flatten to look level + forward, which is far easier to orient by.
+    this.raycaster.set(this.currentTarget, this.up.set(0, 1, 0))
+    this.raycaster.far = 9
+    const lowCeiling = this.raycaster.intersectObjects(this.solids, false).length > 0
+
+    if (lowCeiling) {
+      // Look roughly level forward; don't tilt up into the ceiling.
+      const flat = Math.min(pitch, 0.04)
+      const cosF = Math.cos(flat)
+      this.offsetDir.set(-Math.sin(yaw) * cosF, Math.sin(flat), -Math.cos(yaw) * cosF)
+    } else if (closeFrac > 0.01) {
+      // Relief tilt outdoors: when jammed close, raise the view angle so the
+      // camera rises above the subject instead of staring at its back.
       const liftPitch = Math.min(config.camera.pitchMax, pitch + closeFrac * config.camera.collisionPitchLift)
       const cosL = Math.cos(liftPitch)
       this.offsetDir.set(-Math.sin(yaw) * cosL, Math.sin(liftPitch), -Math.cos(yaw) * cosL)
