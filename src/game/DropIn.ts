@@ -22,7 +22,7 @@ const START_Y = 920 // begin far above the city
 const TERM_DIVE = -88
 const TERM_FLARE = -30
 const TERM_NEUTRAL = -58
-const DEPLOY_MAX_ALT = 260 // above this the chute would drift forever - locked out
+const DEPLOY_REF_ALT = 260 // reference height for canopy-quality scaling (not a cap - deploy anytime)
 
 /**
  * The playable opening: a high-altitude dive. You spawn nearly a kilometre up
@@ -198,7 +198,7 @@ export class DropIn {
 
   /** Called by the DEPLOY button / a screen tap. Only arms once low enough. */
   deploy() {
-    if (this.phase === 'dive' && this.pos.y - this.getGround(this.pos.x, this.pos.z) <= DEPLOY_MAX_ALT) this.pendingDeploy = true
+    if (this.phase === 'dive') this.pendingDeploy = true // deploy at any altitude
   }
 
   skip() {
@@ -218,7 +218,7 @@ export class DropIn {
     const alt = this.pos.y - ground
 
     const chute = this.input.consumeEdge('chute')
-    if (chute && this.phase === 'dive' && alt <= DEPLOY_MAX_ALT) this.pendingDeploy = true
+    if (chute && this.phase === 'dive') this.pendingDeploy = true // any altitude
 
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
@@ -256,7 +256,7 @@ export class DropIn {
       this.checkOrbs()
 
       if (this.pendingDeploy) {
-        this.quality = clamp((alt - 40) / (DEPLOY_MAX_ALT - 40), 0.3, 1)
+        this.quality = clamp((alt - 40) / (DEPLOY_REF_ALT - 40), 0.3, 1)
         this.chuteQuality = this.quality
         this.hud.result = this.quality >= 0.78 ? 'CLEAN CANOPY' : this.quality >= 0.5 ? 'CANOPY OPEN' : 'HARD OPEN'
         this.phase = 'canopy'
@@ -299,10 +299,10 @@ export class DropIn {
     this.hud.alt = Math.max(0, alt)
     this.hud.speed = Math.hypot(hs, this.vy)
     this.hud.phase = this.phase
-    this.hud.canDeploy = this.phase === 'dive' && alt <= DEPLOY_MAX_ALT
+    this.hud.canDeploy = this.phase === 'dive'
     this.hud.hint = this.phase === 'canopy' ? 'STEER TO THE BEACON'
       : this.phase === 'land' ? 'TOUCHDOWN'
-      : this.hud.canDeploy ? 'STEER · DEPLOY THE CHUTE NOW' : 'NOSE-DIVE · STEER FOR THE GREEN BEACON'
+      : 'STEER · DEPLOY THE CHUTE ANYTIME'
     if (this.hud.result) { this.resultT += dt; if (this.resultT > 2.2) this.hud.result = null }
 
     if (this.phase === 'land' && alt <= 0.6) {

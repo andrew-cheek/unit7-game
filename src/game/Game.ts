@@ -28,6 +28,7 @@ import { FxPool } from './FxPool'
 import { Collectibles } from './Collectibles'
 import { TraversalScore } from './TraversalScore'
 import { CaptureCombo } from './CaptureCombo'
+import { Bots } from './Bots'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -163,6 +164,8 @@ export class Game {
   private traversal!: TraversalScore
   // Capture chain multiplier (rapid captures scale score + credits).
   private captureCombo!: CaptureCombo
+  // Cosmetic "other players" (local bots) so the world feels populated.
+  private bots!: Bots
   // Shared-world multiplayer (net socket, remote players, shared aliens, duels,
   // roster). No-ops cleanly when solo; owns its own net state.
   private mp!: MultiplayerManager
@@ -288,6 +291,8 @@ export class Game {
     }))
     // Capture chain: rapid captures build a multiplier on score + credits.
     this.captureCombo = this.systems.register(new CaptureCombo())
+    // Cosmetic bot "players" roaming the city (local presence; never networked).
+    this.bots = this.systems.register(new Bots(this.engine.scene, this.physics))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
@@ -2079,8 +2084,9 @@ export class Game {
       const m = this.engine.memoryInfo()
       this.hud.perf = { draws: this.engine.drawCalls, tris: this.engine.triangles, geos: m.geometries, texs: m.textures }
     }
-    this.hud.online = mp.online
-    this.hud.leaderboard = mp.leaderboard
+    // Pad presence with the cosmetic bots so the world reads as populated.
+    this.hud.online = mp.online + this.bots.count
+    this.hud.leaderboard = [...mp.leaderboard, ...this.bots.leaderboard()].sort((a, b) => b.score - a.score).slice(0, 10)
     this.hud.profiles = mp.profiles
     this.hud.challenge = mp.challenge
     this.hud.match = mp.match
