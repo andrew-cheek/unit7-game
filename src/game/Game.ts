@@ -292,7 +292,12 @@ export class Game {
     // Capture chain: rapid captures build a multiplier on score + credits.
     this.captureCombo = this.systems.register(new CaptureCombo())
     // Cosmetic bot "players" roaming the city (local presence; never networked).
-    this.bots = this.systems.register(new Bots(this.engine.scene, this.physics))
+    // They hunt aliens for show: chase a nearby live alien and pop a cosmetic net
+    // (the real alien is never removed - that stays the player's to catch).
+    this.bots = this.systems.register(new Bots(this.engine.scene, this.physics, {
+      nearestAlien: (x, z) => this.nearestCapturable(x, z),
+      onHunt: (x, y, z) => this.missiles.shockwave({ x, y, z }, 0x9bff4d, 3, 0.45),
+    }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
@@ -1071,17 +1076,17 @@ export class Game {
     this.missileCooldown = 0.45
     const size = v.size
     this.scratchFwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
-    const right = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw))
+    const rx = Math.cos(v.yaw), rz = -Math.sin(v.yaw) // camera-right on the ground
     const muzzleY = v.position.y + 4.0 * size
+    // fire() copies origin + clones dir, so reusing these scratch vectors is safe.
     for (const sx of [-1.3, 1.3]) {
-      const origin = new THREE.Vector3(
-        v.position.x + right.x * sx * size + this.scratchFwd.x * 1.2 * size,
+      this.grappleO.set(
+        v.position.x + rx * sx * size + this.scratchFwd.x * 1.2 * size,
         muzzleY,
-        v.position.z + right.z * sx * size + this.scratchFwd.z * 1.2 * size,
+        v.position.z + rz * sx * size + this.scratchFwd.z * 1.2 * size,
       )
-      // Slight upward lob so they arc out and come down on targets.
-      const dir = new THREE.Vector3(this.scratchFwd.x, 0.12, this.scratchFwd.z)
-      this.missiles.fire(origin, dir, 80, 2.8)
+      this.grappleD.set(this.scratchFwd.x, 0.12, this.scratchFwd.z) // slight upward lob
+      this.missiles.fire(this.grappleO, this.grappleD, 80, 2.8)
     }
     this.hud.banner = 'MISSILES AWAY'
     this.bannerTimer = 0.8

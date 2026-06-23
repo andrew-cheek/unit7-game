@@ -221,6 +221,7 @@ export class Player {
     this.grappleBeam.visible = false
   }
   enterVehicle() {
+    this.endGrapple() // never carry a live grapple into a vehicle (would soft-lock on exit)
     this.mode = 'vehicle'
     this.planeTarget = 0
     this.morphT = 0
