@@ -88,14 +88,16 @@ export const config = {
     fuelMinToFly: 4,
   },
 
-  // Grapple arm: aim with the camera, fire, and get yanked toward the hit point
-  // on a building so you can quickly hop around the city (Spider-Man style).
+  // Grapple arm: hold to shoot a tendril that EXTENDS outward along your aim
+  // until it touches a surface, then reels you to it. Release anytime to let go
+  // and re-aim. (Spider-Man style hopping around the city.)
   grapple: {
-    range: 95, // max reach (m)
-    pull: 130, // acceleration toward the anchor (m/s^2)
-    maxSpeed: 52, // capped zip speed
+    range: 110, // max reach before a miss retracts (m)
+    extendSpeed: 150, // how fast the tendril shoots out (m/s)
+    pull: 140, // acceleration toward the anchor once attached (m/s^2)
+    maxSpeed: 56, // capped zip speed
     arriveDist: 4.5, // release automatically when this close to the anchor
-    maxTime: 2.5, // safety timeout (s)
+    maxTime: 5, // safety timeout (s)
   },
 
   // Summonable hover skateboard (C / mobile BOARD): the robot rides it visibly

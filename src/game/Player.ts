@@ -41,13 +41,20 @@ export class Player {
   private model: RobotModel
   private moveDir = new THREE.Vector3()
   private prevJet = false
-  // Grapple-arm state: a zip toward an anchor point on a building.
+  // Grapple-arm state: a tendril that extends along the aim until it hits a
+  // surface, then reels the player in.
   grappling = false
+  private grappleAttached = false
+  private grappleDir = new THREE.Vector3()
+  private grappleTip = new THREE.Vector3()
+  private grappleTipPrev = new THREE.Vector3()
   private grappleAnchor = new THREE.Vector3()
+  private grappleHand = new THREE.Vector3()
+  private grappleHit = new THREE.Vector3()
+  private grappleLen = 0
   private grappleT = 0
   private scene: THREE.Scene
   private grappleBeam!: THREE.Mesh
-  private gbFrom = new THREE.Vector3()
   private gbMid = new THREE.Vector3()
   private planeTarget = 0 // 0 robot, 1 plane
   private morphT = 0
@@ -206,18 +213,24 @@ export class Player {
     this.airTime = config.parachute.deployMinAir // allow an immediate re-deploy
     return true
   }
-  /** Begin a grapple zip toward a world-space anchor (robot mode only). */
-  startGrapple(anchor: THREE.Vector3) {
+  /** Fire the grapple along an aim direction: a tendril shoots out from here and
+   *  extends until it touches a surface, then reels you in. Re-firing re-aims. */
+  fireGrapple(dir: THREE.Vector3) {
     if (this.mode === 'vehicle') return
     this.mode = 'robot'
     this.planeTarget = 0
     this.grappling = true
+    this.grappleAttached = false
     this.grappleT = 0
-    this.grappleAnchor.copy(anchor)
+    this.grappleLen = 0
+    this.grappleDir.copy(dir).normalize()
+    this.grappleHand.set(this.object.position.x, this.object.position.y + 1.3, this.object.position.z)
+    this.grappleTip.copy(this.grappleHand)
   }
   /** Release the grapple, keeping momentum so you fling/hop off it. */
   endGrapple() {
     this.grappling = false
+    this.grappleAttached = false
     this.grappleBeam.visible = false
   }
   enterVehicle() {
@@ -250,7 +263,7 @@ export class Player {
     if (this.mode !== 'parachute') this.mode = this.planeTarget === 1 ? 'plane' : 'robot'
 
     const dancing = this.dancing && this.grounded && this.mode === 'robot'
-    if (this.grappling) this.updateGrapple(dt, input, gravity)
+    if (this.grappling) this.updateGrapple(dt, input, physics, gravity)
     else if (dancing) this.updateDance(dt, gravity)
     else if (this.mode === 'parachute') this.updateParachute(dt, input, gravity)
     else if (this.mode === 'plane') this.updatePlane(dt, input, gravity)
@@ -299,51 +312,77 @@ export class Player {
     this.updateCanopy(dt)
   }
 
-  /** Zip toward the grapple anchor; light camera-relative steering lets you aim
-   *  the arc. Releases on arrival (with a small upward pop to crest ledges) or a
-   *  timeout, keeping velocity so you fling off it. */
-  private updateGrapple(dt: number, input: Input, _gravity: number) {
+  /** Drive the grapple: extend the tendril along the aim until it hits a surface,
+   *  then reel toward the hit point. Releasing (handled by Game) ends it, keeping
+   *  momentum so you fling off and can re-aim/re-fire elsewhere. */
+  private updateGrapple(dt: number, input: Input, physics: Physics, gravity: number) {
     const g = config.grapple
     const pos = this.object.position
-    const dx = this.grappleAnchor.x - pos.x
-    const dy = this.grappleAnchor.y - pos.y
-    const dz = this.grappleAnchor.z - pos.z
-    const dist = Math.hypot(dx, dy, dz)
     this.grappleT += dt
-    if (dist < g.arriveDist || this.grappleT > g.maxTime) {
-      if (dist < g.arriveDist + 2 && this.velocity.y < 6) this.velocity.y = 6 // pop up to land on top
-      this.endGrapple()
-      return
+    if (this.grappleT > g.maxTime) { this.endGrapple(); return }
+    this.grappleHand.set(pos.x, pos.y + 1.3, pos.z)
+
+    if (!this.grappleAttached) {
+      // EXTEND: shoot the tendril out along the fired direction, checking each new
+      // segment for a building hit. You keep coasting (light fall) while it flies.
+      this.grappleTipPrev.copy(this.grappleTip)
+      this.grappleLen += g.extendSpeed * dt
+      this.grappleTip.copy(this.grappleHand).addScaledVector(this.grappleDir, this.grappleLen)
+      if (physics.raySegmentHit(this.grappleTipPrev, this.grappleTip, this.grappleHit)) {
+        this.grappleAttached = true
+        this.grappleAnchor.copy(this.grappleHit)
+      } else if (this.grappleLen >= g.range) {
+        this.endGrapple() // missed - retract
+        return
+      }
+      this.velocity.y += gravity * 0.45 * dt // light fall while it extends
+      const intent = this.camRelative(input, this.moveDir)
+      if (intent > 0.1) {
+        this.velocity.x += this.moveDir.x * 14 * intent * dt
+        this.velocity.z += this.moveDir.z * 14 * intent * dt
+      }
+      this.model.setFlyPose(0.7)
+      this.model.setThrust(0.3)
+    } else {
+      // REEL: pull toward the anchor; release on arrival (with a pop to crest the
+      // ledge). Light steering lets you shape the swing.
+      const dx = this.grappleAnchor.x - pos.x, dy = this.grappleAnchor.y - pos.y, dz = this.grappleAnchor.z - pos.z
+      const dist = Math.hypot(dx, dy, dz)
+      if (dist < g.arriveDist) {
+        if (this.velocity.y < 6) this.velocity.y = 6
+        this.endGrapple()
+        return
+      }
+      const inv = 1 / Math.max(dist, 1e-3)
+      this.velocity.x += dx * inv * g.pull * dt
+      this.velocity.y += dy * inv * g.pull * dt
+      this.velocity.z += dz * inv * g.pull * dt
+      const intent = this.camRelative(input, this.moveDir)
+      if (intent > 0.1) {
+        this.velocity.x += this.moveDir.x * 22 * intent * dt
+        this.velocity.z += this.moveDir.z * 22 * intent * dt
+      }
+      const sp = this.velocity.length()
+      if (sp > g.maxSpeed) this.velocity.multiplyScalar(g.maxSpeed / sp)
+      this.model.setFlyPose(0.85)
+      this.model.setThrust(0.4)
+      this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 8, dt)
+      this.object.rotation.set(0, this.yaw, 0)
     }
-    const inv = 1 / Math.max(dist, 1e-3)
-    this.velocity.x += dx * inv * g.pull * dt
-    this.velocity.y += dy * inv * g.pull * dt
-    this.velocity.z += dz * inv * g.pull * dt
-    // A little camera-relative steering to shape the swing.
-    const intent = this.camRelative(input, this.moveDir)
-    if (intent > 0.1) {
-      this.velocity.x += this.moveDir.x * 22 * intent * dt
-      this.velocity.z += this.moveDir.z * 22 * intent * dt
-    }
-    const sp = this.velocity.length()
-    if (sp > g.maxSpeed) this.velocity.multiplyScalar(g.maxSpeed / sp)
-    this.model.setFlyPose(0.85)
-    this.model.setThrust(0.4)
-    // Face the anchor.
-    this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 8, dt)
-    this.object.rotation.set(0, this.yaw, 0)
   }
 
-  /** Keep the grapple beam stretched from the hand to the anchor while zipping. */
+  /** Stretch the grapple beam from the hand to the live tip (extending) or the
+   *  anchor (attached), so the tendril is clearly visible shooting out + reeling. */
   private updateGrappleLine() {
     if (!this.grappling) { if (this.grappleBeam.visible) this.grappleBeam.visible = false; return }
     const p = this.object.position
-    this.gbFrom.set(p.x, p.y + 1.3, p.z)
-    const len = this.gbFrom.distanceTo(this.grappleAnchor)
-    this.gbMid.copy(this.gbFrom).lerp(this.grappleAnchor, 0.5)
+    this.grappleHand.set(p.x, p.y + 1.3, p.z)
+    const end = this.grappleAttached ? this.grappleAnchor : this.grappleTip
+    const len = this.grappleHand.distanceTo(end)
+    this.gbMid.copy(this.grappleHand).lerp(end, 0.5)
     this.grappleBeam.position.copy(this.gbMid)
     this.grappleBeam.scale.set(1, Math.max(0.1, len), 1)
-    this.grappleBeam.lookAt(this.grappleAnchor)
+    this.grappleBeam.lookAt(end)
     this.grappleBeam.rotateX(Math.PI / 2) // cylinder is along Y; aim it down the look axis
     this.grappleBeam.visible = true
   }

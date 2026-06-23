@@ -72,6 +72,31 @@ export class Physics {
   }
 
   /**
+   * Segment-vs-collider test for the grapple tendril: does the segment from→to
+   * cross any building AABB? Writes the nearest entry point to `out` and returns
+   * true. Slab method per box; cheap enough to run while the tendril extends.
+   */
+  raySegmentHit(from: THREE.Vector3, to: THREE.Vector3, out: THREE.Vector3): boolean {
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z
+    let best = Infinity
+    for (const box of this.colliders) {
+      let tmin = 0, tmax = 1
+      let ok = true
+      // x slab
+      if (Math.abs(dx) < 1e-9) { if (from.x < box.min.x || from.x > box.max.x) ok = false }
+      else { let t1 = (box.min.x - from.x) / dx, t2 = (box.max.x - from.x) / dx; if (t1 > t2) { const s = t1; t1 = t2; t2 = s } tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2) }
+      if (ok && Math.abs(dy) < 1e-9) { if (from.y < box.min.y || from.y > box.max.y) ok = false }
+      else if (ok) { let t1 = (box.min.y - from.y) / dy, t2 = (box.max.y - from.y) / dy; if (t1 > t2) { const s = t1; t1 = t2; t2 = s } tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2) }
+      if (ok && Math.abs(dz) < 1e-9) { if (from.z < box.min.z || from.z > box.max.z) ok = false }
+      else if (ok) { let t1 = (box.min.z - from.z) / dz, t2 = (box.max.z - from.z) / dz; if (t1 > t2) { const s = t1; t1 = t2; t2 = s } tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2) }
+      if (ok && tmin <= tmax && tmin < best) best = tmin
+    }
+    if (best === Infinity) return false
+    out.set(from.x + dx * best, from.y + dy * best, from.z + dz * best)
+    return true
+  }
+
+  /**
    * Push a capsule (feet at pos.y, of given radius/height) out of any AABB it
    * overlaps in XZ, and remove the velocity component driving it into the wall.
    */

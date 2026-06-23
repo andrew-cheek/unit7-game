@@ -129,8 +129,8 @@ export class Game {
   private credits = 0
   private unlocked = new Set<string>()
   private scratchFwd = new THREE.Vector3()
-  // Grapple-arm aim raycast (camera-forward against the city shells).
-  private grappleRay = new THREE.Raycaster()
+  // Grapple-arm: previous held state (for the fire edge) + reusable scratch
+  // vectors (also borrowed by fireMissiles; they never run in the same frame).
   private grapplePrev = false
   private grappleO = new THREE.Vector3()
   private grappleD = new THREE.Vector3()
@@ -958,38 +958,20 @@ export class Game {
     }
   }
 
-  /** Grapple arm: hold to fire toward where you're aiming and zip in; release to
-   *  let go (keeping momentum so you can hop building to building). */
+  /** Grapple arm: a press fires a tendril along your current aim (camera
+   *  forward); it extends until it hits a building, then reels you in. Pressing
+   *  again re-aims/re-fires; releasing lets go (Player keeps your momentum). */
   private updateGrapple() {
     const held = this.input.held.grapple
-    if (held && !this.grapplePrev && !this.player.grappling) {
-      const anchor = this.raycastGrapple()
-      if (anchor) {
-        this.player.startGrapple(anchor)
-        this.audio.play('ui')
-        trackEvent('ability_used', { ability: 'grapple' })
-      }
+    if (held && !this.grapplePrev) {
+      this.engine.camera.getWorldDirection(this.grappleD) // aim = where you're looking
+      this.player.fireGrapple(this.grappleD)
+      this.audio.play('ui')
+      trackEvent('ability_used', { ability: 'grapple' })
     } else if (!held && this.player.grappling) {
       this.player.endGrapple()
     }
     this.grapplePrev = held
-  }
-
-  /** Cast from the camera along the aim direction; return the nearest building
-   *  hit beyond arm's reach, or null. */
-  private raycastGrapple(): THREE.Vector3 | null {
-    const cam = this.engine.camera
-    cam.getWorldPosition(this.grappleO)
-    cam.getWorldDirection(this.grappleD)
-    this.grappleRay.set(this.grappleO, this.grappleD)
-    this.grappleRay.far = config.grapple.range
-    const meshes = this.zone === 'earth' ? this.world.solidMeshes : this.zones.env(this.zone)?.solidMeshes ?? this.world.solidMeshes
-    const hits = this.grappleRay.intersectObjects(meshes, false)
-    for (const h of hits) {
-      if (h.distance < 3) continue // skip a hit right on top of you
-      return h.point.clone()
-    }
-    return null
   }
 
   private fireNet() {
