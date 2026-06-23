@@ -3,7 +3,6 @@ import { config } from './config'
 import { createAlien, createBus, createCitizen, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { dampAngle, randRange } from './utils'
 import { OFFICE_ANCHORS } from './World'
-import { WaterBalloons } from './WaterBalloons'
 import type { Physics } from './Physics'
 import type { Capturable } from './Game'
 import type { PowerupKind } from './types'
@@ -111,12 +110,9 @@ export class Events {
   private ownedMats: THREE.Material[] = []
 
   // Sunrise alien invasion.
-  private balloons: WaterBalloons
   private invasionActive = false
   private dropships: Dropship[] = []
   private playerPos = new THREE.Vector3()
-  /** Fired when a water balloon bursts on the player. Game shows a banner. */
-  onSoak: (() => void) | null = null
 
   private shipModel: VehicleModel
   private ship = {
@@ -133,7 +129,6 @@ export class Events {
     this.capturables = capturables
     this.onPowerup = onPowerup
     scene.add(this.root)
-    this.balloons = new WaterBalloons(scene)
 
     const q = config.tier.densityScale
     for (let i = 0; i < config.events.powerupCount; i++) this.spawnPowerup(POWERUP_KINDS[i % 4])
@@ -150,7 +145,6 @@ export class Events {
 
   setVisible(v: boolean) {
     this.root.visible = v
-    this.balloons.setVisible(v)
   }
 
   // --- spawn helpers -------------------------------------------------------
@@ -314,12 +308,6 @@ export class Events {
     this.updateShip(dt)
     this.updateInvasion(dt)
     this.updateAliens(dt)
-    // Step + resolve water balloons; soak the player on a near hit.
-    this.balloons.update(
-      dt,
-      (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0,
-      (pos) => { if (Math.hypot(pos.x - this.playerPos.x, pos.z - this.playerPos.z) < 3.5) this.onSoak?.() },
-    )
   }
 
   /**
@@ -650,9 +638,8 @@ export class Events {
         this.aliens.splice(i, 1)
         continue
       }
-      // Invaders keep a wide stand-off and only lob a balloon occasionally - the
-      // splash gag is now a rare side beat, not constant spam. Hard caps: never
-      // within ~22m, long random cooldown, and at most 2 balloons in the air.
+      // Invaders keep a wide stand-off and circle the player (menacing presence;
+      // the water-balloon lob was removed).
       if (a.invader && !a.boarding) {
         const pdx = this.playerPos.x - a.pos.x
         const pdz = this.playerPos.z - a.pos.z
@@ -663,13 +650,6 @@ export class Events {
           0,
           this.playerPos.z - (pd > 0.01 ? pdz / pd : 0) * standoff,
         )
-        a.throwTimer -= dt
-        if (a.throwTimer <= 0 && pd > 22 && pd < 60 && this.balloons.count < 2) {
-          a.throwTimer = randRange(12, 24)
-          const origin = new THREE.Vector3(a.pos.x, a.pos.y + 1.6, a.pos.z)
-          const target = new THREE.Vector3(this.playerPos.x, this.playerPos.y + 0.5, this.playerPos.z)
-          this.balloons.throw(origin, target, 1.4)
-        }
       }
       const tx = a.target.x - a.pos.x
       const tz = a.target.z - a.pos.z
@@ -723,7 +703,6 @@ export class Events {
     for (const c of this.commuters) c.model.dispose()
     for (const a of this.aliens) a.model.dispose()
     for (const s of this.dropships) s.model.dispose()
-    this.balloons.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }
 }

@@ -85,6 +85,7 @@ export class DropIn {
 
   private ai: { g: THREE.Group; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number }[] = []
   private chute!: THREE.Mesh
+  private chuteRig!: THREE.Group // canopy + suspension cords, scaled together
   private streaks!: THREE.Points
   private streakVel!: Float32Array
   private mats: THREE.Material[] = []
@@ -123,11 +124,31 @@ export class DropIn {
     this.group.add(this.diver)
 
     const chuteMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 1.4, roughness: 0.5, side: THREE.DoubleSide, transparent: true, opacity: 0.82 }))
+    // Canopy + suspension cords live in one rig that scales as a unit, so the
+    // whole parachute inflates together and the cords stay attached to the body.
+    this.chuteRig = new THREE.Group()
+    this.chuteRig.scale.setScalar(0.1)
+    this.chuteRig.visible = false
     this.chute = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.9, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2.2)), chuteMat)
     this.chute.position.y = 6.5
-    this.chute.scale.setScalar(0.1)
-    this.chute.visible = false
-    this.diver.add(this.chute)
+    this.chuteRig.add(this.chute)
+    // Suspension cords fanning from the diver's shoulders up to the canopy rim.
+    const cordMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.55, fog: false }))
+    const cordGeo = this.ownG(new THREE.CylinderGeometry(0.04, 0.04, 1, 5))
+    const up = new THREE.Vector3(0, 1, 0)
+    const d = new THREE.Vector3()
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2
+      const rx = Math.cos(a) * 2.5, rz = Math.sin(a) * 2.5, ry = 5.1 // canopy rim
+      const bx = Math.cos(a) * 0.4, bz = Math.sin(a) * 0.4, by = 2.3 // shoulders
+      const cord = new THREE.Mesh(cordGeo, cordMat)
+      cord.position.set((rx + bx) / 2, (ry + by) / 2, (rz + bz) / 2)
+      const len = Math.hypot(rx - bx, ry - by, rz - bz)
+      cord.scale.y = len
+      cord.quaternion.setFromUnitVectors(up, d.set(rx - bx, ry - by, rz - bz).normalize())
+      this.chuteRig.add(cord)
+    }
+    this.diver.add(this.chuteRig)
 
     // Destination beacon: a tall fog-immune pillar of light over where to land,
     // plus a ground ring, so the goal is unmistakable from altitude.
@@ -208,11 +229,12 @@ export class DropIn {
 
   private cutCanopy() {
     this.phase = 'dive'
-    this.chute.visible = false
-    this.chute.scale.setScalar(0.1)
+    this.chuteRig.visible = false
+    this.chuteRig.scale.setScalar(0.1)
     this.rb.setFlyPose(1)
     this.hud.result = null
     this.wantCut = false
+    this.pendingDeploy = false // clear any stale arm so we don't instantly re-pop
   }
 
   skip() {
@@ -283,11 +305,12 @@ export class DropIn {
       this.checkOrbs()
 
       if (this.pendingDeploy) {
+        this.pendingDeploy = false // consume the arm so a later CUT isn't re-popped
         this.quality = clamp((alt - 40) / (DEPLOY_REF_ALT - 40), 0.3, 1)
         this.chuteQuality = this.quality
         this.hud.result = this.quality >= 0.78 ? 'CLEAN CANOPY' : this.quality >= 0.5 ? 'CANOPY OPEN' : 'HARD OPEN'
         this.phase = 'canopy'
-        this.chute.visible = true
+        this.chuteRig.visible = true
         this.rb.setFlyPose(0.2)
         this.onSfx?.('deploy')
         this.vy *= 0.5
@@ -298,7 +321,7 @@ export class DropIn {
     } else if (this.phase === 'canopy') {
       const want = -THREE.MathUtils.lerp(16, 9, this.quality)
       this.vy += (want - this.vy) * Math.min(1, dt * 2.5)
-      this.chute.scale.setScalar(THREE.MathUtils.damp(this.chute.scale.x, 1, 6, dt))
+      this.chuteRig.scale.setScalar(THREE.MathUtils.damp(this.chuteRig.scale.x, 1, 6, dt))
       this.pitch += (0 - this.pitch) * Math.min(1, dt * 3)
       if (alt <= 1.5) { this.phase = 'land'; this.landingPos.set(this.pos.x, ground, this.pos.z) }
     } else {

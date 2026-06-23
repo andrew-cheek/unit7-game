@@ -317,37 +317,45 @@ function ChallengePopup({ name, onAccept, onDecline }: { name: string; onAccept:
   )
 }
 
+/**
+ * Non-blocking welcome panel docked on the LEFT — the game keeps running behind
+ * it (no backdrop), so you can already roam. Start with the two choices; picking
+ * Multiplayer reveals the callsign entry.
+ */
 function JoinWorld({ onJoin, onSolo }: { onJoin: (name: string) => void; onSolo: () => void }) {
+  const [mode, setMode] = useState<'choice' | 'name'>('choice')
   const [name, setName] = useState(() => loadCallsign())
   const submit = () => {
     const n = name.trim()
     if (n) onJoin(n)
   }
   return (
-    <div style={joinBackdrop}>
-      <div style={joinCard}>
-        <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff', font: '800 26px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.16em' }}>
-          UNIT 7
-        </div>
-        <div style={{ fontSize: 12, letterSpacing: '0.28em', color: 'rgba(223,238,255,0.6)', margin: '10px 0 22px' }}>ENTER THE SHARED WORLD</div>
-        <input
-          autoFocus
-          value={name}
-          maxLength={16}
-          placeholder="CALLSIGN"
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
-          }}
-          style={joinInput}
-        />
-        <button style={joinBtn} onClick={submit} disabled={!name.trim()}>
-          JOIN WORLD ▸
-        </button>
-        <button style={joinSolo} onClick={onSolo}>
-          play solo
-        </button>
+    <div style={welcomePanel}>
+      <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff', font: '800 22px/1.1 ui-monospace, Menlo, monospace', letterSpacing: '0.06em' }}>
+        Welcome, Unit 7.
       </div>
+      {mode === 'choice' ? (
+        <>
+          <div style={welcomeSub}>Choose how to play.</div>
+          <button style={welcomeBtnPrimary} onClick={onSolo}>ROAM &amp; PLAY SOLO ▸</button>
+          <button style={welcomeBtnGhost} onClick={() => setMode('name')}>MULTIPLAYER ▸</button>
+        </>
+      ) : (
+        <>
+          <div style={welcomeSub}>Pick a callsign other pilots will see.</div>
+          <input
+            autoFocus
+            value={name}
+            maxLength={16}
+            placeholder="CALLSIGN"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            style={welcomeInput}
+          />
+          <button style={welcomeBtnPrimary} onClick={submit} disabled={!name.trim()}>JOIN WORLD ▸</button>
+          <button style={welcomeBtnGhost} onClick={() => setMode('choice')}>◂ BACK</button>
+        </>
+      )}
     </div>
   )
 }
@@ -544,59 +552,60 @@ const skipBtn: CSSProperties = {
   border: '1px solid rgba(39,231,255,0.5)',
   borderRadius: 999,
 }
-const joinBackdrop: CSSProperties = {
+const welcomePanel: CSSProperties = {
   position: 'absolute',
-  inset: 0,
-  zIndex: 30,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: 'rgba(4,6,12,0.72)',
-  backdropFilter: 'blur(4px)',
-}
-const joinCard: CSSProperties = {
+  left: 16,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  zIndex: 20,
   display: 'flex',
   flexDirection: 'column',
-  alignItems: 'center',
-  padding: '34px 40px',
-  borderRadius: 16,
-  background: 'rgba(8,12,24,0.92)',
+  alignItems: 'stretch',
+  gap: 10,
+  width: 244,
+  padding: '20px 20px 22px',
+  borderRadius: 14,
+  background: 'rgba(8,12,24,0.82)',
   border: '1px solid rgba(39,231,255,0.4)',
-  boxShadow: '0 0 40px rgba(39,231,255,0.18)',
+  boxShadow: '0 0 30px rgba(39,231,255,0.16)',
+  pointerEvents: 'auto', // the panel captures clicks; the rest of the screen plays
 }
-const joinInput: CSSProperties = {
-  width: 220,
-  padding: '12px 16px',
-  textAlign: 'center',
-  font: '700 18px/1 ui-monospace, Menlo, monospace',
+const welcomeSub: CSSProperties = {
+  fontSize: 11,
   letterSpacing: '0.18em',
+  color: 'rgba(223,238,255,0.6)',
+  margin: '2px 0 6px',
+}
+const welcomeInput: CSSProperties = {
+  padding: '11px 14px',
+  textAlign: 'center',
+  font: '700 16px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
   color: '#dff0ff',
   background: 'rgba(5,8,16,0.9)',
   border: '1px solid rgba(39,231,255,0.5)',
   borderRadius: 10,
   outline: 'none',
 }
-const joinBtn: CSSProperties = {
-  marginTop: 16,
-  width: 252,
+const welcomeBtnPrimary: CSSProperties = {
   padding: '12px 0',
   cursor: 'pointer',
-  font: '800 14px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.2em',
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
   color: '#04121a',
   background: 'linear-gradient(180deg,#5cf0ff,#27e7ff)',
   border: 'none',
   borderRadius: 10,
 }
-const joinSolo: CSSProperties = {
-  marginTop: 12,
+const welcomeBtnGhost: CSSProperties = {
+  padding: '11px 0',
   cursor: 'pointer',
-  font: '600 12px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.12em',
-  color: 'rgba(223,238,255,0.55)',
-  background: 'transparent',
-  border: 'none',
-  textDecoration: 'underline',
+  font: '700 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: '#9fe8ff',
+  background: 'rgba(39,231,255,0.08)',
+  border: '1px solid rgba(39,231,255,0.4)',
+  borderRadius: 10,
 }
 const onlinePill: CSSProperties = {
   position: 'absolute',

@@ -210,7 +210,13 @@ export class World {
   // Atmosphere + set dressing.
   private rain?: THREE.Points
   private rainGeo?: THREE.BufferGeometry
+  private rainMat?: THREE.PointsMaterial
   private rainCount = 0
+  // Intermittent weather: it is NOT raining most of the time. weatherT counts
+  // down to the next state flip; rainWet eases the fade in/out.
+  private weatherT = 45 // start with a clear spell
+  private raining = false
+  private rainWet = 0
   private embers?: THREE.Points
   private emberGeo?: THREE.BufferGeometry
   private shafts: THREE.Mesh[] = []
@@ -1628,9 +1634,11 @@ export class World {
     this.rainGeo = new THREE.BufferGeometry()
     this.rainGeo.setAttribute('position', new THREE.BufferAttribute(rp, 3))
     this.ownedGeos.push(this.rainGeo)
-    const rainMat = this.own(new THREE.PointsMaterial({ color: 0x8fd8ff, size: 0.5, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending }))
+    const rainMat = this.own(new THREE.PointsMaterial({ color: 0x8fd8ff, size: 0.5, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }))
+    this.rainMat = rainMat
     this.rain = new THREE.Points(this.rainGeo, rainMat)
     this.rain.frustumCulled = false
+    this.rain.visible = false // starts clear; the weather cycle fades it in
     this.group.add(this.rain)
 
     // Embers drifting upward near the streets.
@@ -1856,15 +1864,27 @@ export class World {
     // guard the CPU loop + full-array GPU re-upload to Earth-with-city-visible —
     // off-world it was pure waste re-uploading geometry that is never drawn.
     const cityActive = this.zone === 'earth' && this.group.visible
-    if (cityActive && this.rain && this.rainGeo) {
-      this.rain.position.set(focus.x, 0, focus.z)
-      const a = this.rainGeo.attributes.position as THREE.BufferAttribute
-      const arr = a.array as Float32Array
-      for (let i = 1; i < arr.length; i += 3) {
-        arr[i] -= 55 * dt
-        if (arr[i] < 0) arr[i] += 80
+    if (cityActive && this.rain && this.rainGeo && this.rainMat) {
+      // Weather cycle: long clear spells, occasional shorter showers. Fade the
+      // rain in/out and skip the geometry re-upload entirely when it's dry.
+      this.weatherT -= dt
+      if (this.weatherT <= 0) {
+        this.raining = !this.raining
+        this.weatherT = this.raining ? 22 + Math.random() * 26 : 90 + Math.random() * 120
       }
-      a.needsUpdate = true
+      this.rainWet = THREE.MathUtils.damp(this.rainWet, this.raining ? 1 : 0, 0.5, dt)
+      this.rainMat.opacity = 0.45 * this.rainWet
+      this.rain.visible = this.rainWet > 0.02
+      if (this.rain.visible) {
+        this.rain.position.set(focus.x, 0, focus.z)
+        const a = this.rainGeo.attributes.position as THREE.BufferAttribute
+        const arr = a.array as Float32Array
+        for (let i = 1; i < arr.length; i += 3) {
+          arr[i] -= 55 * dt
+          if (arr[i] < 0) arr[i] += 80
+        }
+        a.needsUpdate = true
+      }
     }
     if (cityActive && this.embers && this.emberGeo) {
       this.embers.position.set(focus.x, 0, focus.z)
