@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { clamp } from './utils'
-import { createRobot, type RobotModel } from './procedural'
+import { createRobot, createRocket, createSpaceship, type RobotModel, type VehicleModel } from './procedural'
 import type { Input } from './Input'
 
 /** Live readout for the drop HUD: altimeter, speed, phase + contextual hint. */
@@ -43,6 +43,10 @@ export class DropIn {
   bonusTargets = 0
   /** True if you hit the ground without a chute (crash + repair). */
   crashed = false
+  /** Set when you fly through one of the floating destination portals on the way
+   *  down; Game routes the handoff (zone travel for mars/moon, spawn for the
+   *  others). Null = a normal touchdown in the city. */
+  chosenDest: 'arcade' | 'mars' | 'moon' | 'city' | null = null
   /** Where you ended up - the handoff places the player here. */
   readonly landingPos = new THREE.Vector3()
   hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, result: null }
@@ -84,6 +88,11 @@ export class DropIn {
   private impact = new THREE.Vector3()
 
   private ai: { g: THREE.Group; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number }[] = []
+  // Decorative air traffic (rockets + shuttles) cruising the sky as you fall.
+  private traffic: { v: VehicleModel; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number; spin: number }[] = []
+  // Floating destination portals you can steer into mid-dive.
+  private platforms: { group: THREE.Group; ring: THREE.Mesh; x: number; y: number; z: number; dest: 'arcade' | 'mars' | 'moon' | 'city' }[] = []
+  private finishing = false
   private chute!: THREE.Mesh
   private chuteRig!: THREE.Group // canopy + suspension cords, scaled together
   private streaks!: THREE.Points
@@ -217,6 +226,83 @@ export class DropIn {
     this.streaks = new THREE.Points(fg, this.own(new THREE.PointsMaterial({ color: 0xdff1ff, size: 0.1, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })))
     this.streaks.frustumCulled = false
     this.group.add(this.streaks)
+
+    this.buildTraffic()
+    this.buildPlatforms()
+  }
+
+  /** Rockets + shuttles cruising the sky around the drop, so the air feels busy
+   *  on the way down. Each circles a slow loop and climbs/falls gently. */
+  private buildTraffic() {
+    const specs: Array<['rocket' | 'ship', number]> = [['rocket', 1.4], ['rocket', 2.0], ['ship', 1.0], ['ship', 1.0]]
+    for (let i = 0; i < specs.length; i++) {
+      const [kind, scale] = specs[i]
+      const v = kind === 'rocket'
+        ? createRocket({ scale, flaps: true, hull: 0xd8dee8, accent: i % 2 ? 0xff4d6d : 0x27e7ff })
+        : createSpaceship()
+      const cx = this.start.x + (Math.random() - 0.5) * 320
+      const cz = this.start.z * 0.4 + (Math.random() - 0.5) * 320
+      const y = this.target.y + 120 + Math.random() * 460
+      v.group.position.set(cx, y, cz)
+      if (kind === 'ship') v.group.scale.setScalar(1.6)
+      this.group.add(v.group)
+      this.traffic.push({ v, cx, cz, r: 40 + Math.random() * 80, ang: Math.random() * 6.28, spd: 0.12 + Math.random() * 0.22, y, vy: (Math.random() - 0.5) * 6, spin: kind === 'rocket' ? 0 : 0.4 })
+    }
+  }
+
+  /** Four floating ringed platforms spread across the descent. Steer through one
+   *  to pick where you come down: the open city, the arcade, Mars, or the Moon. */
+  private buildPlatforms() {
+    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number]> = [
+      // dest, x offset, z offset, accent colour
+      ['city', -78, -30, 0x27e7ff],
+      ['arcade', 78, -30, 0xff2bd0],
+      ['mars', -78, 46, 0xff8a1e],
+      ['moon', 78, 46, 0xbfe6ff],
+    ]
+    const labels: Record<string, string> = { city: 'CITY', arcade: 'ARCADE', mars: 'MARS', moon: 'MOON' }
+    for (const [dest, ox, oz, col] of defs) {
+      const x = this.target.x + ox
+      const z = this.target.z + oz
+      const y = this.getGround(x, z) + 150
+      const group = new THREE.Group()
+      group.position.set(x, y, z)
+      // Landing disk.
+      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(7, 7.6, 0.6, 28)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.2, roughness: 0.5, metalness: 0.4 })))
+      group.add(disk)
+      // Upright portal ring you fly through.
+      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(5, 0.55, 12, 32)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      ring.position.y = 5.5
+      group.add(ring)
+      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(4.6, 28)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      disc.position.y = 5.5
+      group.add(disc)
+      // Floating label.
+      const sprite = this.labelSprite(labels[dest], col)
+      sprite.position.set(0, 11.5, 0)
+      group.add(sprite)
+      this.group.add(group)
+      this.platforms.push({ group, ring, x, y, z, dest })
+    }
+  }
+
+  /** A neon text billboard sprite for the platform labels. */
+  private labelSprite(text: string, color: number): THREE.Sprite {
+    const cv = document.createElement('canvas')
+    cv.width = 256; cv.height = 96
+    const ctx = cv.getContext('2d')!
+    ctx.font = '800 56px ui-monospace, Menlo, monospace'
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.shadowColor = '#' + color.toString(16).padStart(6, '0')
+    ctx.shadowBlur = 18
+    ctx.fillStyle = '#eaf6ff'
+    ctx.fillText(text, 128, 48)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
+    sprite.scale.set(9, 3.4, 1)
+    this.mats.push(sprite.material)
+    return sprite
   }
 
   /** Called by the DEPLOY button / a screen tap. Only arms once low enough. */
@@ -258,6 +344,14 @@ export class DropIn {
       return
     }
     if (this.phase === 'crash') { this.updateCrash(dt); return }
+    // Flew through a destination portal: fade out and hand off (Game routes it).
+    if (this.finishing) {
+      this.updateTraffic(dt)
+      this.fade = clamp(this.fade + dt * 2, 0, 1)
+      this.placeCamera(false)
+      if (this.fade >= 1) this.done = true
+      return
+    }
 
     const ground = this.getGround(this.pos.x, this.pos.z)
     const alt = this.pos.y - ground
@@ -343,6 +437,8 @@ export class DropIn {
     this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
     this.updateAi(dt)
+    this.updateTraffic(dt)
+    if (this.phase === 'dive' || this.phase === 'canopy') this.checkPlatforms()
     this.updateStreaks(dt, diving)
     this.placeCamera(false)
 
@@ -495,6 +591,35 @@ export class DropIn {
     }
   }
 
+  /** Drift the sky traffic on slow loops and spin the platform portal rings. */
+  private updateTraffic(dt: number) {
+    for (const t of this.traffic) {
+      t.ang += t.spd * dt
+      t.y += t.vy * dt
+      if (t.y < this.target.y + 90 || t.y > this.target.y + 620) t.vy = -t.vy
+      t.v.group.position.set(t.cx + Math.cos(t.ang) * t.r, t.y, t.cz + Math.sin(t.ang) * t.r)
+      t.v.group.rotation.y = -t.ang + Math.PI / 2
+      t.v.update(dt, 0.4)
+    }
+    for (const p of this.platforms) p.ring.rotation.z += dt * 0.8
+  }
+
+  /** Steered into a destination portal? Lock the destination + start the handoff. */
+  private checkPlatforms() {
+    for (const p of this.platforms) {
+      if (Math.abs(this.pos.y - p.y) > 12) continue
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 8) {
+        this.chosenDest = p.dest
+        this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
+        this.finishing = true
+        this.hud.result = 'PORTAL · ' + p.dest.toUpperCase()
+        this.hud.hint = 'LOCKED IN'
+        this.onSfx?.('deploy')
+        return
+      }
+    }
+  }
+
   private updateStreaks(dt: number, fast: boolean) {
     const m = this.streaks.material as THREE.PointsMaterial
     m.opacity = THREE.MathUtils.damp(m.opacity, fast ? 0.85 : 0.3, 5, dt)
@@ -541,6 +666,7 @@ export class DropIn {
     this.scene.remove(this.group)
     this.rb.dispose()
     this.helper?.dispose()
+    for (const t of this.traffic) t.v.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
   }
