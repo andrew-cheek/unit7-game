@@ -491,6 +491,8 @@ export class Game {
       this.beginDropIn()
     } else {
       this.startMorning()
+      // No drop-in to hand off the board, so start on it here too.
+      this.player.setBoard(true)
       // Without multiplayer there's no join/solo prompt, so control begins now.
       if (!this.multiplayerEnabled) this.emitGameStart('solo')
     }
@@ -558,6 +560,9 @@ export class Game {
     // Hand off standing exactly where you came down - no relocation.
     this.player.exitVehicle(land)
     this.player.setVisible(true)
+    // Start riding the hover skateboard. The BOARD button (C / mobile) stows it,
+    // and the parachute still works while boarding (boarding resumes on landing).
+    this.player.setBoard(true)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
     const fog = this.engine.scene.fog
