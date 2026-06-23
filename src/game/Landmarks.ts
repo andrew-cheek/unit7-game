@@ -237,10 +237,42 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     entryGlowL.position.set(CX - ENTRANCE / 2, gy + 3, frontZ - 0.2); scene.add(entryGlowL)
     const entryGlowR = entryGlowL.clone(); entryGlowR.position.x = CX + ENTRANCE / 2; scene.add(entryGlowR)
 
-    const marqueeTex = makeLabelTexture('ARCADE', config.palette.cyan); texs.push(marqueeTex)
+    // Big "ENTER ARCADE" marquee over the entrance.
+    const marqueeTex = makeLabelTexture('ENTER ARCADE', config.palette.cyan); texs.push(marqueeTex)
     const marquee = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: marqueeTex, transparent: true, depthWrite: false })))
-    marquee.position.set(CX, gy + H + 3, frontZ - 0.5)
-    marquee.scale.set(20, 5, 1); scene.add(marquee)
+    marquee.position.set(CX, gy + H + 4, frontZ - 0.5)
+    marquee.scale.set(30, 7.5, 1); scene.add(marquee)
+
+    // A VERY TALL neon tower above the hall so the arcade reads as a distinct
+    // landmark from across the city (not just another dark district tower).
+    const TOWER_H = 84
+    const towerTopY = gy + H + TOWER_H
+    const towerMat = own(new THREE.MeshStandardMaterial({ color: 0x0a0c16, emissive: config.palette.magenta, emissiveIntensity: 1.7, metalness: 0.5, roughness: 0.4 }))
+    const tower = new THREE.Mesh(ownG(new THREE.BoxGeometry(W * 0.62, TOWER_H, 7)), towerMat)
+    tower.position.set(CX, gy + H + TOWER_H / 2, backZ - 1.5)
+    tower.castShadow = true
+    scene.add(tower); solids.push(tower)
+    physics.colliders.push(new THREE.Box3(
+      new THREE.Vector3(CX - W * 0.31, gy, backZ - 5),
+      new THREE.Vector3(CX + W * 0.31, towerTopY, backZ + 2),
+    ))
+    // Alternating cyan/magenta neon bands up the tower face (toward spawn).
+    for (let k = 0; k < 7; k++) {
+      const band = new THREE.Mesh(ownG(new THREE.BoxGeometry(W * 0.64, 0.7, 0.5)), k % 2 ? trimMat : trimMagenta)
+      band.position.set(CX, gy + H + 8 + k * 11, backZ - 5.1)
+      scene.add(band)
+    }
+    // Crowning hero sign high up, readable from afar (camera-facing sprite).
+    const topTex = makeLabelTexture('ARCADE', config.palette.magenta); texs.push(topTex)
+    const topSign = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: topTex, transparent: true, depthWrite: false })))
+    topSign.position.set(CX, towerTopY - 12, backZ - 5.5)
+    topSign.scale.set(30, 15, 1); scene.add(topSign)
+    // A glowing roof ring on top of the tower as a beacon cap.
+    const capMat = own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+    const cap = new THREE.Mesh(ownG(new THREE.TorusGeometry(W * 0.34, 0.6, 8, 28)), capMat)
+    cap.rotation.x = Math.PI / 2
+    cap.position.set(CX, towerTopY + 0.5, backZ - 1.5)
+    scene.add(cap)
 
     // ---- doors: 4 on each side wall, facing inward ----
     const perSide = 4

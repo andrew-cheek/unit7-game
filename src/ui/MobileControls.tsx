@@ -22,6 +22,8 @@ const CAPTURE: BtnDef = { label: 'CAPTURE', action: 'net', type: 'tap', color: '
 const ENTER: BtnDef = { label: 'ENTER', action: 'enter', type: 'tap', color: '#27e7ff' }
 const EXIT: BtnDef = { label: 'EXIT', action: 'enter', type: 'tap', color: '#ff2bd0' }
 const CHUTE: BtnDef = { label: 'CHUTE', action: 'chute', type: 'tap', color: '#ff2bd0' }
+const CUT: BtnDef = { label: 'CUT', action: 'chute', type: 'tap', color: '#ff8a1e' }
+const GRAPPLE: BtnDef = { label: 'GRAPPLE', action: 'grapple', type: 'hold', color: '#27e7ff' }
 const FIRE: BtnDef = { label: 'FIRE', action: 'net', type: 'tap', color: '#ff8a1e' }
 const BOARD: BtnDef = { label: 'BOARD', action: 'board', type: 'tap', color: '#27e7ff' }
 const WARP: BtnDef = { label: 'WARP', action: 'warp', type: 'tap', color: '#b46bff' }
@@ -71,8 +73,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     if (nearVehicle) secondary.unshift(ENTER)
     if (hud.warp.ready || hud.warp.active) secondary.unshift(WARP)
     if (hud.canCapture) secondary.push(CAPTURE)
-    if (airborne) secondary.push(CHUTE)
+    if (airborne) secondary.push(hud.mode === 'parachute' ? CUT : CHUTE)
     else secondary.push(MORPH, BOARD)
+    secondary.push(GRAPPLE) // hold to fire the grapple arm and zip around
   }
 
   const helper = inMech

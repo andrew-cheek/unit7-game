@@ -41,6 +41,12 @@ export class Player {
   private model: RobotModel
   private moveDir = new THREE.Vector3()
   private prevJet = false
+  // Grapple-arm state: a zip toward an anchor point on a building.
+  grappling = false
+  private grappleAnchor = new THREE.Vector3()
+  private grappleT = 0
+  private scene: THREE.Scene
+  private grappleLine!: THREE.Line
   private planeTarget = 0 // 0 robot, 1 plane
   private morphT = 0
   private chuteT = 0
@@ -49,9 +55,18 @@ export class Player {
   private canopyMat: THREE.MeshStandardMaterial
 
   constructor(scene: THREE.Scene) {
+    this.scene = scene
     this.object.rotation.order = 'YXZ' // yaw, then pitch/roll for plane banking
     this.model = createRobot()
     this.object.add(this.model.group)
+
+    // Grapple cable: a 2-point line drawn in world space from hand to anchor.
+    const glGeo = new THREE.BufferGeometry()
+    glGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3))
+    this.grappleLine = new THREE.Line(glGeo, new THREE.LineBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.9 }))
+    this.grappleLine.frustumCulled = false
+    this.grappleLine.visible = false
+    scene.add(this.grappleLine)
 
     this.canopyMat = new THREE.MeshStandardMaterial({
       color: 0xff5db0,
@@ -130,6 +145,11 @@ export class Player {
     this.grounded = false
     this.airTime = 0
   }
+  /** Sustained lift from an updraft column (adds to rise, capped). */
+  rideUpdraft(dv: number) {
+    this.velocity.y = Math.min(this.velocity.y + dv, config.jetpack.maxAscend + 5)
+    if (this.grounded && this.velocity.y > 0) { this.grounded = false; this.airTime = 0 }
+  }
   setDancing(v: boolean) {
     this.dancing = v
   }
@@ -168,6 +188,28 @@ export class Player {
     if (this.velocity.y < 0) this.velocity.y *= 0.3
     return true
   }
+  /** Cut the canopy: drop straight back into free-fall (jetpack + re-deploy available). */
+  cutChute(): boolean {
+    if (this.mode !== 'parachute') return false
+    this.mode = 'robot'
+    this.planeTarget = 0
+    this.airTime = config.parachute.deployMinAir // allow an immediate re-deploy
+    return true
+  }
+  /** Begin a grapple zip toward a world-space anchor (robot mode only). */
+  startGrapple(anchor: THREE.Vector3) {
+    if (this.mode === 'vehicle') return
+    this.mode = 'robot'
+    this.planeTarget = 0
+    this.grappling = true
+    this.grappleT = 0
+    this.grappleAnchor.copy(anchor)
+  }
+  /** Release the grapple, keeping momentum so you fling/hop off it. */
+  endGrapple() {
+    this.grappling = false
+    this.grappleLine.visible = false
+  }
   enterVehicle() {
     this.mode = 'vehicle'
     this.planeTarget = 0
@@ -197,12 +239,14 @@ export class Player {
     if (this.mode !== 'parachute') this.mode = this.planeTarget === 1 ? 'plane' : 'robot'
 
     const dancing = this.dancing && this.grounded && this.mode === 'robot'
-    if (dancing) this.updateDance(dt, gravity)
+    if (this.grappling) this.updateGrapple(dt, input, gravity)
+    else if (dancing) this.updateDance(dt, gravity)
     else if (this.mode === 'parachute') this.updateParachute(dt, input, gravity)
     else if (this.mode === 'plane') this.updatePlane(dt, input, gravity)
     else this.updateRobot(dt, input, gravity)
 
     this.integrateAndCollide(dt, physics)
+    this.updateGrappleLine()
 
     // Face + animate.
     const moving = this.moveDir.lengthSq() > 1e-4
@@ -242,6 +286,52 @@ export class Player {
       this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
     }
     this.updateCanopy(dt)
+  }
+
+  /** Zip toward the grapple anchor; light camera-relative steering lets you aim
+   *  the arc. Releases on arrival (with a small upward pop to crest ledges) or a
+   *  timeout, keeping velocity so you fling off it. */
+  private updateGrapple(dt: number, input: Input, _gravity: number) {
+    const g = config.grapple
+    const pos = this.object.position
+    const dx = this.grappleAnchor.x - pos.x
+    const dy = this.grappleAnchor.y - pos.y
+    const dz = this.grappleAnchor.z - pos.z
+    const dist = Math.hypot(dx, dy, dz)
+    this.grappleT += dt
+    if (dist < g.arriveDist || this.grappleT > g.maxTime) {
+      if (dist < g.arriveDist + 2 && this.velocity.y < 6) this.velocity.y = 6 // pop up to land on top
+      this.endGrapple()
+      return
+    }
+    const inv = 1 / Math.max(dist, 1e-3)
+    this.velocity.x += dx * inv * g.pull * dt
+    this.velocity.y += dy * inv * g.pull * dt
+    this.velocity.z += dz * inv * g.pull * dt
+    // A little camera-relative steering to shape the swing.
+    const intent = this.camRelative(input, this.moveDir)
+    if (intent > 0.1) {
+      this.velocity.x += this.moveDir.x * 22 * intent * dt
+      this.velocity.z += this.moveDir.z * 22 * intent * dt
+    }
+    const sp = this.velocity.length()
+    if (sp > g.maxSpeed) this.velocity.multiplyScalar(g.maxSpeed / sp)
+    this.model.setFlyPose(0.85)
+    this.model.setThrust(0.4)
+    // Face the anchor.
+    this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 8, dt)
+    this.object.rotation.set(0, this.yaw, 0)
+  }
+
+  /** Keep the grapple cable drawn from the hand to the anchor while zipping. */
+  private updateGrappleLine() {
+    if (!this.grappling) { if (this.grappleLine.visible) this.grappleLine.visible = false; return }
+    const attr = (this.grappleLine.geometry as THREE.BufferGeometry).attributes.position as THREE.BufferAttribute
+    const p = this.object.position
+    attr.setXYZ(0, p.x, p.y + 1.3, p.z)
+    attr.setXYZ(1, this.grappleAnchor.x, this.grappleAnchor.y, this.grappleAnchor.z)
+    attr.needsUpdate = true
+    this.grappleLine.visible = true
   }
 
   private updateDance(dt: number, gravity: number) {
@@ -291,12 +381,22 @@ export class Player {
     this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
 
     // Jetpack: hold to fly. Unlimited — it never runs out and always gives full
-    // lift; the fuel meter stays topped up.
+    // lift; the fuel meter stays topped up. Re-pressing in mid-air fires a pulse
+    // boost that climbs PAST the steady cruise cap, so tapping repeatedly lets
+    // you stack height (a key vertical-traversal move).
     const canHop = this.grounded || this.airTime < config.player.coyoteTime
     if (jetting) {
-      // Coyote time: still allow the launch hop just after stepping off a ledge.
-      if (!this.prevJet && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
-      this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
+      const risingEdge = !this.prevJet
+      if (risingEdge && canHop && this.velocity.y <= 0.1) {
+        this.velocity.y = config.player.jumpSpeed // ground / coyote launch hop
+      } else if (risingEdge && !this.grounded) {
+        // Mid-air re-press: an upward burst on top of current rise (can exceed cap).
+        this.velocity.y = Math.max(this.velocity.y, 0) + config.jetpack.pulseBoost
+      }
+      // Steady cruise ramps toward the cap, but never drags a higher pulse down.
+      if (this.velocity.y < config.jetpack.maxAscend) {
+        this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
+      }
       this.model.setThrust(1)
     } else {
       // Held already released this frame, but a latched tap still owes one hop.
@@ -385,6 +485,9 @@ export class Player {
   }
 
   dispose() {
+    this.scene.remove(this.grappleLine)
+    this.grappleLine.geometry.dispose()
+    ;(this.grappleLine.material as THREE.Material).dispose()
     this.model.dispose()
     this.canopy.traverse((o) => {
       const m = o as THREE.Mesh

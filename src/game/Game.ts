@@ -127,6 +127,11 @@ export class Game {
   private credits = 0
   private unlocked = new Set<string>()
   private scratchFwd = new THREE.Vector3()
+  // Grapple-arm aim raycast (camera-forward against the city shells).
+  private grappleRay = new THREE.Raycaster()
+  private grapplePrev = false
+  private grappleO = new THREE.Vector3()
+  private grappleD = new THREE.Vector3()
 
   // Arcade portals (neon doorways near the spawn that launch the minigames).
   private arcadePortals: { kind: MinigameKind; pos: THREE.Vector3; group: THREE.Group; screenMat: THREE.MeshStandardMaterial }[] = []
@@ -938,6 +943,40 @@ export class Game {
     }
   }
 
+  /** Grapple arm: hold to fire toward where you're aiming and zip in; release to
+   *  let go (keeping momentum so you can hop building to building). */
+  private updateGrapple() {
+    const held = this.input.held.grapple
+    if (held && !this.grapplePrev && !this.player.grappling) {
+      const anchor = this.raycastGrapple()
+      if (anchor) {
+        this.player.startGrapple(anchor)
+        this.audio.play('ui')
+        trackEvent('ability_used', { ability: 'grapple' })
+      }
+    } else if (!held && this.player.grappling) {
+      this.player.endGrapple()
+    }
+    this.grapplePrev = held
+  }
+
+  /** Cast from the camera along the aim direction; return the nearest building
+   *  hit beyond arm's reach, or null. */
+  private raycastGrapple(): THREE.Vector3 | null {
+    const cam = this.engine.camera
+    cam.getWorldPosition(this.grappleO)
+    cam.getWorldDirection(this.grappleD)
+    this.grappleRay.set(this.grappleO, this.grappleD)
+    this.grappleRay.far = config.grapple.range
+    const meshes = this.zone === 'earth' ? this.world.solidMeshes : this.zones.env(this.zone)?.solidMeshes ?? this.world.solidMeshes
+    const hits = this.grappleRay.intersectObjects(meshes, false)
+    for (const h of hits) {
+      if (h.distance < 6) continue // skip the ground right under you / your feet
+      return h.point.clone()
+    }
+    return null
+  }
+
   private fireNet() {
     trackEvent('ability_used', { ability: 'net' }) // H = net / capture
     const N = NET_SEGMENTS
@@ -1628,9 +1667,15 @@ export class Game {
     if (this.input.consumeEdge('enter')) this.handleEnterExit()
     if (!piloting) {
       if (this.input.consumeEdge('morph')) { this.player.toggleMorph(); trackEvent('ability_used', { ability: 'morph' }) }
-      // Only report a parachute deploy that actually took (airborne, past the min).
-      if (this.input.consumeEdge('chute') && this.player.deployChute()) trackEvent('ability_used', { ability: 'parachute' })
+      // Parachute: deploy when airborne, or CUT it if it's already out (drop back
+      // into free-fall - you can jetpack or re-deploy).
+      if (this.input.consumeEdge('chute')) {
+        if (this.player.mode === 'parachute') this.player.cutChute()
+        else if (this.player.deployChute()) trackEvent('ability_used', { ability: 'parachute' })
+      }
       if (this.input.consumeEdge('net')) this.fireNet()
+      // Grapple arm: hold to fire toward where you aim and zip in; release to let go.
+      this.updateGrapple()
     } else {
       this.input.consumeEdge('chute')
       // In a mech, MORPH transforms between robot and jet form.
@@ -1682,6 +1727,9 @@ export class Game {
         const s = this.playground.bouncePadAt(this.zone, this.player.position.x, this.player.position.z)
         if (s > 0) { this.player.launch(s); this.audio.play('portal'); vibrate(20) }
       }
+      // Updraft columns: ride the rising air upward (works grounded or airborne).
+      const lift = this.playground.updraftAt(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
+      if (lift > 0) this.player.rideUpdraft(lift * dt)
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
     }
 

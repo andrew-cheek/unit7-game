@@ -16,10 +16,20 @@ interface Pad {
   discMat: THREE.MeshBasicMaterial
 }
 
+interface Updraft {
+  x: number
+  z: number
+  r: number
+  lift: number // upward acceleration while inside (m/s^2)
+  top: number // stops lifting above this world height
+  colMat: THREE.MeshBasicMaterial
+}
+
 export class Playground {
   private scene: THREE.Scene
   private groups: Record<Zone, THREE.Group>
   private pads: Record<Zone, Pad[]> = { earth: [], mars: [], moon: [] }
+  private updrafts: Record<Zone, Updraft[]> = { earth: [], mars: [], moon: [] }
   private floorTiles: THREE.MeshStandardMaterial[] = []
   private floor = { x: 0, z: 34, half: 7 }
   private mats: THREE.Material[] = []
@@ -34,10 +44,19 @@ export class Playground {
     this.buildPad('earth', 40, -20, 24)
     this.buildPad('earth', -46, 28, 24)
     this.buildPad('earth', 8, 70, 28)
+    // MEGA pads: a big gold launcher that flings you skyscraper-high.
+    this.buildPad('earth', -70, -56, 58, { mega: true })
+    this.buildPad('earth', 96, 24, 58, { mega: true })
     this.buildPad('mars', 16, -22, 30) // lower gravity → big air
     this.buildPad('mars', -20, -14, 30)
+    this.buildPad('mars', 40, 30, 60, { mega: true })
     this.buildPad('moon', 18, -20, 34) // lowest gravity → huge air
     this.buildPad('moon', -18, -18, 34)
+    this.buildPad('moon', 30, 26, 64, { mega: true })
+    // Updraft columns: ride the rising air to hover + climb (like a thermal).
+    this.buildUpdraft('earth', 60, -64, 7, 30, 150)
+    this.buildUpdraft('earth', -96, 70, 7, 30, 150)
+    this.buildUpdraft('mars', -52, 36, 8, 26, 140)
     this.buildDanceFloor()
     for (const z of ['earth', 'mars', 'moon'] as Zone[]) {
       this.groups[z].visible = z === 'earth'
@@ -63,6 +82,21 @@ export class Playground {
     for (let i = 0; i < this.floorTiles.length; i++) {
       this.floorTiles[i].emissiveIntensity = 1.4 + Math.sin(this.t * 3 + i * 0.7) * 1.3
     }
+    for (const z of ['earth', 'mars', 'moon'] as Zone[]) {
+      for (const u of this.updrafts[z]) u.colMat.opacity = 0.12 + Math.sin(this.t * 2 + u.x) * 0.06
+    }
+  }
+
+  /** Upward acceleration if the player is inside an updraft column in `zone` and
+   *  below its ceiling, else 0. Applied as a sustained lift by Game. */
+  updraftAt(zone: Zone, x: number, y: number, z: number): number {
+    for (const u of this.updrafts[zone]) {
+      if (y > u.top) continue
+      const dx = x - u.x
+      const dz = z - u.z
+      if (dx * dx + dz * dz < u.r * u.r) return u.lift
+    }
+    return 0
   }
 
   /** Bounce strength if the player is standing on a pad in `zone`, else 0. */
@@ -81,19 +115,47 @@ export class Playground {
     return Math.abs(x - this.floor.x) < this.floor.half && Math.abs(z - this.floor.z) < this.floor.half
   }
 
-  private buildPad(zone: Zone, x: number, z: number, strength: number) {
-    const color = zone === 'mars' ? config.palette.orange : zone === 'moon' ? 0xbfe6ff : config.palette.lime
+  private buildPad(zone: Zone, x: number, z: number, strength: number, opts: { mega?: boolean } = {}) {
+    const mega = opts.mega ?? false
+    // Mega pads are gold + larger so they read as "the big launcher".
+    const color = mega ? 0xffd24a : zone === 'mars' ? config.palette.orange : zone === 'moon' ? 0xbfe6ff : config.palette.lime
+    const rad = mega ? 5 : 3
     const g = this.groups[zone]
-    const ringMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 2.4, roughness: 0.4 }))
-    const base = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(3, 3.4, 0.4, 24)), ringMat)
-    base.position.set(x, 0.2, z)
+    const ringMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: mega ? 3 : 2.4, roughness: 0.4 }))
+    const base = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(rad, rad + 0.4, mega ? 0.7 : 0.4, 28)), ringMat)
+    base.position.set(x, mega ? 0.35 : 0.2, z)
     g.add(base)
     const discMat = this.own(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(2.7, 28)), discMat)
+    const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(rad - 0.3, 30)), discMat)
     disc.rotation.x = -Math.PI / 2
-    disc.position.set(x, 0.45, z)
+    disc.position.set(x, mega ? 0.75 : 0.45, z)
     g.add(disc)
-    this.pads[zone].push({ x, z, r: 3, strength, ringMat, discMat })
+    if (mega) {
+      // A chevron stack so it reads as "launch UP" from a distance.
+      const arrowMat = this.own(new THREE.MeshBasicMaterial({ color: 0xfff0b0, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      for (let i = 0; i < 3; i++) {
+        const ch = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(rad * (0.5 - i * 0.12), 1.2, 4)), arrowMat)
+        ch.position.set(x, 1.4 + i * 1.3, z)
+        ch.rotation.y = Math.PI / 4
+        g.add(ch)
+      }
+    }
+    this.pads[zone].push({ x, z, r: rad, strength, ringMat, discMat })
+  }
+
+  /** A translucent rising-air column you can ride upward (hover + climb). */
+  private buildUpdraft(zone: Zone, x: number, z: number, r: number, lift: number, height: number) {
+    const g = this.groups[zone]
+    const colMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.14, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const col = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(r, r, height, 20, 1, true)), colMat)
+    col.position.set(x, height / 2, z)
+    g.add(col)
+    const ringMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.7, fog: false }))
+    const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(r, 0.3, 8, 28)), ringMat)
+    ring.rotation.x = Math.PI / 2
+    ring.position.set(x, 0.4, z)
+    g.add(ring)
+    this.updrafts[zone].push({ x, z, r, lift, top: height, colMat })
   }
 
   private buildDanceFloor() {
