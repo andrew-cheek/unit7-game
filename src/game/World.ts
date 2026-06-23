@@ -1596,6 +1596,17 @@ export class World {
       sign.translateZ(0.2)
       this.group.add(sign)
     }
+    // Solid collider per office so you can't walk through them. The room sits
+    // behind the anchor (offset along -localZ by D/2), so centre the box there;
+    // a square footprint covers it at any of the anchors' axis-aligned facings.
+    // Height spans the room (+ tower on tiers that build one).
+    const halfFp = 4.4
+    const top = highTier ? H + TOWER_H : H + 0.6
+    for (const a of OFFICE_ANCHORS) {
+      const cxw = a.office.x - Math.sin(a.face) * (D / 2)
+      const czw = a.office.z - Math.cos(a.face) * (D / 2)
+      this.colliders.push(new THREE.Box3(new THREE.Vector3(cxw - halfFp, 0, czw - halfFp), new THREE.Vector3(cxw + halfFp, top, czw + halfFp)))
+    }
   }
 
   /** Neon drizzle near the player + drifting embers + (desktop) light shafts. */
