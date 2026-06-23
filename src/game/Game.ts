@@ -88,6 +88,7 @@ export class Game {
   // Interactive orbital drop-in (the playable opening). Replaces the passive
   // cinematic on the default Earth start.
   private dropIn: DropIn | null = null
+  private dropLand = new THREE.Vector3() // where the drop-in steers + hands off (arcade plaza)
   private savedFogDensity: number | null = null
   // Sit the sky/star dome around the cinematic's pocket of airspace.
   private introFocus = new THREE.Vector3(0, 50, -390)
@@ -471,9 +472,23 @@ export class Game {
    * through the descent so you land as the sun finishes cresting.
    */
   private beginDropIn() {
-    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.robotFactory.roofPad, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    // Land in the open plaza just in front of the arcade (averaged from the
+    // arcade doorways, stepped a little toward spawn so we touch down on clear
+    // ground, not on a cabinet). This is the point the dive steers toward.
+    let tx = 0, tz = 22
+    if (this.arcadePortals.length) {
+      let sx = 0, sz = 0
+      for (const p of this.arcadePortals) { sx += p.pos.x; sz += p.pos.z }
+      tx = sx / this.arcadePortals.length
+      tz = sz / this.arcadePortals.length
+      const dx = this.world.spawn.x - tx, dz = this.world.spawn.z - tz
+      const dl = Math.hypot(dx, dz)
+      if (dl > 0.01) { tx += (dx / dl) * 7; tz += (dz / dl) * 7 }
+    }
+    this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
+
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
-    this.robotFactory.setPadGlow(true)
     this.hud.intro = true // surfaces the SKIP button
     this.player.setVisible(false)
     this.input.setLockEnabled(true)
@@ -485,31 +500,29 @@ export class Game {
     }
     const fog = this.engine.scene.fog
     if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
-    this.hud.banner = 'ORBITAL DROP'
+    this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DROP IN', body: 'Steer with WASD or the stick to thread the rings. When the DEPLOY gauge lights up, tap F / Space in the sweet zone for a clean chute.' }
-    this.missionPopupTimer = 6
+    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD or the stick. Hold Space (or drag forward) to nose-dive, pull back to slow. When you are low, tap DEPLOY to pop the chute and glide into the arcade plaza.' }
+    this.missionPopupTimer = 7
   }
 
   private finishDrop() {
-    // Reward the drop: rings threaded + how clean the parachute timing was.
-    const rings = this.dropIn?.hud.rings ?? 0
+    // Reward the drop: how cleanly (how high) you popped the canopy.
     const q = this.dropIn?.chuteQuality ?? 0
-    const chuteBonus = q >= 0.85 ? 150 : q >= 0.55 ? 60 : 0
-    const credits = 100 + rings * 25 + chuteBonus
-    const xp = 40 + rings * 10 + (q >= 0.85 ? 40 : 0)
+    const chuteBonus = q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
+    const credits = 120 + chuteBonus
+    const xp = 50 + (q >= 0.78 ? 40 : 0)
     this.dropIn?.dispose()
     this.dropIn = null
-    this.robotFactory.setPadGlow(false)
     this.addCredits(credits)
     this.awardXp(xp)
-    const grade = q >= 0.85 ? 'PERFECT LANDING' : q >= 0.55 ? 'CLEAN LANDING' : 'TOUCHDOWN'
-    this.hud.banner = `${grade}  ${rings} rings  +${credits}c`
+    const grade = q >= 0.78 ? 'CLEAN LANDING' : q >= 0.5 ? 'GOOD LANDING' : 'TOUCHDOWN'
+    this.hud.banner = `${grade}  +${credits}c`
     this.bannerTimer = 3.4
     this.hud.intro = false
     this.hud.drop = null
-    // Land "inside" the factory: place the player on the floor among the robots.
-    this.player.exitVehicle(this.robotFactory.entrance.clone())
+    // Hand off standing in the plaza right where the chute set you down.
+    this.player.exitVehicle(this.dropLand.clone())
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
@@ -522,7 +535,7 @@ export class Game {
     // Grace period so the player can orient before the Mars gate (which sits on
     // the route out) can fire — stops an accidental yank to Mars on hand-off.
     this.travelCooldown = 3
-    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'You are on the factory floor. Follow the green beacon to Portal Plaza - the OBJECTIVE readout shows the distance.' }
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'You touched down by the arcade. Follow the green beacon to Portal Plaza - the OBJECTIVE readout shows the distance.' }
     this.missionPopupTimer = 6
   }
 
@@ -1571,7 +1584,7 @@ export class Game {
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
       const d = this.dropIn.hud
-      this.hud.drop = { alt: Math.round(d.alt), rings: d.rings, total: d.total, speed: Math.round(d.speed), phase: d.phase, gauge: d.gauge, sweetLo: d.sweetLo, sweetHi: d.sweetHi, result: d.result }
+      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, result: d.result }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return

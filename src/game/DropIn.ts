@@ -3,51 +3,47 @@ import { clamp } from './utils'
 import { createRobot, type RobotModel } from './procedural'
 import type { Input } from './Input'
 
-/** Live readout for the drop HUD: altimeter, ring count, the deploy gauge. */
+/** Live readout for the drop HUD: altimeter, speed, phase + contextual hint. */
 export interface DropHud {
   alt: number
-  rings: number
-  total: number
   speed: number
-  phase: 'fall' | 'window' | 'canopy' | 'land'
-  gauge: number | null // 0..1 sweeping marker while the deploy window is open
-  sweetLo: number
-  sweetHi: number
-  result: string | null // 'PERFECT CHUTE' / 'GOOD' / 'HARD OPEN' after deploy
+  phase: 'dive' | 'canopy' | 'land'
+  hint: string | null
+  canDeploy: boolean // the chute can be popped now (drives the DEPLOY button)
+  result: string | null // 'CLEAN CANOPY' / 'CANOPY OPEN' / 'HARD OPEN' after deploy
 }
 
-// Drop staging. Start high, fall fast, then time a tap to pop the canopy in the
-// sweet spot and glide into the factory's rooftop pad. Tuned short and punchy.
-const START = new THREE.Vector3(0, 205, 120)
-const N_RINGS = 6
-const RING_R = 8
-const N_AI = 4
-const DEPLOY_TOP = 100 // gauge opens at this altitude
-const DEPLOY_FLOOR = 44 // forced (poor) deploy if you wait past this
-const SWEET_LO = 0.42
-const SWEET_HI = 0.6
+// Drop staging. You start very high and nose-dive a long way, steering your fall
+// (tuck to plunge, flare to slow + hang) to line up the arcade, then pop the
+// canopy and glide it down into the plaza. No rings, no timing minigame - it is
+// the falling itself that you control.
+const START_Y = 760 // begin far above the city
+const TERM_DIVE = -84 // tucked nose-dive terminal speed (fast)
+const TERM_FLARE = -30 // flared/air-braked descent (slow, lots of hang time)
+const TERM_NEUTRAL = -56 // hands-off fall
+const DEPLOY_MAX_ALT = 240 // above this the chute would just drift forever - locked out
+const DEPLOY_FLOOR = 52 // auto (hard) deploy if you plummet past this
 
 /**
- * Interactive orbital drop-in: the opening you play. Freefall fast through a
- * bright dawn sky steering a short slalom of rings, time a tap to deploy the
- * canopy as a sweeping gauge crosses its sweet spot (clean pop = slow, steerable
- * descent + bonus; mistimed = a hard, fast opening), then glide down into the
- * robot factory's rooftop intake pad - which is exactly where you take control,
- * standing on the factory floor among the robots building robots.
+ * The playable opening: an interactive high-altitude dive. You spawn hundreds of
+ * metres up and fall the whole way down, steering the freefall - tuck (hold
+ * Space / drag forward) to plunge fast, flare (pull back) to flatten and hang -
+ * to track toward the arcade. When you're low enough, pop the canopy and steer
+ * the glide into the plaza, which is exactly where you take control on foot. It
+ * reads as gameplay that happens to start very high, not a cutscene.
  *
  * Self-contained: owns a group + the camera while `done` is false, exposes
- * `fade` for the handoff, and disposes everything on exit. Identical solo (AI
- * divers fill the sky) and, once wired, with real players dropping alongside.
+ * `fade` for the handoff, and disposes everything on exit.
  */
 export class DropIn {
   readonly group = new THREE.Group()
   done = false
   fade = 0 // no opening black: you're in the bright sky immediately
-  /** Set on canopy deploy: 0..1 how clean the timing was (drives the reward). */
+  /** Set on canopy deploy: 0..1 how much altitude you had (drives the reward). */
   chuteQuality = 0
-  hud: DropHud = { alt: START.y, rings: 0, total: N_RINGS, speed: 0, phase: 'fall', gauge: null, sweetLo: SWEET_LO, sweetHi: SWEET_HI, result: null }
+  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, result: null }
 
-  /** Fired on a clean ring pass, the canopy pop, and touchdown, for SFX. */
+  /** Fired on the canopy pop and touchdown, for SFX. */
   onSfx: ((kind: 'ring' | 'deploy' | 'land') => void) | null = null
 
   private scene: THREE.Scene
@@ -55,22 +51,22 @@ export class DropIn {
   private input: Input
   private getGround: (x: number, z: number) => number
   private target: THREE.Vector3
+  private start: THREE.Vector3
 
   private rb: RobotModel
   private diver = new THREE.Group()
-  private pos = START.clone()
-  private vy = -14
+  private pos: THREE.Vector3
+  private vy = -22
   private hVel = new THREE.Vector3()
   private camHeading = 0
+  private pitch = 0.5 // 0 flat (flare) .. 1 steep (tuck), smoothed for the body pose
 
-  private phase: DropHud['phase'] = 'fall'
-  private gaugeT = 0
+  private phase: DropHud['phase'] = 'dive'
   private quality = 0
   private pendingDeploy = false
-  private prevJet = false
+  private prevChute = false
   private resultT = 0
 
-  private rings: { group: THREE.Group; mat: THREE.MeshBasicMaterial; pos: THREE.Vector3; passed: boolean }[] = []
   private ai: { g: THREE.Group; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number }[] = []
   private chute!: THREE.Mesh
   private streaks!: THREE.Points
@@ -80,12 +76,12 @@ export class DropIn {
 
   private camPos = new THREE.Vector3()
   private camLook = new THREE.Vector3()
+  private fwd = new THREE.Vector3()
 
   // tuning
-  private static readonly STEER = 32
-  private static readonly H_DAMP = 1.7
-  private static readonly H_MAX = 40
-  private static readonly TERM = 60 // freefall terminal speed (fast)
+  private static readonly STEER = 42 // horizontal steering authority (strong - it's a long fall to aim)
+  private static readonly H_DAMP = 1.5
+  private static readonly H_MAX = 48
 
   constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number) {
     this.scene = scene
@@ -93,10 +89,12 @@ export class DropIn {
     this.input = input
     this.target = target.clone()
     this.getGround = getGround
+    // Spawn high and back from the target so the whole descent tracks toward the
+    // arcade with the city laid out ahead and below.
+    this.start = new THREE.Vector3(target.x + 24, START_Y, target.z - 270)
+    this.pos = this.start.clone()
     this.rb = createRobot()
-    // Face down the route toward the target from the first frame so the opening
-    // frames the city and the factory, not empty sky behind you.
-    this.camHeading = Math.atan2(this.target.x - START.x, this.target.z - START.z)
+    this.camHeading = Math.atan2(this.target.x - this.start.x, this.target.z - this.start.z)
     this.build()
     scene.add(this.group)
     this.placeCamera(true)
@@ -118,25 +116,9 @@ export class DropIn {
     this.chute.visible = false
     this.diver.add(this.chute)
 
-    // Ring slalom leading from the start down toward the target, ending above
-    // the deploy window so the rings guide you onto the approach line.
-    for (let i = 0; i < N_RINGS; i++) {
-      const f = i / (N_RINGS - 1)
-      const y = THREE.MathUtils.lerp(START.y - 24, DEPLOY_TOP + 14, f)
-      const x = THREE.MathUtils.lerp(START.x, this.target.x, f) + Math.sin(f * Math.PI * 2.2) * 26 * (1 - f * 0.6)
-      const z = THREE.MathUtils.lerp(START.z - 14, this.target.z, f)
-      const mat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.85, fog: false }))
-      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(RING_R, 0.5, 12, 30)), mat)
-      const g = new THREE.Group()
-      g.add(ring)
-      g.position.set(x, y, z)
-      g.rotation.x = Math.PI / 2
-      this.group.add(g)
-      this.rings.push({ group: g, mat, pos: new THREE.Vector3(x, y, z), passed: false })
-    }
-
+    // A few AI divers scattered down the long fall for a sense of a mass drop.
     const aiBody = this.own(new THREE.MeshStandardMaterial({ color: 0x223040, metalness: 0.5, roughness: 0.5 }))
-    for (let i = 0; i < N_AI; i++) {
+    for (let i = 0; i < 5; i++) {
       const g = new THREE.Group()
       const body = new THREE.Mesh(this.ownG(new THREE.CapsuleGeometry(0.5, 1.1, 4, 8)), aiBody)
       g.add(body)
@@ -144,12 +126,12 @@ export class DropIn {
       const canopy = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.6, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.1)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85, side: THREE.DoubleSide, fog: false })))
       canopy.position.y = 3.4
       g.add(canopy)
-      const cx = (Math.random() - 0.5) * 80
-      const cz = START.z * 0.4 + (Math.random() - 0.5) * 80
-      const y = START.y - Math.random() * 120
+      const cx = this.start.x + (Math.random() - 0.5) * 90
+      const cz = this.start.z * 0.5 + (Math.random() - 0.5) * 120
+      const y = START_Y - Math.random() * 360
       g.position.set(cx, y, cz)
       this.group.add(g)
-      this.ai.push({ g, cx, cz, r: 6 + Math.random() * 14, ang: Math.random() * 6.28, spd: 0.2 + Math.random() * 0.3, y, vy: 10 + Math.random() * 8 })
+      this.ai.push({ g, cx, cz, r: 6 + Math.random() * 14, ang: Math.random() * 6.28, spd: 0.2 + Math.random() * 0.3, y, vy: 24 + Math.random() * 18 })
     }
 
     const NF = 130
@@ -168,43 +150,40 @@ export class DropIn {
     this.group.add(this.streaks)
   }
 
-  /** Called by the DEPLOY button / a screen tap. Desktop also taps via Space.
-   *  Only registers once the deploy window is open, so an eager early tap can't
-   *  force a hard opening the instant the gauge appears. */
-  deploy() { if (this.phase === 'window') this.pendingDeploy = true }
+  /** Called by the DEPLOY button / a screen tap. Only arms once low enough. */
+  deploy() {
+    if (this.phase === 'dive' && this.pos.y - this.getGround(this.pos.x, this.pos.z) <= DEPLOY_MAX_ALT) this.pendingDeploy = true
+  }
 
   skip() {
     if (this.done) return
-    // Snap onto the rooftop pad so the handoff position is always correct and
-    // touchdown fires on the next frame.
     this.pos.copy(this.target).setY(this.target.y + 0.4)
     this.vy = -2
     this.hVel.set(0, 0, 0)
     this.phase = 'land'
-    for (const r of this.rings) r.passed = true
   }
 
   update(dt: number) {
     if (this.done) return
+    const alt = this.pos.y - this.getGround(this.pos.x, this.pos.z)
 
-    // deploy intent from a Space tap (rising edge), only during the window
-    const jet = this.input.held.jet
-    if (jet && !this.prevJet && this.phase === 'window') this.pendingDeploy = true
-    this.prevJet = jet
+    // Deploy intent: the chute key (rising edge) or the DEPLOY button.
+    const chute = this.input.consumeEdge('chute')
+    if (chute && this.phase === 'dive' && alt <= DEPLOY_MAX_ALT) this.pendingDeploy = true
 
-    // --- steering (camera-relative; matches gameplay convention) ---
+    // --- horizontal steering (camera-relative, matches gameplay convention) ---
     const yaw = this.input.yaw
-    const control = this.phase === 'canopy' ? 0.5 + this.quality * 0.5 : 1
+    const control = this.phase === 'canopy' ? 0.55 + this.quality * 0.45 : 1
     const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * control
     const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER * control
     this.hVel.x += ax * dt
     this.hVel.z += az * dt
 
-    // gentle glide assist toward the pad once the canopy is open
     if (this.phase === 'canopy') {
+      // Glide assist nudges you toward the plaza so the landing always lands.
       const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
       const d = Math.hypot(dx, dz) || 1
-      const assist = 10
+      const assist = 11
       this.hVel.x += (dx / d) * assist * dt
       this.hVel.z += (dz / d) * assist * dt
     }
@@ -212,42 +191,41 @@ export class DropIn {
     this.hVel.x *= damp
     this.hVel.z *= damp
     const hs = Math.hypot(this.hVel.x, this.hVel.z)
-    const hMax = this.phase === 'canopy' ? 22 : DropIn.H_MAX
+    const hMax = this.phase === 'canopy' ? 24 : DropIn.H_MAX
     if (hs > hMax) { this.hVel.x *= hMax / hs; this.hVel.z *= hMax / hs }
 
     // --- phase machine ---
-    if (this.phase === 'fall') {
-      this.vy += (-DropIn.TERM - this.vy) * Math.min(1, dt * 1.8)
-      if (this.pos.y <= DEPLOY_TOP) { this.phase = 'window'; this.hud.phase = 'window'; this.pendingDeploy = false }
-    } else if (this.phase === 'window') {
-      this.gaugeT += dt
-      this.vy += (-DropIn.TERM - this.vy) * Math.min(1, dt * 1.8)
-      const marker = this.pingpong(this.gaugeT * 0.9)
-      this.hud.gauge = marker
-      if (this.pendingDeploy || this.pos.y <= DEPLOY_FLOOR) {
+    if (this.phase === 'dive') {
+      // Control the fall: tuck to plunge, flare to flatten + hang. Hold Space or
+      // drag forward to tuck; pull back to flare.
+      let diveAmt = 0.5
+      if (this.input.held.jet || this.input.moveY > 0.35) diveAmt = 1
+      else if (this.input.moveY < -0.35) diveAmt = 0.08
+      this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3)
+      const term = diveAmt >= 0.99 ? TERM_DIVE : diveAmt <= 0.1 ? TERM_FLARE : TERM_NEUTRAL
+      this.vy += (term - this.vy) * Math.min(1, dt * 1.5)
+
+      if (this.pendingDeploy || alt <= DEPLOY_FLOOR) {
         const forced = !this.pendingDeploy
-        const center = (SWEET_LO + SWEET_HI) / 2
-        const half = (SWEET_HI - SWEET_LO) / 2
-        const dist = Math.abs(marker - center)
-        this.quality = forced ? 0.3 : dist < half ? 1 - (dist / half) * 0.35 : Math.max(0, 0.55 - (dist - half) * 2.2)
+        // Quality from how much altitude you had: an early, high pop is a clean,
+        // slow, steerable canopy; a last-second pop is a hard, fast opening.
+        this.quality = forced ? 0.25 : clamp((alt - DEPLOY_FLOOR) / (DEPLOY_MAX_ALT - DEPLOY_FLOOR), 0.3, 1)
         this.chuteQuality = this.quality
-        this.hud.result = this.quality >= 0.85 ? 'PERFECT CHUTE' : this.quality >= 0.55 ? 'GOOD CHUTE' : 'HARD OPEN'
-        this.hud.gauge = null
-        this.phase = 'canopy'; this.hud.phase = 'canopy'
+        this.hud.result = this.quality >= 0.78 ? 'CLEAN CANOPY' : this.quality >= 0.5 ? 'CANOPY OPEN' : 'HARD OPEN'
+        this.phase = 'canopy'
         this.chute.visible = true
         this.rb.setFlyPose(0.2)
         this.onSfx?.('deploy')
-        // a clean pop pays bonus "rings"
-        if (this.quality >= 0.85) this.hud.rings = Math.min(this.hud.total, this.hud.rings + 1)
+        if (!forced) this.vy *= 0.5 // a clean pop bleeds speed; a forced one barely does
       }
     } else if (this.phase === 'canopy') {
-      // descent speed from how clean the pop was (good = slow + controllable)
-      const want = -THREE.MathUtils.lerp(15, 9, this.quality)
+      const want = -THREE.MathUtils.lerp(16, 9, this.quality)
       this.vy += (want - this.vy) * Math.min(1, dt * 2.5)
       this.chute.scale.setScalar(THREE.MathUtils.damp(this.chute.scale.x, 1, 6, dt))
-      if (this.pos.y <= this.target.y + 1.5) { this.phase = 'land'; this.hud.phase = 'land' }
+      this.pitch += (0 - this.pitch) * Math.min(1, dt * 3)
+      if (this.pos.y <= this.target.y + 1.5) this.phase = 'land'
     } else {
-      // land: ease exactly onto the pad
+      // land: ease exactly onto the plaza point
       this.pos.x = THREE.MathUtils.damp(this.pos.x, this.target.x, 4, dt)
       this.pos.z = THREE.MathUtils.damp(this.pos.z, this.target.z, 4, dt)
       this.vy += (-2 - this.vy) * Math.min(1, dt * 4)
@@ -260,50 +238,32 @@ export class DropIn {
 
     this.diver.position.copy(this.pos)
     if (hs > 0.5) this.camHeading = Math.atan2(this.hVel.x, this.hVel.z)
-    const belly = this.phase === 'fall' || this.phase === 'window'
-    this.diver.rotation.set(belly ? 0.5 : 0, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
+    const diving = this.phase === 'dive'
+    // Steeper body pitch the harder you tuck; level out under canopy.
+    const bodyPitch = diving ? THREE.MathUtils.lerp(0.2, 1.25, this.pitch) : 0
+    this.diver.rotation.set(bodyPitch, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
     this.rb.setThrust(0)
-    this.rb.update(dt, belly ? 0.4 : 0.15, false)
+    this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
-    this.updateRings(dt)
     this.updateAi(dt)
-    this.updateStreaks(dt, this.phase === 'fall' || this.phase === 'window')
+    this.updateStreaks(dt, diving)
     this.placeCamera(false)
 
-    this.hud.alt = Math.max(0, this.pos.y - this.getGround(this.pos.x, this.pos.z))
+    // HUD
+    this.hud.alt = Math.max(0, alt)
     this.hud.speed = Math.hypot(hs, this.vy)
+    this.hud.phase = this.phase
+    this.hud.canDeploy = this.phase === 'dive' && alt <= DEPLOY_MAX_ALT
+    this.hud.hint = this.phase === 'canopy' ? 'GUIDE TO THE ARCADE'
+      : this.phase === 'land' ? 'TOUCHDOWN'
+      : this.hud.canDeploy ? 'STEER · DEPLOY THE CHUTE' : 'NOSE-DIVE · STEER TOWARD THE CITY'
     if (this.hud.result) { this.resultT += dt; if (this.resultT > 2.2) this.hud.result = null }
 
     // touchdown -> brief fade + handoff
     if (this.phase === 'land' && this.pos.y <= this.target.y + 0.6) {
       if (this.fade === 0) this.onSfx?.('land')
-      this.fade = clamp(this.fade + dt * 2.2, 0, 1) // smooth ~0.45s fade to the handoff
+      this.fade = clamp(this.fade + dt * 2.2, 0, 1)
       if (this.fade >= 1) this.done = true
-    }
-  }
-
-  private pingpong(t: number): number {
-    const m = t % 2
-    return m < 1 ? m : 2 - m
-  }
-
-  private updateRings(dt: number) {
-    for (const r of this.rings) {
-      r.group.rotation.z += dt * 0.8
-      if (r.passed) {
-        if (this.pos.y < r.pos.y - 4) continue
-      } else if (this.pos.y <= r.pos.y + 0.6 && this.pos.y >= r.pos.y - 4) {
-        const d = Math.hypot(this.pos.x - r.pos.x, this.pos.z - r.pos.z)
-        if (d < RING_R) { r.passed = true; r.mat.color.setHex(0x294055); r.mat.opacity = 0.3; this.hud.rings++; this.onSfx?.('ring'); this.vy -= 5 }
-      } else if (this.pos.y < r.pos.y - 4) {
-        r.passed = true
-      }
-      if (!r.passed) {
-        const next = this.rings.find((x) => !x.passed) === r
-        r.mat.color.setHex(next ? 0x9dff5a : 0x27e7ff)
-        r.mat.opacity = next ? 1 : 0.7
-        r.group.scale.setScalar(next ? 1.08 : 1)
-      }
     }
   }
 
@@ -311,7 +271,7 @@ export class DropIn {
     for (const a of this.ai) {
       a.ang += a.spd * dt
       a.y -= a.vy * dt
-      if (a.y < 6) { a.y = START.y + Math.random() * 30; a.vy = 10 + Math.random() * 8 }
+      if (a.y < 6) { a.y = START_Y - Math.random() * 60; a.vy = 24 + Math.random() * 18 }
       a.g.position.set(a.cx + Math.cos(a.ang) * a.r, a.y, a.cz + Math.sin(a.ang) * a.r)
       a.g.rotation.y = -a.ang
     }
@@ -322,7 +282,7 @@ export class DropIn {
     m.opacity = THREE.MathUtils.damp(m.opacity, fast ? 0.85 : 0.3, 5, dt)
     this.streaks.position.copy(this.pos)
     const fp = (this.streaks.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array
-    const rise = fast ? 48 : 20
+    const rise = fast ? 52 : 20
     for (let i = 0; i < this.streakVel.length; i++) {
       const j = i * 3 + 1
       fp[j] += (this.streakVel[i] + rise) * dt
@@ -332,11 +292,10 @@ export class DropIn {
   }
 
   private placeCamera(snap: boolean) {
-    const fwd = new THREE.Vector3(Math.sin(this.camHeading), 0, Math.cos(this.camHeading))
-    // Closer chase so the diver reads big (Roblox-ish framing), still angled down
-    // the route at the city/factory.
-    const want = this.camPos.copy(this.pos).addScaledVector(fwd, -7.5).add(new THREE.Vector3(0, 4.2, 0))
-    const lookWant = this.camLook.copy(this.pos).addScaledVector(fwd, 7).add(new THREE.Vector3(0, -5, 0))
+    this.fwd.set(Math.sin(this.camHeading), 0, Math.cos(this.camHeading))
+    // Chase from above-behind, angled down the dive so the city rushes up at you.
+    const want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -7.5).add(new THREE.Vector3(0, 4.6, 0))
+    const lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7).add(new THREE.Vector3(0, -6.5, 0))
     if (snap) this.cam.position.copy(want)
     else this.cam.position.lerp(want, 0.09)
     this.cam.lookAt(lookWant)
