@@ -331,7 +331,7 @@ function JoinWorld({ onJoin, onSolo }: { onJoin: (name: string) => void; onSolo:
   }
   return (
     <div style={welcomePanel}>
-      <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff', font: '800 22px/1.1 ui-monospace, Menlo, monospace', letterSpacing: '0.06em' }}>
+      <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff', font: '800 19px/1.1 ui-monospace, Menlo, monospace', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
         Welcome, Unit 7.
       </div>
       {mode === 'choice' ? (

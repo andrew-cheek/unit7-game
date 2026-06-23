@@ -51,6 +51,12 @@ export class Player {
   private model: RobotModel
   private moveDir = new THREE.Vector3()
   private prevJet = false
+  // Render interpolation: the sim steps at a fixed 60Hz, but the display can run
+  // faster. rPrev/rTrue bracket the position over the last fixed step so the
+  // visual can be lerped between them each render frame (smooth, no stepping).
+  private rPrev = new THREE.Vector3()
+  private rTrue = new THREE.Vector3()
+  private interpInit = false
   // Grapple-arm state: a tendril that extends toward a pre-picked grab point
   // (Game raycasts the aim against buildings) then reels the player up to the
   // roof edge there. grappleHasTarget is false on a miss (the beam just shoots
@@ -289,6 +295,23 @@ export class Player {
     this.velocity.set(0, 0, 0)
     this.object.rotation.set(0, this.yaw, 0)
     this.setVisible(true)
+    this.resetInterp()
+  }
+
+  /** Snap the render-interpolation anchors to the current position (after any
+   *  teleport: spawn, portal, zone change, respawn) so the visual doesn't lerp
+   *  across the jump. */
+  resetInterp() {
+    this.rTrue.copy(this.object.position)
+    this.rPrev.copy(this.object.position)
+    this.interpInit = true
+  }
+
+  /** Render the body at the interpolated position between the last two sim steps
+   *  (alpha 0..1 from the engine). Called once per rendered frame. */
+  interp(alpha: number) {
+    if (this.mode === 'vehicle' || !this.interpInit) return
+    this.object.position.lerpVectors(this.rPrev, this.rTrue, alpha)
   }
 
   // --- per-frame -----------------------------------------------------------
@@ -297,6 +320,13 @@ export class Player {
       this.model.update(dt, 0, true)
       return
     }
+
+    // Render interpolation: restore the true sim position (the last render frame
+    // may have left the body lerped part-way) before stepping, and record the
+    // step's start. rTrue is recaptured at the end of the step.
+    if (!this.interpInit) { this.rTrue.copy(this.object.position); this.interpInit = true }
+    this.object.position.copy(this.rTrue)
+    this.rPrev.copy(this.rTrue)
 
     // Animate morph and resolve active mode.
     this.morphT = damp(this.morphT, this.planeTarget, config.plane.morphLambda, dt)
@@ -358,6 +388,8 @@ export class Player {
       this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
     }
     this.updateCanopy(dt)
+    // Record the step's end position for render interpolation.
+    this.rTrue.copy(this.object.position)
   }
 
   /** Latch onto a nearby rail if the board is moving fast enough. */

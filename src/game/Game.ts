@@ -534,7 +534,10 @@ export class Game {
     const crashed = di?.crashed ?? false
     const q = di?.chuteQuality ?? 0
     const orbBonus = (di?.bonusTargets ?? 0) * 30
-    const land = di ? di.landingPos.clone() : this.dropLand.clone()
+    const dest = di?.chosenDest ?? null
+    // Where you come down. Flying through a destination portal overrides it:
+    // arcade -> the plaza; mars/moon -> a zone jump kicked off below.
+    const land = dest === 'arcade' ? this.dropLand.clone() : di ? di.landingPos.clone() : this.dropLand.clone()
     const chuteBonus = crashed ? 0 : q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
     const credits = (crashed ? 40 : 120) + chuteBonus + orbBonus
     const xp = (crashed ? 20 : 50) + (q >= 0.78 ? 40 : 0)
@@ -554,15 +557,22 @@ export class Game {
     this.input.setLockEnabled(true)
     const fog = this.engine.scene.fog
     if (fog instanceof THREE.FogExp2 && this.savedFogDensity != null) { fog.density = this.savedFogDensity; this.savedFogDensity = null }
-    // The drop ended on a brief fade; fade back in on the gameplay side so the
-    // hand-off to the follow camera reads as one continuous shot.
     this.hud.fade = 1
-    this.trans = { phase: 'in', t: 0, target: this.zone }
-    // Grace period so the player can orient before the Mars gate (which sits on
-    // the route out) can fire — stops an accidental yank to Mars on hand-off.
-    this.travelCooldown = 3
-    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'You touched down in the plaza. Follow the green beacon to your objective - the OBJECTIVE readout shows the distance.' }
-    this.missionPopupTimer = 6
+    if (dest === 'mars' || dest === 'moon') {
+      // You picked an off-world portal on the way down: jump straight there.
+      this.trans = { phase: 'none', t: 0, target: this.zone }
+      this.requestTravel(dest)
+      this.hud.banner = `PORTAL · ${dest.toUpperCase()}`
+    } else {
+      // The drop ended on a brief fade; fade back in on the gameplay side so the
+      // hand-off to the follow camera reads as one continuous shot.
+      this.trans = { phase: 'in', t: 0, target: this.zone }
+      // Grace period so the player can orient before the Mars gate (which sits on
+      // the route out) can fire — stops an accidental yank to Mars on hand-off.
+      this.travelCooldown = 3
+      this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Follow the green beacon to your objective - the OBJECTIVE readout shows the distance.' }
+      this.missionPopupTimer = 6
+    }
     // On a restart replay the solo/multiplayer choice was already made, so
     // re-announce game_start; on a first solo run with no join prompt, begin now.
     if (this.startedMode) this.emitGameStart(this.startedMode)
@@ -726,6 +736,7 @@ export class Game {
     out.normalize()
     this.player.position.set(this.activePortal.x, this.activePortal.y, this.activePortal.z).addScaledVector(out, 4)
     this.player.position.y = this.physics.sampleGround(this.player.position.x, this.player.position.z, this.player.position.y + 4)?.y ?? this.activePortal.y
+    this.player.resetInterp()
     this.arcadeCooldown = 1.5
     this.input.consumePause() // drop any Escape pressed inside the minigame
     this.input.setLockEnabled(true)
@@ -1895,6 +1906,12 @@ export class Game {
       // Drop any speed FOV punch so cinematics / menus frame at the base fov.
       if (this.fovBoostCur !== 0) { this.fovBoostCur = 0; this.engine.setFovBoost(0) }
       return
+    }
+    // Smooth the on-foot body between fixed sim steps (no high-refresh stepping),
+    // and follow the interpolated position so the camera tracks it exactly.
+    if (!this.vehicles.current) {
+      this.player.interp(this.engine.alpha)
+      this.focus.copy(this.player.position)
     }
     this.camera.update(frameDt, this.input, this.focus, this.buildFollowState())
     // Keep the (desktop-only) depth-of-field focused on the subject.

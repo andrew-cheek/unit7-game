@@ -63,6 +63,8 @@ export class Engine {
   onRender: ((frameDt: number) => void) | null = null
   /** Smoothed real render frame rate (the sim now always steps at a fixed dt). */
   fps = 60
+  /** Interpolation fraction into the next fixed sim step (0..1), for smooth render. */
+  alpha = 0
   // Per-frame render stats, cached once at the end of each frame so a console
   // read (window.__UNIT7__) gets stable numbers instead of catching the counter
   // mid-accumulation or after a 1-triangle post-processing pass.
@@ -324,6 +326,11 @@ export class Engine {
     }
     // Hit the catch-up cap: drop the leftover so we don't spiral after a hitch.
     if (steps === maxSteps) this.accumulator = 0
+
+    // Fraction of the way into the next fixed step (0..1). Render code lerps the
+    // player between its previous and current sim positions by this, so motion is
+    // smooth on high-refresh displays instead of stepping at the 60Hz sim rate.
+    this.alpha = this.accumulator / fixed
 
     this.adapt(frame)
     // Per-frame hook (camera + look) right before the render, using the real
