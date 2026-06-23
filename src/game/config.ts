@@ -226,6 +226,20 @@ export const config = {
       facades: [0x100c16, 0x0e0c14, 0x130f1a, 0x0c0a12, 0x140f1c], accents: [0x8a5cff, 0x9bff4d, 0xff2bd0] },
   ] as District[],
 
+  // Day/night cycle timing (seconds within one full loop). Long enough that the
+  // day and the night each SETTLE instead of the old 2-minute strobe. The dawn
+  // ramp is kept short so the opening morning still plays out quickly; the long
+  // hold between dawnEnd and duskStart is the steady daytime, then a dusk ramp
+  // into a long neon night. dayFactor still reaches 1, so the invasion / dawn
+  // show / commuter triggers that key off it are unchanged.
+  dayNight: {
+    cycle: 480, // 8-minute full loop
+    dawnStart: 6,
+    dawnEnd: 16, // ~10s sunrise ramp (matches the old snappy morning)
+    duskStart: 320, // ~5 minutes of full day in between
+    duskEnd: 345, // 25s dusk, then ~2.5 minutes of night before the next dawn
+  },
+
   events: {
     spaceshipInterval: 10, // seconds between landing-ship events (more alien life)
     aliensPerShip: 5,

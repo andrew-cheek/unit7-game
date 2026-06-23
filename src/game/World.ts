@@ -46,21 +46,18 @@ const smooth01 = (x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// Day/night cycle, 2-minute loop. Sun starts rising at 5s, is full by 15s,
-// holds, then starts setting at 35s and eases down into a long neon night
-// before the next dawn at the 120s mark. The phase markers (full day, full
-// night) drive the city's rising/folding props + worker arrivals/departures.
-const CYCLE = 120
-const DAWN_START = 5
-const DAWN_END = 15 // full sun by 15s
-const DUSK_START = 35 // sun starts to set at 35s
-const DUSK_END = 55 // 20s sunset, then night until the next cycle
+// Day/night cycle (timing in config.dayNight). A long loop so day and night each
+// settle: a short sunrise ramp, a long full-day hold, a dusk ramp, then a long
+// neon night before the next dawn. The phase markers (full day, full night)
+// drive the city's rising/folding props + worker arrivals/departures via the
+// 0..1 dayFactor below, so lengthening the loop leaves those triggers intact.
 function dayCycle(time: number): number {
-  const u = time % CYCLE
-  if (u < DAWN_START) return 0
-  if (u < DAWN_END) return smooth01((u - DAWN_START) / (DAWN_END - DAWN_START))
-  if (u < DUSK_START) return 1
-  if (u < DUSK_END) return 1 - smooth01((u - DUSK_START) / (DUSK_END - DUSK_START))
+  const dn = config.dayNight
+  const u = time % dn.cycle
+  if (u < dn.dawnStart) return 0
+  if (u < dn.dawnEnd) return smooth01((u - dn.dawnStart) / (dn.dawnEnd - dn.dawnStart))
+  if (u < dn.duskStart) return 1
+  if (u < dn.duskEnd) return 1 - smooth01((u - dn.duskStart) / (dn.duskEnd - dn.duskStart))
   return 0
 }
 const NIGHT = {
