@@ -57,7 +57,9 @@ export class CameraController {
   // Pull the camera in on mobile so the robot reads big. Portrait widens the
   // vertical FOV (to keep the horizontal view), which shrinks the subject, so the
   // low/medium tiers sit closer to compensate.
-  private tierDist = config.tier.name === 'low' ? 0.72 : config.tier.name === 'medium' ? 0.86 : 1
+  // Pull the follow camera in closer on mobile (low/medium tiers) so the robot
+  // reads larger on a small screen; desktop (high) keeps the full distance.
+  private tierDist = config.tier.name === 'low' ? 0.56 : config.tier.name === 'medium' ? 0.72 : 1
   // Player zoom (pinch on touch, scroll on desktop). 1 = the configured default;
   // clamped so you can pull in close or back off without losing the subject.
   private zoom = 1

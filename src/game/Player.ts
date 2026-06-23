@@ -38,6 +38,7 @@ export class Player {
   private danceMoveT = 0  // time elapsed within the current move
   private danceMove = 0   // 0-4: spin, moonwalk, flip, pop-lock, raise-the-roof
   boarding = false // riding the summonable hover skateboard
+  private static readonly BOARD_LIFT = 0.42 // how far the deck floats off the ground
   private board: THREE.Group
   private boardLean = 0
   // Grind state: locked to a neon rail on the board (see GrindRails). The snap
@@ -112,6 +113,11 @@ export class Player {
 
     this.board = this.buildBoard()
     this.board.visible = false
+    // Float the board off the ground so it reads as a hoverboard (the robot is
+    // lifted onto the deck while boarding; thrusters glow in the gap below). The
+    // deck top sits 0.2 above the board's origin, so floating it by LIFT-0.2 puts
+    // the deck exactly under the robot's lifted feet (model lift = BOARD_LIFT).
+    this.board.position.y = Player.BOARD_LIFT - 0.2
     this.object.add(this.board)
 
     scene.add(this.object)
@@ -397,7 +403,9 @@ export class Player {
     if (dancing) {
       this.danceModel(dt)
     } else {
-      this.model.group.position.y = 0
+      // Stand the robot on the deck while boarding so it visibly rides the board;
+      // otherwise feet rest on the ground.
+      this.model.group.position.y = this.boarding ? Player.BOARD_LIFT : 0
       this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
     }
     this.updateCanopy(dt)
