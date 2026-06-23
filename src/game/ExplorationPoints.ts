@@ -122,10 +122,25 @@ export class ExplorationPoints {
     beacon.position.set(rx + 3, 11, rz)
     g.add(beacon)
     this.marker(g, rx, rz, 0, cyan)
-    // Energy cores scattered toward the city outskirts.
-    this.makeCore(g, 150, -130, 2.2, cyan, 'earth')
-    this.makeCore(g, -170, -90, 2.2, config.palette.magenta, 'earth')
-    this.makeCore(g, 60, 175, 2.2, config.palette.purple, 'earth')
+    // Energy cores spread across the WHOLE city (it now runs out to ~560m), not
+    // just the inner blocks, so wandering the outskirts always pays off.
+    const half = config.world.half
+    const palette = [cyan, config.palette.magenta, config.palette.purple, config.palette.orange, config.palette.lime]
+    const n = config.tier.name === 'high' ? 11 : config.tier.name === 'medium' ? 7 : 4
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + 0.6
+      const rad = half * (0.34 + (i % 3) * 0.19) // three radial bands out to ~0.72*half
+      this.makeCore(g, Math.cos(a) * rad, Math.sin(a) * rad, 2.2, palette[i % palette.length], 'earth')
+    }
+    // A tall discovery beacon over each district's hero tower so every sector
+    // reads as a place worth heading toward, not just filler sprawl.
+    const anchors: Array<[number, number, number]> = [
+      [40, 178, config.palette.cyan], [188, 36, config.palette.magenta],
+      [-176, -52, config.palette.orange], [44, -184, config.palette.purple],
+    ]
+    for (const [ax, az, col] of anchors) {
+      if (Math.abs(ax) < half - 10 && Math.abs(az) < half - 10) this.marker(g, ax, az, 0, col)
+    }
     return g
   }
 

@@ -27,15 +27,55 @@ export class Physics {
   private groundMeshes: THREE.Mesh[]
   colliders: THREE.Box3[]
 
+  // Broadphase: colliders are bucketed into a uniform XZ grid so resolveHorizontal
+  // (run by every NPC/vehicle/player each step) and topSupport only test the few
+  // boxes near the query, not all ~300 of them. A per-query stamp dedupes boxes
+  // that span multiple cells without allocating a Set each call. gridCount tracks
+  // collider.length so late pushes (landmark towers added after construction) and
+  // zone swaps trigger a rebuild lazily.
+  private static readonly CELL = 40
+  private grid = new Map<number, number[]>()
+  private stamp = new Int32Array(0)
+  private queryId = 0
+  private gridCount = -1
+
   constructor(groundMeshes: THREE.Mesh[], colliders: THREE.Box3[]) {
     this.groundMeshes = groundMeshes
     this.colliders = colliders
+    this.rebuildGrid()
   }
 
   /** Swap the active collision/ground surfaces (on zone change). */
   setSurfaces(groundMeshes: THREE.Mesh[], colliders: THREE.Box3[]) {
     this.groundMeshes = groundMeshes
     this.colliders = colliders
+    this.rebuildGrid()
+  }
+
+  private cellKey(ix: number, iz: number): number {
+    return (ix + 4096) * 8192 + (iz + 4096)
+  }
+
+  /** (Re)bucket every collider into the grid. Cheap; runs on zone change or when
+   *  the collider count changes (a few landmark boxes are pushed post-construct). */
+  private rebuildGrid() {
+    this.grid.clear()
+    const cs = Physics.CELL
+    for (let i = 0; i < this.colliders.length; i++) {
+      const b = this.colliders[i]
+      const x0 = Math.floor(b.min.x / cs), x1 = Math.floor(b.max.x / cs)
+      const z0 = Math.floor(b.min.z / cs), z1 = Math.floor(b.max.z / cs)
+      for (let ix = x0; ix <= x1; ix++) {
+        for (let iz = z0; iz <= z1; iz++) {
+          const k = this.cellKey(ix, iz)
+          let arr = this.grid.get(k)
+          if (!arr) { arr = []; this.grid.set(k, arr) }
+          arr.push(i)
+        }
+      }
+    }
+    if (this.stamp.length < this.colliders.length) this.stamp = new Int32Array(this.colliders.length)
+    this.gridCount = this.colliders.length
   }
 
   /** Highest ground surface directly below (x, z), searched from `fromY` down. */
@@ -61,8 +101,12 @@ export class Physics {
    *  player land on and walk across rooftops (building colliders aren't in the
    *  ground-mesh raycast, so without this you'd sink/eject on a roof). */
   topSupport(x: number, z: number, feetY: number, tol = 0.6): number | null {
+    if (this.colliders.length !== this.gridCount) this.rebuildGrid()
+    const arr = this.grid.get(this.cellKey(Math.floor(x / Physics.CELL), Math.floor(z / Physics.CELL)))
+    if (!arr) return null
     let best: number | null = null
-    for (const box of this.colliders) {
+    for (let n = 0; n < arr.length; n++) {
+      const box = this.colliders[arr[n]]
       if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z) continue
       const top = box.max.y
       if (top > feetY + tol) continue // top is above the feet → it's a wall here, not a floor
@@ -122,51 +166,69 @@ export class Physics {
    * overlaps in XZ, and remove the velocity component driving it into the wall.
    */
   resolveHorizontal(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, height: number) {
+    if (this.colliders.length !== this.gridCount) this.rebuildGrid()
     const r2 = radius * radius
-    for (const box of this.colliders) {
-      // Skip boxes the capsule doesn't vertically overlap. The top margin lets you
-      // rest ON a roof without being shoved sideways (topSupport snaps Y there).
-      if (pos.y >= box.max.y - 0.35 || pos.y + height <= box.min.y) continue
+    const cs = Physics.CELL
+    // Only the grid cells the capsule footprint touches; a box within `radius`
+    // must overlap one of them, and the stamp keeps a multi-cell box from being
+    // resolved twice in one call.
+    const x0 = Math.floor((pos.x - radius) / cs), x1 = Math.floor((pos.x + radius) / cs)
+    const z0 = Math.floor((pos.z - radius) / cs), z1 = Math.floor((pos.z + radius) / cs)
+    const qid = ++this.queryId
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iz = z0; iz <= z1; iz++) {
+        const arr = this.grid.get(this.cellKey(ix, iz))
+        if (!arr) continue
+        for (let n = 0; n < arr.length; n++) {
+          const idx = arr[n]
+          if (this.stamp[idx] === qid) continue
+          this.stamp[idx] = qid
+          const box = this.colliders[idx]
+          // Skip boxes the capsule doesn't vertically overlap. The top margin lets
+          // you rest ON a roof without being shoved sideways (topSupport snaps Y).
+          if (pos.y >= box.max.y - 0.35 || pos.y + height <= box.min.y) continue
 
-      const cx = Math.min(Math.max(pos.x, box.min.x), box.max.x)
-      const cz = Math.min(Math.max(pos.z, box.min.z), box.max.z)
-      const dx = pos.x - cx
-      const dz = pos.z - cz
-      const d2 = dx * dx + dz * dz
+          const cx = Math.min(Math.max(pos.x, box.min.x), box.max.x)
+          const cz = Math.min(Math.max(pos.z, box.min.z), box.max.z)
+          const dx = pos.x - cx
+          const dz = pos.z - cz
+          const d2 = dx * dx + dz * dz
 
-      if (d2 >= r2) continue
+          if (d2 >= r2) continue
 
-      if (d2 > 1e-8) {
-        const d = Math.sqrt(d2)
-        const nx = dx / d
-        const nz = dz / d
-        const pen = radius - d
-        pos.x += nx * pen
-        pos.z += nz * pen
-        const vdot = vel.x * nx + vel.z * nz
-        if (vdot < 0) {
-          vel.x -= vdot * nx
-          vel.z -= vdot * nz
-        }
-      } else {
-        // Center is inside the footprint: eject along the nearest face.
-        const toMinX = pos.x - box.min.x
-        const toMaxX = box.max.x - pos.x
-        const toMinZ = pos.z - box.min.z
-        const toMaxZ = box.max.z - pos.z
-        const minPen = Math.min(toMinX, toMaxX, toMinZ, toMaxZ)
-        if (minPen === toMinX) {
-          pos.x = box.min.x - radius
-          if (vel.x > 0) vel.x = 0
-        } else if (minPen === toMaxX) {
-          pos.x = box.max.x + radius
-          if (vel.x < 0) vel.x = 0
-        } else if (minPen === toMinZ) {
-          pos.z = box.min.z - radius
-          if (vel.z > 0) vel.z = 0
-        } else {
-          pos.z = box.max.z + radius
-          if (vel.z < 0) vel.z = 0
+          if (d2 > 1e-8) {
+            const d = Math.sqrt(d2)
+            const nx = dx / d
+            const nz = dz / d
+            const pen = radius - d
+            pos.x += nx * pen
+            pos.z += nz * pen
+            const vdot = vel.x * nx + vel.z * nz
+            if (vdot < 0) {
+              vel.x -= vdot * nx
+              vel.z -= vdot * nz
+            }
+          } else {
+            // Center is inside the footprint: eject along the nearest face.
+            const toMinX = pos.x - box.min.x
+            const toMaxX = box.max.x - pos.x
+            const toMinZ = pos.z - box.min.z
+            const toMaxZ = box.max.z - pos.z
+            const minPen = Math.min(toMinX, toMaxX, toMinZ, toMaxZ)
+            if (minPen === toMinX) {
+              pos.x = box.min.x - radius
+              if (vel.x > 0) vel.x = 0
+            } else if (minPen === toMaxX) {
+              pos.x = box.max.x + radius
+              if (vel.x < 0) vel.x = 0
+            } else if (minPen === toMinZ) {
+              pos.z = box.min.z - radius
+              if (vel.z > 0) vel.z = 0
+            } else {
+              pos.z = box.max.z + radius
+              if (vel.z < 0) vel.z = 0
+            }
+          }
         }
       }
     }
