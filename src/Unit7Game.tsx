@@ -158,7 +158,6 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
         <DropOverlay
           drop={hud.drop}
           touch={touch}
-          onSkip={() => controlsRef.current?.skipIntro()}
           onDeploy={() => controlsRef.current?.dropDeploy()}
           onSteer={(x, y) => controlsRef.current?.setVirtualMove(x, y)}
         />
@@ -398,7 +397,7 @@ type DropState = NonNullable<HudState['drop']>
  * full-screen drag-to-steer layer behind the buttons (drag forward to nose-dive,
  * back to flatten and slow).
  */
-function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropState; touch: boolean; onSkip: () => void; onDeploy: () => void; onSteer: (x: number, y: number) => void }) {
+function DropOverlay({ drop, touch, onDeploy, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onSteer: (x: number, y: number) => void }) {
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
   const onDown = (e: ReactPointerEvent) => {
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
@@ -447,7 +446,6 @@ function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropSta
       {drop.phase === 'dive' && (
         <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
       )}
-      <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
     </>
   )
 }
