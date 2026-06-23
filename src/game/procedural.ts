@@ -818,6 +818,96 @@ export function createHovercar(): VehicleModel {
 }
 
 /**
+ * Chunky off-world exploration rover (origin at chassis centre, facing +Z; wheel
+ * bottoms at y=-0.7 so it sits on the ground at hoverHeight 0.7). Six big knobby
+ * wheels on a wide stance, a roll cage, a tilted solar panel, a light bar and
+ * neon underglow. Built for bombing over Mars/Moon dunes and launching off ramps,
+ * so the wheels spin with speed and the suspension reads heavy. `accent` tints
+ * the trim per planet. Wheels are exposed for the driver to spin in update.
+ */
+export interface RoverOpts { accent?: number }
+export function createRover(opts: RoverOpts = {}): VehicleModel {
+  const accent = opts.accent ?? config.palette.orange
+  const group = new THREE.Group()
+  const mats: THREE.Material[] = []
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xb9bec8, metalness: 0.6, roughness: 0.4 })
+  const dark = new THREE.MeshStandardMaterial({ color: 0x14171e, metalness: 0.5, roughness: 0.6 })
+  const tire = new THREE.MeshStandardMaterial({ color: 0x0c0d11, metalness: 0.2, roughness: 0.85 })
+  mats.push(bodyMat, dark, tire)
+
+  const chassis = box(2.6, 0.5, 3.6, bodyMat)
+  group.add(chassis)
+  const skid = box(2.2, 0.24, 3.9, dark)
+  skid.position.y = -0.3
+  group.add(skid)
+  // Roll cage / open cab.
+  const cab = box(1.8, 0.7, 1.6, dark)
+  cab.position.set(0, 0.55, -0.3)
+  group.add(cab)
+  const seat = box(1.4, 0.5, 1.0, glowMat(mats, accent, 1.4))
+  seat.position.set(0, 0.45, -0.3)
+  group.add(seat)
+  // Tilted solar panel on the back deck.
+  const panel = box(2.2, 0.08, 1.6, glowMat(mats, 0x1b3a6b, 0.6))
+  panel.position.set(0, 0.7, -1.5)
+  panel.rotation.x = -0.28
+  group.add(panel)
+  // Neon underglow + side rails.
+  const under = box(2.0, 0.06, 3.2, glowMat(mats, accent, 3))
+  under.position.y = -0.42
+  group.add(under)
+  for (const sx of [-1.32, 1.32]) {
+    const rail = box(0.12, 0.14, 3.0, glowMat(mats, accent, 2.2))
+    rail.position.set(sx, 0.12, 0)
+    group.add(rail)
+  }
+  // Headlights + light bar.
+  for (const sx of [-0.8, 0.8]) {
+    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), glowMat(mats, 0xfff2cf, 3))
+    hl.position.set(sx, 0.05, 1.85)
+    group.add(hl)
+  }
+  const bar = box(1.6, 0.16, 0.3, glowMat(mats, accent, 3))
+  bar.position.set(0, 1.0, -0.3)
+  group.add(bar)
+  const antenna = box(0.06, 1.2, 0.06, bodyMat)
+  antenna.position.set(0.7, 1.4, -1.1)
+  group.add(antenna)
+
+  // Six big wheels (3 per side), bottoms at y=-0.7.
+  const wheelGeo = new THREE.CylinderGeometry(0.7, 0.7, 0.5, 16)
+  const hubGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.54, 8)
+  const wheels: THREE.Mesh[] = []
+  for (const sx of [-1.35, 1.35]) {
+    for (const wz of [-1.4, 0, 1.4]) {
+      const w = new THREE.Mesh(wheelGeo, tire)
+      w.rotation.z = Math.PI / 2
+      w.position.set(sx, 0, wz)
+      group.add(w)
+      const hub = new THREE.Mesh(hubGeo, glowMat(mats, accent, 1.6))
+      hub.rotation.z = Math.PI / 2
+      hub.position.set(sx, 0, wz)
+      group.add(hub)
+      wheels.push(w, hub)
+    }
+  }
+
+  shadowAll(group)
+  const underMat = under.material as THREE.MeshStandardMaterial
+  let t = 0
+  return {
+    group,
+    update: (dt, speed01) => {
+      t += dt
+      underMat.emissiveIntensity = 2.6 + Math.sin(t * 5) * 0.9
+      const spin = (0.4 + speed01 * 18) * dt
+      for (const w of wheels) w.rotation.x += spin
+    },
+    dispose: () => disposeGroup(group, mats),
+  }
+}
+
+/**
  * A long city commuter bus / shuttle (origin at body center, facing +Z). Boxy
  * hull with a bright lit window strip, a roof sign, headlights and four wheels.
  * Used by Events to ferry commuter NPCs to the office buildings.

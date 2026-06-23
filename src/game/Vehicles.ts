@@ -1,13 +1,13 @@
 import * as THREE from 'three'
 import { config } from './config'
-import { createHovercar, createSpaceship, createRocket, createSpeederBike, createMechSuit, createBus, type VehicleModel } from './procedural'
+import { createHovercar, createSpaceship, createRocket, createSpeederBike, createMechSuit, createBus, createRover, type VehicleModel } from './procedural'
 import { damp } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
 import type { Zone } from './types'
 
-export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL' | 'titan' | 'tram'
-type DriveMode = 'hover' | 'fly' | 'rocket' | 'rail'
+export type VehicleKind = 'hovercar' | 'speeder' | 'spaceship' | 'rocket' | 'mechM' | 'mechL' | 'mechXL' | 'titan' | 'tram' | 'rover'
+type DriveMode = 'hover' | 'fly' | 'rocket' | 'rail' | 'rover'
 
 export interface Vehicle {
   kind: VehicleKind
@@ -29,6 +29,7 @@ export interface Vehicle {
   path?: THREE.Vector3[] // waypoint loop for rail vehicles (the tram)
   pathIdx: number
   railStop: number // dwell timer at the current stop
+  grounded: boolean // rover: wheels on the surface (vs airborne off a ramp)
 }
 
 // Where the mechs line up relative to spawn when taken to another world.
@@ -129,6 +130,15 @@ export class Vehicles {
     const roam2 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x4a2330, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(100, 0, 86), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
     roam1.wander = true
     roam2.wander = true
+
+    // Off-world exploration rovers. They live hidden on Earth and surface on
+    // Mars / the Moon (positioned beside the spawn by setZone), where the big
+    // dune hills + launch ramps + low gravity make them a blast to bomb around.
+    const rh = config.vehicle.rover.hoverHeight
+    const marsRover = this.spawn('rover', createRover({ accent: config.palette.orange }), new THREE.Vector3(20, 0, 6), rh, 1.7, 'rover')
+    const moonRover = this.spawn('rover', createRover({ accent: config.palette.cyan }), new THREE.Vector3(24, 0, 6), rh, 1.7, 'rover')
+    marsRover.model.group.visible = false
+    moonRover.model.group.visible = false
   }
 
   private spawn(kind: VehicleKind, model: VehicleModel, at: THREE.Vector3, hoverHeight: number, radius: number, drive: DriveMode, size = 1): Vehicle {
@@ -166,6 +176,7 @@ export class Vehicles {
       wanderTurn: Math.random() * 4,
       pathIdx: 0,
       railStop: 0,
+      grounded: true,
     }
     this.list.push(v)
     return v
@@ -182,12 +193,15 @@ export class Vehicles {
     // Off-world rocket pad: rockets line up just in front of the spawn so you can
     // always find a ride onward. Spread by rocket index.
     const ROCKET_OFF = [new THREE.Vector3(-14, 0, 18), new THREE.Vector3(2, 0, 22), new THREE.Vector3(16, 0, 18)]
+    const ROVER_OFF = [new THREE.Vector3(16, 0, 4), new THREE.Vector3(22, 0, -6)]
     let rocketIdx = 0
+    let roverIdx = 0
     for (const v of this.list) {
-      // Mechs follow you off-world; rockets are everywhere (the spaceport); the
-      // rest stay parked on Earth.
+      // Mechs + rovers follow you off-world; rockets are everywhere (the
+      // spaceport); the rest stay parked on Earth. Rovers are off-world only.
       const isRocket = v.kind === 'rocket'
-      const visible = earth || isMech(v.kind) || isRocket
+      const isRover = v.kind === 'rover'
+      const visible = isRover ? !earth : (earth || isMech(v.kind) || isRocket)
       v.model.group.visible = visible
       if (!visible) continue
       if (earth) {
@@ -195,11 +209,15 @@ export class Vehicles {
       } else if (isRocket) {
         const off = ROCKET_OFF[rocketIdx % ROCKET_OFF.length]
         v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
+      } else if (isRover) {
+        const off = ROVER_OFF[roverIdx % ROVER_OFF.length]
+        v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
       } else {
         const off = OFFWORLD_MECH_OFFSET[v.kind] ?? new THREE.Vector3()
         v.position.set(spawn.x + off.x, 0, spawn.z + off.z)
       }
       if (isRocket) rocketIdx++
+      if (isRover) roverIdx++
       const gy = this.physics.sampleGround(v.position.x, v.position.z, 200)?.y ?? 0
       v.position.y = gy + (isWalker(v.kind) ? 0 : v.hoverHeight)
       v.yaw = 0
@@ -275,7 +293,7 @@ export class Vehicles {
     for (const veh of this.list) veh.model.group.visible = v
   }
 
-  update(dt: number, input: Input) {
+  update(dt: number, input: Input, gravity = -24) {
     for (const v of this.list) {
       // Skip vehicles hidden in the current zone (e.g. the dozens of rockets/cars
       // that aren't on this world). The one you're piloting is always visible, so
@@ -293,6 +311,7 @@ export class Vehicles {
       } else if (v === this.current) {
         if (v.drive === 'hover') this.driveHover(v, dt, input)
         else if (v.drive === 'fly') this.driveFly(v, dt, input)
+        else if (v.drive === 'rover') this.driveRover(v, dt, input, gravity)
       } else {
         this.idle(v, dt)
       }
@@ -400,6 +419,65 @@ export class Vehicles {
     v.position.y = damp(v.position.y, targetY, 14, dt)
 
     this.orient(v, g ? g.normal : UP, -input.moveX * 0.25 * Math.min(1, Math.abs(fs) / 12), dt, 12)
+    this.speed01 = Math.min(1, Math.abs(fs) / maxSpeed)
+  }
+
+  /**
+   * Ground vehicle with real gravity (the rover). Drives like the hovercar on
+   * the surface - follows the ground raycast and banks to the slope normal - but
+   * keeps a vertical velocity instead of being pinned to the ground, so cresting
+   * a ramp banks the upward speed of the climb and flings it into a gravity arc.
+   * The weaker off-world gravity (passed in) makes the hops big and floaty.
+   */
+  private driveRover(v: Vehicle, dt: number, input: Input, gravity: number) {
+    const cfg = config.vehicle.rover
+    const boost = input.held.boost ? 1.5 : 1
+    const maxSpeed = cfg.maxSpeed * boost
+
+    this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
+    this.right.set(Math.cos(v.yaw), 0, -Math.sin(v.yaw))
+    let fs = v.velocity.dot(this.fwd)
+    let ls = v.velocity.dot(this.right)
+    // Steer; in the air the wheels can't bite, so turning is weak.
+    const steerK = v.grounded ? (0.4 + 0.6 * Math.min(1, Math.abs(fs) / 10)) : 0.25
+    v.yaw -= input.moveX * cfg.turn * dt * steerK
+    if (v.grounded) {
+      const targetFs = input.moveY >= 0 ? input.moveY * maxSpeed : input.moveY * cfg.reverse
+      fs = approach(fs, targetFs, cfg.accel * boost * dt)
+      ls = approach(ls, 0, 60 * dt) // wheel grip kills lateral drift
+    } else {
+      ls = approach(ls, 0, 6 * dt) // little control mid-air
+    }
+
+    this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
+    this.right.set(Math.cos(v.yaw), 0, -Math.sin(v.yaw))
+    const prevY = v.position.y
+    // Horizontal from drive; vertical from gravity-integrated velocity.
+    v.position.x += (this.fwd.x * fs + this.right.x * ls) * dt
+    v.position.z += (this.fwd.z * fs + this.right.z * ls) * dt
+    v.velocity.y += gravity * dt
+    v.position.y += v.velocity.y * dt
+    // Keep velocity x/z in sync for collision response.
+    v.velocity.x = this.fwd.x * fs + this.right.x * ls
+    v.velocity.z = this.fwd.z * fs + this.right.z * ls
+    this.physics.resolveHorizontal(v.position, v.velocity, v.radius, 2)
+
+    const g = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 8)
+    const gy = g ? g.y : 0
+    const restY = gy + cfg.hoverHeight
+    if (v.position.y <= restY + 0.06) {
+      // On the surface (or climbing it): glue down and bank the climb rate as
+      // upward velocity, so the lip of a ramp turns the climb into a launch.
+      const climb = (restY - prevY) / Math.max(dt, 1e-4)
+      v.position.y = restY
+      v.velocity.y = Math.max(0, Math.min(climb, cfg.maxLaunch))
+      v.grounded = true
+    } else {
+      v.grounded = false
+    }
+
+    // Bank to the slope on the ground; settle level in the air.
+    this.orient(v, v.grounded && g ? g.normal : UP, -input.moveX * 0.2 * Math.min(1, Math.abs(fs) / 12), dt, v.grounded ? 12 : 4)
     this.speed01 = Math.min(1, Math.abs(fs) / maxSpeed)
   }
 

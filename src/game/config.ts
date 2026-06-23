@@ -177,6 +177,11 @@ export const config = {
   vehicle: {
     hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
     speeder: { accel: 56, maxSpeed: 58, reverse: 12, turn: 2.4, hoverHeight: 0.9, bob: 0.1 },
+    // Off-world exploration rover. Unlike the hovercars it has real ground +
+    // gravity physics (drive 'rover'), so climbing a ramp and clearing the lip
+    // launches it into a low-gravity arc. hoverHeight is the wheel clearance;
+    // maxLaunch caps the upward speed banked from a steep climb.
+    rover: { accel: 38, maxSpeed: 42, reverse: 14, turn: 1.6, hoverHeight: 0.7, maxLaunch: 17 },
     spaceship: { accel: 30, maxSpeed: 50, turn: 1.5, hoverHeight: 2.2 },
     // Three pilotable battle-mechs of growing size. They fly (drive: 'fly') and
     // fire missiles. Bigger = stands taller, turns slower, hits a higher top

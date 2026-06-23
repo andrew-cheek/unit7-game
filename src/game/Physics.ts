@@ -72,28 +72,49 @@ export class Physics {
   }
 
   /**
-   * Segment-vs-collider test for the grapple tendril: does the segment from→to
-   * cross any building AABB? Writes the nearest entry point to `out` and returns
-   * true. Slab method per box; cheap enough to run while the tendril extends.
+   * Pick a grapple target along an aim ray. First tries a direct hit: the nearest
+   * building face the ray crosses within `range`. If the ray misses (you rarely
+   * aim dead-on in third person), it falls back to generous forward-cone auto-aim:
+   * the best-aligned building within reach. Writes the grab point (on the near
+   * face) to `out` and returns that building's TOP Y, so the grapple can lift you
+   * to the roof edge instead of pinning you flat against the wall. Null if nothing
+   * grabbable is in reach. Called once per fire, so a few allocations are fine.
    */
-  raySegmentHit(from: THREE.Vector3, to: THREE.Vector3, out: THREE.Vector3): boolean {
-    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z
-    let best = Infinity
+  grappleTarget(from: THREE.Vector3, dir: THREE.Vector3, range: number, out: THREE.Vector3): number | null {
+    const inv = new THREE.Vector3(1 / (dir.x || 1e-9), 1 / (dir.y || 1e-9), 1 / (dir.z || 1e-9))
+    let bestT = Infinity
+    let hitBox: THREE.Box3 | null = null
     for (const box of this.colliders) {
-      let tmin = 0, tmax = 1
-      let ok = true
-      // x slab
-      if (Math.abs(dx) < 1e-9) { if (from.x < box.min.x || from.x > box.max.x) ok = false }
-      else { let t1 = (box.min.x - from.x) / dx, t2 = (box.max.x - from.x) / dx; if (t1 > t2) { const s = t1; t1 = t2; t2 = s } tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2) }
-      if (ok && Math.abs(dy) < 1e-9) { if (from.y < box.min.y || from.y > box.max.y) ok = false }
-      else if (ok) { let t1 = (box.min.y - from.y) / dy, t2 = (box.max.y - from.y) / dy; if (t1 > t2) { const s = t1; t1 = t2; t2 = s } tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2) }
-      if (ok && Math.abs(dz) < 1e-9) { if (from.z < box.min.z || from.z > box.max.z) ok = false }
-      else if (ok) { let t1 = (box.min.z - from.z) / dz, t2 = (box.max.z - from.z) / dz; if (t1 > t2) { const s = t1; t1 = t2; t2 = s } tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2) }
-      if (ok && tmin <= tmax && tmin < best) best = tmin
+      // slab intersection, entry t (may be negative if origin is inside)
+      let t1 = (box.min.x - from.x) * inv.x, t2 = (box.max.x - from.x) * inv.x
+      let tmin = Math.min(t1, t2), tmax = Math.max(t1, t2)
+      t1 = (box.min.y - from.y) * inv.y; t2 = (box.max.y - from.y) * inv.y
+      tmin = Math.max(tmin, Math.min(t1, t2)); tmax = Math.min(tmax, Math.max(t1, t2))
+      t1 = (box.min.z - from.z) * inv.z; t2 = (box.max.z - from.z) * inv.z
+      tmin = Math.max(tmin, Math.min(t1, t2)); tmax = Math.min(tmax, Math.max(t1, t2))
+      if (tmax < Math.max(tmin, 0)) continue // miss / behind
+      const t = tmin >= 0 ? tmin : tmax
+      if (t >= 0 && t <= range && t < bestT) { bestT = t; hitBox = box }
     }
-    if (best === Infinity) return false
-    out.set(from.x + dx * best, from.y + dy * best, from.z + dz * best)
-    return true
+    if (hitBox) {
+      out.set(from.x + dir.x * bestT, from.y + dir.y * bestT, from.z + dir.z * bestT)
+      return hitBox.max.y
+    }
+    // Cone fallback: closest point on each box, accept if it's roughly in the aim
+    // direction (within ~30 deg) and in range; pick the nearest such building.
+    let bestDist = Infinity
+    for (const box of this.colliders) {
+      const cx = Math.min(Math.max(from.x, box.min.x), box.max.x)
+      const cy = Math.min(Math.max(from.y, box.min.y), box.max.y)
+      const cz = Math.min(Math.max(from.z, box.min.z), box.max.z)
+      const vx = cx - from.x, vy = cy - from.y, vz = cz - from.z
+      const d = Math.hypot(vx, vy, vz)
+      if (d < 2 || d > range) continue
+      const align = (vx * dir.x + vy * dir.y + vz * dir.z) / d
+      if (align < 0.86) continue // outside the cone
+      if (d < bestDist) { bestDist = d; hitBox = box; out.set(cx, cy, cz) }
+    }
+    return hitBox ? hitBox.max.y : null
   }
 
   /**

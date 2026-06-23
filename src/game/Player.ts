@@ -41,16 +41,18 @@ export class Player {
   private model: RobotModel
   private moveDir = new THREE.Vector3()
   private prevJet = false
-  // Grapple-arm state: a tendril that extends along the aim until it hits a
-  // surface, then reels the player in.
+  // Grapple-arm state: a tendril that extends toward a pre-picked grab point
+  // (Game raycasts the aim against buildings) then reels the player up to the
+  // roof edge there. grappleHasTarget is false on a miss (the beam just shoots
+  // out to max range and retracts) so a wild aim gives clear feedback.
   grappling = false
   private grappleAttached = false
+  private grappleHasTarget = false
   private grappleDir = new THREE.Vector3()
   private grappleTip = new THREE.Vector3()
   private grappleTipPrev = new THREE.Vector3()
   private grappleAnchor = new THREE.Vector3()
   private grappleHand = new THREE.Vector3()
-  private grappleHit = new THREE.Vector3()
   private grappleLen = 0
   private grappleT = 0
   private scene: THREE.Scene
@@ -213,18 +215,42 @@ export class Player {
     this.airTime = config.parachute.deployMinAir // allow an immediate re-deploy
     return true
   }
-  /** Fire the grapple along an aim direction: a tendril shoots out from here and
-   *  extends until it touches a surface, then reels you in. Re-firing re-aims. */
-  fireGrapple(dir: THREE.Vector3) {
+  /** Fire the grapple at a grab point Game picked by raycasting your aim against
+   *  the buildings. `top` is that building's roof height: we anchor just above
+   *  the roof edge at the grab's XZ so reeling lifts you ONTO the building rather
+   *  than pinning you flat against the wall. Re-firing re-aims. */
+  fireGrapple(grab: THREE.Vector3, top: number) {
     if (this.mode === 'vehicle') return
     this.mode = 'robot'
     this.planeTarget = 0
+    const pos = this.object.position
+    this.grappleHand.set(pos.x, pos.y + 1.3, pos.z)
+    // Aim for the roof edge above the grab point, but never beyond reach.
+    const anchorY = Math.max(grab.y, Math.min(top + 1.4, this.grappleHand.y + config.grapple.range))
+    this.grappleAnchor.set(grab.x, anchorY, grab.z)
+    this.grappleDir.copy(this.grappleAnchor).sub(this.grappleHand)
+    const d = this.grappleDir.length()
+    if (d > 1e-3) this.grappleDir.multiplyScalar(1 / d)
     this.grappling = true
     this.grappleAttached = false
+    this.grappleHasTarget = true
     this.grappleT = 0
     this.grappleLen = 0
+    this.grappleTip.copy(this.grappleHand)
+  }
+  /** Fire on a miss (nothing grabbable under the aim): the tendril shoots out to
+   *  max range along the aim and retracts, so the input still reads as "fired". */
+  fireGrappleMiss(dir: THREE.Vector3) {
+    if (this.mode === 'vehicle') return
+    const pos = this.object.position
+    this.grappleHand.set(pos.x, pos.y + 1.3, pos.z)
     this.grappleDir.copy(dir).normalize()
-    this.grappleHand.set(this.object.position.x, this.object.position.y + 1.3, this.object.position.z)
+    this.grappleAnchor.copy(this.grappleHand).addScaledVector(this.grappleDir, config.grapple.range)
+    this.grappling = true
+    this.grappleAttached = false
+    this.grappleHasTarget = false
+    this.grappleT = 0
+    this.grappleLen = 0
     this.grappleTip.copy(this.grappleHand)
   }
   /** Release the grapple, keeping momentum so you fling/hop off it. */
@@ -323,33 +349,36 @@ export class Player {
     this.grappleHand.set(pos.x, pos.y + 1.3, pos.z)
 
     if (!this.grappleAttached) {
-      // EXTEND: shoot the tendril out along the fired direction, checking each new
-      // segment for a building hit. You keep coasting (light fall) while it flies.
+      // EXTEND: shoot the visible tendril toward the grab point. On a real target
+      // it curves to track the anchor (so the beam lands exactly where you'll
+      // attach); on a miss it just runs out to max range and retracts.
+      if (this.grappleHasTarget) {
+        this.grappleDir.copy(this.grappleAnchor).sub(this.grappleHand)
+        const d = this.grappleDir.length()
+        if (d > 1e-3) this.grappleDir.multiplyScalar(1 / d)
+      }
+      const reach = this.grappleHasTarget ? this.grappleHand.distanceTo(this.grappleAnchor) : g.range
       this.grappleTipPrev.copy(this.grappleTip)
       this.grappleLen += g.extendSpeed * dt
-      this.grappleTip.copy(this.grappleHand).addScaledVector(this.grappleDir, this.grappleLen)
-      if (physics.raySegmentHit(this.grappleTipPrev, this.grappleTip, this.grappleHit)) {
-        this.grappleAttached = true
-        this.grappleAnchor.copy(this.grappleHit)
-      } else if (this.grappleLen >= g.range) {
-        this.endGrapple() // missed - retract
-        return
+      this.grappleTip.copy(this.grappleHand).addScaledVector(this.grappleDir, Math.min(this.grappleLen, reach))
+      if (this.grappleLen >= reach) {
+        if (this.grappleHasTarget) this.grappleAttached = true
+        else { this.endGrapple(); return } // miss: retract
       }
-      this.velocity.y += gravity * 0.45 * dt // light fall while it extends
-      const intent = this.camRelative(input, this.moveDir)
-      if (intent > 0.1) {
-        this.velocity.x += this.moveDir.x * 14 * intent * dt
-        this.velocity.z += this.moveDir.z * 14 * intent * dt
-      }
+      this.velocity.y += gravity * 0.4 * dt // light hang while it flies
       this.model.setFlyPose(0.7)
       this.model.setThrust(0.3)
     } else {
-      // REEL: pull toward the anchor; release on arrival (with a pop to crest the
-      // ledge). Light steering lets you shape the swing.
-      const dx = this.grappleAnchor.x - pos.x, dy = this.grappleAnchor.y - pos.y, dz = this.grappleAnchor.z - pos.z
+      // REEL: pull up toward the roof-edge anchor. Light steering shapes the
+      // swing. Arriving (or reaching the ledge) pops you up + over so you land on
+      // top of the building rather than dangling against its face.
+      const dx = this.grappleAnchor.x - pos.x, dy = this.grappleAnchor.y - (pos.y + 1.3), dz = this.grappleAnchor.z - pos.z
       const dist = Math.hypot(dx, dy, dz)
-      if (dist < g.arriveDist) {
-        if (this.velocity.y < 6) this.velocity.y = 6
+      const horiz = Math.hypot(dx, dz)
+      if (dist < g.arriveDist || (horiz < 1.4 && dy < 1.6)) {
+        this.velocity.y = Math.max(this.velocity.y, 9) // pop to crest the ledge
+        this.velocity.x += (dx === 0 ? 0 : Math.sign(dx)) * 2
+        this.velocity.z += (dz === 0 ? 0 : Math.sign(dz)) * 2
         this.endGrapple()
         return
       }
@@ -357,6 +386,8 @@ export class Player {
       this.velocity.x += dx * inv * g.pull * dt
       this.velocity.y += dy * inv * g.pull * dt
       this.velocity.z += dz * inv * g.pull * dt
+      // Pressed against the wall below the edge: climb so you don't stall there.
+      if (horiz < config.player.radius + 1 && dy > 0.5) this.velocity.y += g.pull * 0.5 * dt
       const intent = this.camRelative(input, this.moveDir)
       if (intent > 0.1) {
         this.velocity.x += this.moveDir.x * 22 * intent * dt

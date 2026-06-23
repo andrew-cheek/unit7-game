@@ -146,6 +146,8 @@ export class Game {
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
   private plazaHub: { group: THREE.Group; ring: THREE.Mesh; ring2: THREE.Mesh; beamMat: THREE.MeshBasicMaterial | null } | null = null
+  // Per-frame tick for the arcade tower's live SNAKE plasma screen (Earth only).
+  private arcadeScreenUpdate: ((dt: number) => void) | null = null
   // The central plaza hero ring doubles as the Mars gateway: step into it to
   // travel. Stored as a plain trigger so checkPortals can route it like a ring.
   private plazaMars: { pos: THREE.Vector3; radius: number } | null = null
@@ -353,6 +355,7 @@ export class Game {
     this.arcadeMats.push(...lm.mats)
     this.arcadeGeos.push(...lm.geos)
     this.arcadeTex.push(...lm.texs)
+    this.arcadeScreenUpdate = lm.screenUpdate
     // Arcade proximity + transport beam (beam is a pooled mesh ArcadeSystem owns
     // and frees in its own dispose(); the arcade arrays hold only landmark resources).
     this.arcade = new ArcadeSystem(this.engine.scene)
@@ -964,8 +967,13 @@ export class Game {
   private updateGrapple() {
     const held = this.input.held.grapple
     if (held && !this.grapplePrev) {
-      this.engine.camera.getWorldDirection(this.grappleD) // aim = where you're looking
-      this.player.fireGrapple(this.grappleD)
+      const cam = this.engine.camera
+      cam.getWorldDirection(this.grappleD) // aim = where you're looking
+      // Raycast the aim against buildings (with forward-cone auto-aim) so the
+      // grapple grabs what you're looking at instead of firing into open air.
+      const top = this.physics.grappleTarget(cam.position, this.grappleD, config.grapple.range, this.grappleO)
+      if (top !== null) this.player.fireGrapple(this.grappleO, top)
+      else this.player.fireGrappleMiss(this.grappleD)
       this.audio.play('ui')
       trackEvent('ability_used', { ability: 'grapple' })
     } else if (!held && this.player.grappling) {
@@ -1696,8 +1704,9 @@ export class Game {
 
     this.missileCooldown = Math.max(0, this.missileCooldown - dt)
     const gravity = config.zones[this.zone].gravity
-    // Vehicles update in every zone now (mechs are pilotable off-world).
-    this.vehicles.update(dt, this.input)
+    // Vehicles update in every zone now (mechs are pilotable off-world); gravity
+    // feeds the rover's ramp launches (weaker off-world = bigger hops).
+    this.vehicles.update(dt, this.input, gravity)
 
     if (this.vehicles.current) {
       this.player.object.position.copy(this.vehicles.current.position)
@@ -1836,6 +1845,8 @@ export class Game {
       if (!onEarth) continue
       p.screenMat.emissiveIntensity = 1.3 + Math.sin(_elapsed * 3 + p.pos.x) * 0.35
     }
+    // Live SNAKE demo on the arcade tower's plasma screen (Earth only).
+    if (onEarth && this.arcadeScreenUpdate) this.arcadeScreenUpdate(dt)
     if (this.arcadeRobot) {
       this.arcadeRobot.group.visible = onEarth
       if (onEarth) this.arcadeRobot.update(dt, 0) // subtle idle sway
