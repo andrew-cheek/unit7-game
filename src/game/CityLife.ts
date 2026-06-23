@@ -60,6 +60,11 @@ export class CityLife implements GameSystem {
   private blimps: Blimp[] = []
   private reactors: Reactor[] = []
   private crane: { jib: THREE.Group; hook: THREE.Group; sparks: THREE.MeshStandardMaterial[] } | null = null
+  private streetDrones: { g: THREE.Group; axis: 'x' | 'z'; off: number; pos: number; dir: number; spd: number; bob: number }[] = []
+  private gates: THREE.Vector3[] = []
+  private racer: { g: THREE.Group; idx: number; speed: number } | null = null
+  private creatures: { g: THREE.Group; segs: THREE.Mesh[]; cx: number; cz: number; r: number; ang: number; spd: number; y: number; phase: number }[] = []
+  private holo: THREE.Mesh | null = null
 
   // scratch (no per-frame allocation)
   private m = new THREE.Matrix4()
@@ -75,6 +80,10 @@ export class CityLife implements GameSystem {
     this.buildSkyLanes()
     this.buildBlimps()
     this.buildSetPieces(opts)
+    this.buildStreetDrones()
+    this.buildRaceCourse(opts)
+    this.buildCreatures()
+    this.buildMarket(opts)
     this.scene.add(this.group)
   }
 
@@ -265,6 +274,143 @@ export class CityLife implements GameSystem {
     this.crane = { jib, hook, sparks }
   }
 
+  // --- street drones --------------------------------------------------------
+
+  /** Small police/courier drones patrolling down the road grid at low altitude
+   *  with a downward scan beam, so the streets themselves have life. They ride
+   *  road centrelines (multiples of the block pitch) to stay clear of buildings. */
+  private buildStreetDrones() {
+    const half = config.world.half
+    const pitch = config.world.block
+    const n = this.fx >= 0.9 ? 10 : this.fx >= 0.6 ? 6 : 3
+    const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x12151d, metalness: 0.7, roughness: 0.4 }))
+    const tints = [0x27e7ff, 0xff2bd0, 0x9bff4d, 0xffb14a]
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group()
+      const body = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.6, 0.5, 1.6)), bodyMat)
+      g.add(body)
+      const tint = tints[i % tints.length]
+      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1.1, 0.12, 6, 16)), this.own(new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      ring.rotation.x = Math.PI / 2
+      g.add(ring)
+      const beam = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.1, 8, 12, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })))
+      beam.position.y = -4
+      g.add(beam)
+      this.group.add(g)
+      const axis: 'x' | 'z' = i % 2 === 0 ? 'x' : 'z'
+      // snap the perpendicular offset to a road centreline out in the city
+      const lines = Math.floor(half / pitch)
+      const off = (Math.floor(Math.random() * (lines * 2 + 1)) - lines) * pitch
+      this.streetDrones.push({ g, axis, off, pos: (Math.random() * 2 - 1) * half, dir: Math.random() < 0.5 ? 1 : -1, spd: 12 + Math.random() * 10, bob: Math.random() * 6 })
+    }
+  }
+
+  // --- drone race course ----------------------------------------------------
+
+  /** A floating circuit of neon gates out in a district with an AI racer drone
+   *  threading them on a loop (banking into the turns). Pure spectacle you can
+   *  chase; placed off-centre so it reads as its own destination. */
+  private buildRaceCourse(opts: CityLifeOpts) {
+    if (this.fx < 0.6) return
+    const half = config.world.half
+    const ccx = -half * 0.5, ccz = half * 0.42
+    const by = opts.groundY(ccx, ccz)
+    const gateN = 7
+    const courseR = 70
+    const gateMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xff2bd0, emissiveIntensity: 2.2, roughness: 0.4 }))
+    for (let i = 0; i < gateN; i++) {
+      const a = (i / gateN) * Math.PI * 2
+      const gx = ccx + Math.cos(a) * courseR
+      const gz = ccz + Math.sin(a) * (courseR * 0.7)
+      const gy = by + 24 + Math.sin(a * 2) * 12 // weave the altitude
+      const gate = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(5, 0.5, 8, 24)), gateMat)
+      gate.position.set(gx, gy, gz)
+      gate.rotation.y = a + Math.PI / 2 // face along the track
+      this.group.add(gate)
+      this.gates.push(new THREE.Vector3(gx, gy, gz))
+    }
+    const g = new THREE.Group()
+    const hull = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(0.9, 4, 12)), this.own(new THREE.MeshStandardMaterial({ color: 0xdfe6f0, metalness: 0.6, roughness: 0.3 })))
+    hull.rotation.x = Math.PI / 2
+    g.add(hull)
+    const trail = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(0.7, 6, 12, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    trail.rotation.x = -Math.PI / 2
+    trail.position.z = -4
+    g.add(trail)
+    g.position.copy(this.gates[0])
+    this.group.add(g)
+    this.racer = { g, idx: 1, speed: 34 }
+  }
+
+  // --- drifting sky creatures -----------------------------------------------
+
+  /** Big bioluminescent "sky-whales" cruising slowly between the towers high up,
+   *  undulating as they go. Translucent + additive so they glow like jellyfish. */
+  private buildCreatures() {
+    const half = config.world.half
+    const n = this.fx >= 0.9 ? 2 : this.fx >= 0.6 ? 1 : 0
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group()
+      const skin = this.own(new THREE.MeshBasicMaterial({ color: i % 2 ? 0x7fd7ff : 0xbf8aff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const segs: THREE.Mesh[] = []
+      const SEG = 6
+      for (let s = 0; s < SEG; s++) {
+        const r = 3.4 * (1 - s / (SEG + 2))
+        const seg = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(r, 12, 8)), skin)
+        seg.position.z = -s * 4
+        seg.scale.z = 1.6
+        g.add(seg)
+        segs.push(seg)
+      }
+      for (const sx of [-1, 1]) {
+        const fin = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.2, 7, 8)), skin)
+        fin.position.set(sx * 3, 0, -4)
+        fin.rotation.z = sx * 1.2
+        g.add(fin)
+      }
+      this.group.add(g)
+      this.creatures.push({ g, segs, cx: (Math.random() * 2 - 1) * half * 0.2, cz: (Math.random() * 2 - 1) * half * 0.2, r: half * (0.35 + i * 0.15), ang: Math.random() * 6.28, spd: 0.05 + i * 0.015, y: 120 + i * 30, phase: Math.random() * 6.28 })
+    }
+  }
+
+  // --- market plaza ---------------------------------------------------------
+
+  /** A lit street-market cluster in an outer district: rows of canopied stalls
+   *  with glowing awnings around a rotating holographic vendor sign. Mostly
+   *  static (cheap); only the central holo spins. */
+  private buildMarket(opts: CityLifeOpts) {
+    const half = config.world.half
+    const cx = half * 0.42, cz = -half * 0.5
+    const by = opts.groundY(cx, cz)
+    const site = new THREE.Group()
+    site.position.set(cx, by, cz)
+    this.group.add(site)
+    const post = this.own(new THREE.MeshStandardMaterial({ color: 0x1a1d26, metalness: 0.5, roughness: 0.6 }))
+    const awnings = [0xff2bd0, 0x27e7ff, 0x9bff4d, 0xffb14a, 0x8a5cff]
+    let k = 0
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 4; c++) {
+        const sx = (c - 1.5) * 7
+        const sz = (r === 0 ? -1 : 1) * 8
+        const stall = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(5, 3, 4)), post)
+        stall.position.set(sx, 1.5, sz)
+        site.add(stall)
+        const awn = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(5.6, 0.4, 4.6)), this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: awnings[k % awnings.length], emissiveIntensity: 1.8, roughness: 0.4 })))
+        awn.position.set(sx, 3.4, sz)
+        site.add(awn)
+        k++
+      }
+    }
+    // Rotating holographic vendor sign on a plinth in the middle.
+    const plinth = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.4, 1.8, 1.2, 16)), post)
+    plinth.position.y = 0.6
+    site.add(plinth)
+    const holo = new THREE.Mesh(this.ownG(new THREE.IcosahedronGeometry(2.2, 0)), this.own(new THREE.MeshBasicMaterial({ color: 0x6fffe0, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    holo.position.y = 4
+    site.add(holo)
+    this.holo = holo
+  }
+
   // --- system contract ------------------------------------------------------
 
   setZone(zone: Zone) {
@@ -311,6 +457,53 @@ export class CityLife implements GameSystem {
       this.crane.jib.rotation.y += 0.12 * dt
       for (const s of this.crane.sparks) s.emissiveIntensity = Math.random() < 0.5 ? 2.5 + Math.random() * 2 : 0
     }
+
+    // Street drones: cruise along their road line, wrap at the city edge, bob.
+    const lim = config.world.half
+    for (const d of this.streetDrones) {
+      d.pos += d.dir * d.spd * dt
+      if (d.pos > lim) d.pos = -lim
+      else if (d.pos < -lim) d.pos = lim
+      d.bob += dt
+      const y = 8.5 + Math.sin(d.bob * 1.6) * 0.6
+      if (d.axis === 'x') {
+        d.g.position.set(d.pos, y, d.off)
+        d.g.rotation.y = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2
+      } else {
+        d.g.position.set(d.off, y, d.pos)
+        d.g.rotation.y = d.dir > 0 ? 0 : Math.PI
+      }
+    }
+
+    // Race drone: fly toward the next gate, hop to the following one on arrival.
+    if (this.racer && this.gates.length > 1) {
+      const r = this.racer
+      const target = this.gates[r.idx]
+      this.v.copy(target).sub(r.g.position)
+      const dist = this.v.length()
+      if (dist < 4) {
+        r.idx = (r.idx + 1) % this.gates.length
+      } else {
+        this.v.multiplyScalar((r.speed * dt) / dist)
+        r.g.position.add(this.v)
+        r.g.lookAt(target) // nose toward the gate (banks through the weave)
+      }
+    }
+
+    // Sky creatures: drift their loop and undulate the body segments.
+    for (const c of this.creatures) {
+      c.ang += c.spd * dt
+      const x = c.cx + Math.cos(c.ang) * c.r
+      const z = c.cz + Math.sin(c.ang) * c.r
+      c.g.position.set(x, c.y + Math.sin(this.t * 0.5 + c.phase) * 4, z)
+      c.g.rotation.y = -c.ang + Math.PI / 2
+      for (let s = 0; s < c.segs.length; s++) {
+        c.segs[s].position.y = Math.sin(this.t * 2 + c.phase + s * 0.6) * (0.5 + s * 0.18)
+      }
+    }
+
+    // Market holo sign slowly turns.
+    if (this.holo) this.holo.rotation.y += dt * 0.8
   }
 
   dispose() {
