@@ -228,6 +228,45 @@ export class Zones {
     group.add(body)
   }
 
+  /**
+   * Launch ramps: solid wedges the rover (and player) drive up and fly off. Each
+   * is a triangular prism added to the ground-raycast meshes (so Y follows the
+   * slope on the way up) with a glowing top lip + side stripes so it reads as a
+   * jump from a distance. No blocking collider - that would stop you climbing it;
+   * the ground follow + per-zone gravity do the launch. Placed out in the hills
+   * where the low gravity makes the air time dramatic.
+   */
+  private addRamps(group: THREE.Group, env: PlanetEnv, displace: (x: number, z: number) => number, color: number, specs: Array<[number, number, number, number, number, number]>) {
+    const rampMat = new THREE.MeshStandardMaterial({ color: 0x232733, metalness: 0.5, roughness: 0.55, side: THREE.DoubleSide })
+    const lipMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: 2.4, roughness: 0.4 })
+    for (const [x, z, yaw, w, len, h] of specs) {
+      const by = displace(x, z)
+      const rg = new THREE.Group()
+      rg.position.set(x, by, z)
+      rg.rotation.y = yaw
+      const wedge = new THREE.Mesh(makeWedge(w, len, h), rampMat)
+      wedge.receiveShadow = true
+      wedge.castShadow = true
+      wedge.name = 'ramp'
+      rg.add(wedge)
+      // Glowing top lip at the launch edge + chevron stripes up the face.
+      const lip = new THREE.Mesh(new THREE.BoxGeometry(w * 1.04, 0.5, 0.7), lipMat)
+      lip.position.set(0, h + 0.25, len / 2)
+      rg.add(lip)
+      for (let i = 1; i <= 3; i++) {
+        const f = i / 4
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, 0.12, 0.5), lipMat)
+        stripe.position.set(0, h * f + 0.18, -len / 2 + len * f)
+        stripe.rotation.x = -Math.atan2(h, len)
+        rg.add(stripe)
+      }
+      group.add(rg)
+      rg.updateMatrixWorld(true)
+      env.groundMeshes.push(wedge)
+      env.solidMeshes.push(rg)
+    }
+  }
+
   private scatterRocks(group: THREE.Group, env: PlanetEnv, displace: (x: number, z: number) => number, color: number, count: number) {
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.03, flatShading: true })
     for (let i = 0; i < count; i++) {
@@ -327,7 +366,12 @@ export class Zones {
 
   private buildMars(): PlanetEnv {
     const displace = (x: number, z: number) => {
+      const d = Math.hypot(x, z)
+      // Big rolling dunes ramp in away from spawn (mask = 0 near origin, 1 by ~98m)
+      // so you touch down on flat ground but the rover has real hills to launch off.
+      const hill = Math.min(1, Math.max(0, (d - 34) / 64))
       let y = Math.sin(x * 0.018) * 3 + Math.cos(z * 0.022) * 2.6 + Math.sin((x + z) * 0.04) * 1.4
+      y += hill * (Math.sin(x * 0.0065 + 1.3) * 13 + Math.cos(z * 0.0078 - 0.6) * 11 + Math.sin((x - z) * 0.0052) * 8)
       y -= 5.4 // flatten the origin region for spawn
       return y
     }
@@ -359,6 +403,14 @@ export class Zones {
     }
     this.addBoundary(env.colliders)
     this.scatterRocks(group, env, displace, 0x612e16, 26)
+    // Launch ramps spread out into the dunes (x, z, yaw, width, length, height).
+    this.addRamps(group, env, displace, config.palette.orange, [
+      [22, -34, 0, 12, 22, 7],
+      [-40, -20, Math.PI * 0.5, 11, 20, 6],
+      [54, 40, Math.PI * 0.85, 13, 26, 8.5],
+      [-60, 50, -Math.PI * 0.35, 12, 22, 7],
+      [10, 70, Math.PI, 14, 26, 9],
+    ])
     this.buildMarsLife(group, displace)
     const colony = this.buildMarsColony(group, env, displace, 64, -56)
     const baseUpdate = env.update
@@ -620,7 +672,11 @@ export class Zones {
     }
     for (let i = 0; i < 14; i++) craters.push([randRange(-160, 160), randRange(-160, 160), randRange(12, 34), randRange(2.5, 6)])
     const displace = (x: number, z: number) => {
+      const rad = Math.hypot(x, z)
+      const hill = Math.min(1, Math.max(0, (rad - 34) / 64))
       let y = Math.sin(x * 0.012) * 1.4 + Math.cos(z * 0.015) * 1.4
+      // Big rolling regolith hills further out, masked flat near the spawn pad.
+      y += hill * (Math.sin(x * 0.006 - 0.4) * 11 + Math.cos(z * 0.0072 + 1.1) * 10 + Math.sin((x + z) * 0.0049) * 6)
       for (const [cx, cz, r, d] of craters) {
         const dist = Math.hypot(x - cx, z - cz)
         if (dist < r * 1.25) {
@@ -659,6 +715,14 @@ export class Zones {
     }
     this.addBoundary(env.colliders)
     this.scatterRocks(group, env, displace, 0x55555c, 22)
+    // Launch ramps over the regolith hills - low gravity makes these huge hops.
+    this.addRamps(group, env, displace, config.palette.cyan, [
+      [-24, -32, 0.2, 12, 22, 7],
+      [38, -18, -Math.PI * 0.5, 11, 20, 6],
+      [-52, 44, Math.PI * 0.7, 13, 24, 8],
+      [60, 54, Math.PI * 1.15, 12, 24, 8],
+      [-8, 78, Math.PI, 14, 26, 9],
+    ])
     const base = this.buildMoonBase(group, env, displace, 44, 30)
     const dc = this.buildMoonDataCenter(group, env, displace, 0, 34)
     const baseUpdate = env.update
@@ -848,6 +912,29 @@ export class Zones {
     this.mars?.dispose()
     this.moon?.dispose()
   }
+}
+
+/** Triangular-prism launch ramp, centred on Z (-len/2..len/2), base at y=0 rising
+ *  to height h at the +Z end. Non-indexed so each flat face keeps its own normal
+ *  (the ground raycast reads the slope for vehicle pitch). DoubleSide material, so
+ *  winding doesn't matter for visibility. */
+function makeWedge(w: number, len: number, h: number): THREE.BufferGeometry {
+  const x = w / 2, L = len / 2
+  // Corners: A/B front-bottom, C/D back-bottom, E/F back-top.
+  const A = [-x, 0, -L], B = [x, 0, -L], C = [-x, 0, L], D = [x, 0, L], E = [-x, h, L], F = [x, h, L]
+  const tris = [
+    A, B, F, A, F, E, // top slope
+    A, C, D, A, D, B, // bottom
+    C, E, F, C, F, D, // back
+    A, E, C, // left
+    B, F, D, // right
+  ]
+  const pos = new Float32Array(tris.length * 3)
+  for (let i = 0; i < tris.length; i++) { pos[i * 3] = tris[i][0]; pos[i * 3 + 1] = tris[i][1]; pos[i * 3 + 2] = tris[i][2] }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  geo.computeVertexNormals()
+  return geo
 }
 
 function disposePlanet(group: THREE.Group) {

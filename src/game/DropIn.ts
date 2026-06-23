@@ -498,10 +498,12 @@ export class DropIn {
     let want: THREE.Vector3
     let lookWant: THREE.Vector3
     if (this.phase === 'canopy') {
-      // Under canopy: drop back + lower and look UP toward the diver so the open
-      // chute above is clearly in frame (the dive framing looked down past it).
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -11).add(new THREE.Vector3(0, 1.5, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 4).add(new THREE.Vector3(0, 4.5, 0))
+      // Under canopy: sit ABOVE and behind the diver and aim down the glide path,
+      // so the ground you're steering toward fills most of the frame while the
+      // open chute + diver stay framed in the upper third (the old framing looked
+      // up at the chute and you couldn't see where you were going).
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -12.5).add(new THREE.Vector3(0, 6.5, 0))
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 9).add(new THREE.Vector3(0, -3.5, 0))
     } else {
       // Dive: chase from above-behind, angled down so the city rushes up at you.
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -7.5).add(new THREE.Vector3(0, 4.6, 0))

@@ -32,6 +32,8 @@ export interface LandmarksResult {
   mats: THREE.Material[]
   geos: THREE.BufferGeometry[]
   texs: THREE.CanvasTexture[]
+  /** Per-frame tick for the arcade tower's live plasma screen (Earth only). */
+  screenUpdate: ((dt: number) => void) | null
 }
 
 /** The eight cabinet games, in door order (kind, accent color, marquee name). */
@@ -68,6 +70,76 @@ function makeLabelTexture(text: string, color = 0x27e7ff): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
+}
+
+/**
+ * A self-contained auto-playing SNAKE rendered to a canvas texture for the arcade
+ * tower's big "plasma" screen. A greedy auto-pilot steers toward the food (with a
+ * simple don't-trap-yourself check) so it always looks like a live demo. Steps on
+ * a fixed tick and only re-uploads the texture on a step, so it's cheap.
+ */
+function buildPlasmaScreen(): { texture: THREE.CanvasTexture; update: (dt: number) => void } {
+  const COLS = 16, ROWS = 12, CELL = 16 // -> 256 x 192
+  const cv = document.createElement('canvas')
+  cv.width = COLS * CELL; cv.height = ROWS * CELL
+  const ctx = cv.getContext('2d')!
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.magFilter = THREE.NearestFilter
+  tex.minFilter = THREE.NearestFilter
+
+  let snake: Array<[number, number]> = [[8, 6], [7, 6], [6, 6]]
+  let dir: [number, number] = [1, 0]
+  let food: [number, number] = [12, 6]
+  const bodyHit = (x: number, y: number, skipTail: boolean) => {
+    const arr = skipTail ? snake.slice(0, -1) : snake
+    return arr.some(([sx, sy]) => sx === x && sy === y)
+  }
+  const placeFood = () => {
+    let x = 0, y = 0
+    do { x = Math.floor(Math.random() * COLS); y = Math.floor(Math.random() * ROWS) } while (bodyHit(x, y, false))
+    food = [x, y]
+  }
+  const reset = () => { snake = [[8, 6], [7, 6], [6, 6]]; dir = [1, 0]; placeFood() }
+  const step = () => {
+    const [hx, hy] = snake[0]
+    // Greedy: pick the legal move that gets the head closest to the food.
+    let best: [number, number] | null = null, bestD = Infinity
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Array<[number, number]>) {
+      if (dx === -dir[0] && dy === -dir[1]) continue // never reverse
+      const nx = hx + dx, ny = hy + dy
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue
+      if (bodyHit(nx, ny, true)) continue
+      const d = Math.abs(nx - food[0]) + Math.abs(ny - food[1])
+      if (d < bestD) { bestD = d; best = [dx, dy] }
+    }
+    if (best) dir = best
+    const nx = hx + dir[0], ny = hy + dir[1]
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS || bodyHit(nx, ny, true)) { reset(); return }
+    snake.unshift([nx, ny])
+    if (nx === food[0] && ny === food[1]) { if (snake.length > COLS * ROWS - 8) reset(); else placeFood() }
+    else snake.pop()
+  }
+  const draw = () => {
+    ctx.fillStyle = '#04060a'; ctx.fillRect(0, 0, cv.width, cv.height)
+    ctx.fillStyle = 'rgba(90,130,170,0.10)'
+    for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) ctx.fillRect(x * CELL + CELL / 2 - 1, y * CELL + CELL / 2 - 1, 2, 2)
+    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 12; ctx.fillStyle = '#ff2bd0'
+    ctx.fillRect(food[0] * CELL + 2, food[1] * CELL + 2, CELL - 4, CELL - 4)
+    ctx.shadowColor = '#9bff4d'; ctx.shadowBlur = 10
+    for (let i = 0; i < snake.length; i++) {
+      ctx.fillStyle = i === 0 ? '#e6ffcf' : '#5bd83a'
+      ctx.fillRect(snake[i][0] * CELL + 1, snake[i][1] * CELL + 1, CELL - 2, CELL - 2)
+    }
+    ctx.shadowBlur = 0
+    tex.needsUpdate = true
+  }
+  placeFood(); draw()
+  let acc = 0
+  return {
+    texture: tex,
+    update: (dt: number) => { acc += dt; if (acc >= 0.11) { acc -= 0.11; step(); draw() } },
+  }
 }
 
 /** A stylized "screenshot" of a game: an iconic motif in its accent color. */
@@ -161,6 +233,8 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
   const ownG = <T extends THREE.BufferGeometry>(g: T) => { geos.push(g); return g }
 
   const arcadePortals: ArcadeCabinet[] = []
+  // Set when the arcade tower's live plasma screen is built; Game ticks it.
+  let screenUpdate: ((dt: number) => void) | null = null
 
   // ===========================================================================
   // ARCADE BUILDING — the walk-in hub. Doors = games. Sits just north of spawn
@@ -298,11 +372,24 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
       stripe.position.set(CX + sx, gy + H + TOWER_H / 2, towerFrontZ)
       scene.add(stripe)
     }
-    // Two giant glowing "screen" panels on the facade so it reads as an arcade.
-    for (const yy of [gy + H + TOWER_H * 0.35, gy + H + TOWER_H * 0.68]) {
-      const screen = new THREE.Mesh(ownG(new THREE.BoxGeometry(towerW * 0.6, 18, 0.6)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 1.8, roughness: 0.4 })))
-      screen.position.set(CX, yy, towerFrontZ - 0.3)
-      scene.add(screen)
+    // Upper facade screen (static neon glow).
+    const upperScreen = new THREE.Mesh(ownG(new THREE.BoxGeometry(towerW * 0.6, 14, 0.6)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.cyan, emissiveIntensity: 1.8, roughness: 0.4 })))
+    upperScreen.position.set(CX, gy + H + TOWER_H * 0.72, towerFrontZ - 0.3)
+    scene.add(upperScreen)
+    // Big live "plasma" screen below it running an auto-playing SNAKE demo, so the
+    // tower has real motion you can spot from across the city. Cheap: the snake
+    // steps ~9x/sec and only re-uploads the texture on a step (Earth-only update).
+    const plasma = buildPlasmaScreen(); texs.push(plasma.texture)
+    const plasmaW = towerW * 0.62, plasmaH = plasmaW * 0.75, plasmaY = gy + H + TOWER_H * 0.34
+    const plasmaScreen = new THREE.Mesh(ownG(new THREE.BoxGeometry(plasmaW, plasmaH, 0.6)), own(new THREE.MeshBasicMaterial({ map: plasma.texture, toneMapped: false })))
+    plasmaScreen.position.set(CX, plasmaY, towerFrontZ - 0.32)
+    scene.add(plasmaScreen)
+    screenUpdate = plasma.update
+    // Magenta neon bezel framing the plasma screen.
+    const bezelMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.magenta, emissiveIntensity: 2, roughness: 0.4 }))
+    for (const [w, h, ox, oy] of [[plasmaW + 1.3, 0.7, 0, plasmaH / 2], [plasmaW + 1.3, 0.7, 0, -plasmaH / 2], [0.7, plasmaH + 1.3, plasmaW / 2, 0], [0.7, plasmaH + 1.3, -plasmaW / 2, 0]] as [number, number, number, number][]) {
+      const b = new THREE.Mesh(ownG(new THREE.BoxGeometry(w, h, 0.7)), bezelMat)
+      b.position.set(CX + ox, plasmaY + oy, towerFrontZ - 0.5); scene.add(b)
     }
     // Crowning hero sign high up + a glowing roof ring beacon.
     const topTex = makeLabelTexture('ARCADE', config.palette.magenta); texs.push(topTex)
@@ -463,5 +550,5 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     rocketGate = g
   }
 
-  return { arcadePortals, plazaHub, plazaMars, rocketGate, mats, geos, texs }
+  return { arcadePortals, plazaHub, plazaMars, rocketGate, mats, geos, texs, screenUpdate }
 }
