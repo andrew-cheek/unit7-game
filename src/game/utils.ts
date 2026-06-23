@@ -65,6 +65,15 @@ export function disposeMaterial(material: THREE.Material) {
   material.dispose()
 }
 
+/** Short haptic pulse on capable devices (mobile). No-op where unsupported. */
+export function vibrate(pattern: number | number[]) {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern)
+  } catch {
+    /* ignore */
+  }
+}
+
 /** True when the device looks touch-primary (used to pick the control scheme). */
 export function isTouchDevice() {
   if (typeof window === 'undefined') return false

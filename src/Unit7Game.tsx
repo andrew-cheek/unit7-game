@@ -393,9 +393,10 @@ function IntroOverlay({ onSkip }: { onSkip: () => void }) {
 type DropState = NonNullable<HudState['drop']>
 
 /**
- * Orbital drop-in HUD: altimeter + ring count, the parachute-deploy timing gauge
- * (tap when the marker is in the green to pop a clean canopy), a DEPLOY button,
- * and on touch a full-screen drag-to-steer layer behind the buttons.
+ * Playable high-altitude drop-in HUD: altimeter + speed + a contextual hint, a
+ * DEPLOY button (armed once you're low enough to pop the canopy), and on touch a
+ * full-screen drag-to-steer layer behind the buttons (drag forward to nose-dive,
+ * back to flatten and slow).
  */
 function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropState; touch: boolean; onSkip: () => void; onDeploy: () => void; onSteer: (x: number, y: number) => void }) {
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
@@ -412,8 +413,8 @@ function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropSta
   }
   const onUp = () => { dragRef.current = null; onSteer(0, 0) }
 
-  const label = drop.phase === 'fall' ? 'FREEFALL' : drop.phase === 'window' ? 'DEPLOY NOW' : drop.phase === 'canopy' ? 'GLIDE TO THE PAD' : 'TOUCHDOWN'
-  const armed = drop.gauge != null
+  const phase = drop.phase === 'dive' ? 'NOSE-DIVE' : drop.phase === 'canopy' ? 'CANOPY' : 'TOUCHDOWN'
+  const armed = drop.canDeploy
   return (
     <>
       {/* touch steer pad sits behind the buttons */}
@@ -428,34 +429,24 @@ function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropSta
       )}
       <div style={introTitle}>
         <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
-        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ORBITAL DROP</div>
+        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>HIGH-ALTITUDE DROP</div>
       </div>
 
       <div style={dropReadout}>
         <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
-        <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · RINGS {drop.rings}/{drop.total}</div>
-        <div style={{ fontSize: 12, letterSpacing: '0.28em', color: 'rgba(223,238,255,0.7)', marginTop: 6 }}>{label}</div>
+        <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · {phase}</div>
+        {drop.hint && <div style={{ fontSize: 12, letterSpacing: '0.24em', color: 'rgba(223,238,255,0.75)', marginTop: 6 }}>{drop.hint}</div>}
       </div>
 
-      {/* deploy timing gauge */}
-      {armed && (
-        <div style={gaugeWrap}>
-          <div style={gaugeBar}>
-            <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${drop.sweetLo * 100}%`, width: `${(drop.sweetHi - drop.sweetLo) * 100}%`, background: 'rgba(157,255,90,0.45)', borderLeft: '2px solid #9dff5a', borderRight: '2px solid #9dff5a' }} />
-            <div style={{ position: 'absolute', top: -4, bottom: -4, left: `calc(${(drop.gauge ?? 0) * 100}% - 2px)`, width: 4, background: '#fff', boxShadow: '0 0 10px #fff' }} />
-          </div>
-          <div style={{ fontSize: 12, letterSpacing: '0.25em', color: '#fff', marginTop: 8, textAlign: 'center' }}>
-            {touch ? 'TAP DEPLOY IN THE GREEN' : 'SPACE / TAP DEPLOY IN THE GREEN'}
-          </div>
-        </div>
-      )}
       {drop.result && (
-        <div style={{ ...gaugeWrap, top: '38%' }}>
-          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.12em', textAlign: 'center', color: drop.result.startsWith('PERFECT') ? '#9dff5a' : drop.result.startsWith('GOOD') ? '#27e7ff' : '#ff8a1e', textShadow: '0 0 18px currentColor' }}>{drop.result}</div>
+        <div style={{ position: 'absolute', left: '50%', top: '40%', transform: 'translateX(-50%)' }}>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.12em', textAlign: 'center', color: drop.result.startsWith('CLEAN') ? '#9dff5a' : drop.result.startsWith('CANOPY') ? '#27e7ff' : '#ff8a1e', textShadow: '0 0 18px currentColor' }}>{drop.result}</div>
         </div>
       )}
 
-      <button style={{ ...deployBtn, opacity: armed ? 1 : 0.5, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
+      {drop.phase === 'dive' && (
+        <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
+      )}
       <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
     </>
   )
@@ -521,23 +512,6 @@ const dropReadout: CSSProperties = {
   textAlign: 'center',
   pointerEvents: 'none',
   fontFamily: 'ui-monospace, Menlo, monospace',
-}
-const gaugeWrap: CSSProperties = {
-  position: 'absolute',
-  top: '46%',
-  left: '50%',
-  transform: 'translateX(-50%)',
-  zIndex: 15,
-  width: 'min(440px, 76vw)',
-  pointerEvents: 'none',
-}
-const gaugeBar: CSSProperties = {
-  position: 'relative',
-  height: 18,
-  borderRadius: 999,
-  background: 'rgba(8,12,24,0.78)',
-  border: '1px solid rgba(39,231,255,0.5)',
-  overflow: 'hidden',
 }
 const deployBtn: CSSProperties = {
   position: 'absolute',

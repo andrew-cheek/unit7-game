@@ -114,6 +114,7 @@ export function HUD({
               <Stat label="SCORE" value={String(hud.score)} color={NEON.cyan} />
               <Stat label="CREDITS" value={String(hud.credits)} color={NEON.orange} />
               <Stat label="CAUGHT" value={String(hud.captured)} color={NEON.lime} />
+              {hud.shards.total > 0 && <Stat label="SHARDS" value={`${hud.shards.found}/${hud.shards.total}`} color={NEON.purple} />}
             </div>
             <div style={statRow}>
               <Stat label="BEST" value={String(hud.best)} color={NEON.purple} />
@@ -145,6 +146,49 @@ export function HUD({
       {hud.race && hud.race.near && !hud.minigame && (
         <div style={{ ...promptStyle, bottom: '28%', borderColor: 'rgba(155,255,77,0.6)' }}>
           <span style={{ color: NEON.lime }}>DRIVE THROUGH THE GATE TO RACE</span>
+        </div>
+      )}
+
+      {/* perf overlay (?debug only): live draw calls + GPU memory. Watch geos/texs
+          climb across zone + minigame switches to spot leaks. */}
+      {hud.perf && (
+        <div style={perfStyle}>
+          <span style={{ color: hud.fps >= 50 ? NEON.lime : hud.fps >= 30 ? NEON.orange : NEON.magenta }}>{hud.fps} fps</span>
+          <span style={{ color: NEON.text }}>{hud.perf.draws} draws</span>
+          <span style={{ color: NEON.dim }}>{(hud.perf.tris / 1000).toFixed(0)}k tris</span>
+          <span style={{ color: NEON.text }}>geo {hud.perf.geos}</span>
+          <span style={{ color: NEON.text }}>tex {hud.perf.texs}</span>
+        </div>
+      )}
+
+      {/* capture chain (top-center, under the objective): rapid captures build a
+          multiplier; the bar drains over the 2.5s window. */}
+      {hud.captureChain && !hud.minigame && (
+        <div style={chainStyle}>
+          <span style={{ color: NEON.orange, fontWeight: 800, fontSize: 18 }}>CHAIN ×{hud.captureChain.mult.toFixed(1)}</span>
+          <div style={{ width: 92, height: 4, marginTop: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }}>
+            <div style={{ width: `${Math.round(hud.captureChain.remaining01 * 100)}%`, height: '100%', borderRadius: 2, background: NEON.orange }} />
+          </div>
+        </div>
+      )}
+
+      {/* style combo meter (right-center): climbs while you keep expressive
+          traversal going, then banks. Colour ramps with the multiplier. */}
+      {hud.combo.active && !hud.minigame && (
+        <div style={comboStyle}>
+          <span style={{ color: NEON.dim, fontSize: 11, letterSpacing: 2 }}>STYLE</span>
+          <span
+            style={{
+              fontSize: 30,
+              fontWeight: 800,
+              lineHeight: 1,
+              color: hud.combo.mult >= 4 ? NEON.magenta : hud.combo.mult >= 2.5 ? NEON.orange : NEON.cyan,
+              textShadow: '0 0 12px currentColor',
+            }}
+          >
+            ×{hud.combo.mult.toFixed(1)}
+          </span>
+          <span style={{ color: NEON.text, fontSize: 13 }}>{hud.combo.points}</span>
         </div>
       )}
 
@@ -604,6 +648,47 @@ const objectiveStyle: CSSProperties = {
   font: '700 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.1em',
   boxShadow: '0 0 16px rgba(155,255,77,0.2)',
+}
+const chainStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '22%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  font: '700 14px/1 ui-monospace, Menlo, monospace',
+  textShadow: '0 0 12px rgba(255,138,30,0.6)',
+  pointerEvents: 'none',
+}
+const perfStyle: CSSProperties = {
+  position: 'absolute',
+  left: 'max(10px, env(safe-area-inset-left))',
+  bottom: 'max(10px, env(safe-area-inset-bottom))',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '6px 10px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 8,
+  font: '600 11px/1.3 ui-monospace, Menlo, monospace',
+  pointerEvents: 'none',
+}
+const comboStyle: CSSProperties = {
+  position: 'absolute',
+  right: 'max(16px, env(safe-area-inset-right))',
+  top: '42%',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-end',
+  gap: 2,
+  padding: '8px 14px',
+  background: 'rgba(6,10,22,0.55)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 12,
+  font: '700 14px/1 ui-monospace, Menlo, monospace',
+  pointerEvents: 'none',
 }
 const raceStyle: CSSProperties = {
   position: 'absolute',

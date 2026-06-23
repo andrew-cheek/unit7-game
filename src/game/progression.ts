@@ -291,6 +291,7 @@ export interface AchContext {
   gamesPlayed: number // distinct arcade cabinets played at least once
   colorsOwned: number
   dailyCompleted: boolean // a daily objective has been completed (this session or ever)
+  shardsFound: number // lifetime data shards collected (discovery layer)
 }
 
 export interface AchievementDef {
@@ -324,6 +325,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'col4', name: 'Collector', desc: 'Own 4 colors', color: BRONZE, ok: (c) => c.colorsOwned >= 4 },
   { id: 'colAll', name: 'Fashionista', desc: 'Own every color', color: GOLD, ok: (c) => c.colorsOwned >= 8 },
   { id: 'daily', name: 'Daily Grind', desc: 'Complete a daily objective', color: SILVER, ok: (c) => c.dailyCompleted },
+  { id: 'shard25', name: 'Scavenger', desc: 'Collect 25 data shards', color: BRONZE, ok: (c) => c.shardsFound >= 25 },
+  { id: 'shard150', name: 'Data Hoarder', desc: 'Collect 150 data shards', color: SILVER, ok: (c) => c.shardsFound >= 150 },
+  { id: 'shard500', name: 'Archivist', desc: 'Collect 500 data shards', color: GOLD, ok: (c) => c.shardsFound >= 500 },
 ]
 
 /** Evaluate all achievements against the context; persist + return newly unlocked. */

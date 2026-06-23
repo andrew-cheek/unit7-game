@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { config, type ZoneCfg } from './config'
+import { config, type ZoneCfg, type District } from './config'
 import { hash01 } from './utils'
 import { createSky, createWindowTexture, type SkyModel } from './procedural'
 import { NeonManager } from './NeonManager'
@@ -41,36 +41,23 @@ export const OFFICE_ANCHORS: OfficeAnchor[] = [
 const ROT_NONE = new THREE.Quaternion() // identity rotation for instanced transforms
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
-// NeonManager district rule: map a chunk's normalized distance from the city
-// centre to a neon allowance (0..1) so the whole city isn't uniformly noisy.
-//   plaza heart   (<0.18): limited — the plaza hub is the hero, towers stay calm
-//   commercial   (0.18-0.5): full — the bright signage band
-//   residential/industrial (>0.5): mostly ambient, minimal signage
-function districtNeon(distNorm: number): number {
-  if (distNorm < 0.18) return 0.5
-  if (distNorm < 0.5) return 1
-  return 0.25
-}
 const smooth01 = (x: number) => {
   const t = Math.min(1, Math.max(0, x))
   return t * t * (3 - 2 * t)
 }
 
-// Day/night cycle, 2-minute loop. Sun starts rising at 5s, is full by 15s,
-// holds, then starts setting at 35s and eases down into a long neon night
-// before the next dawn at the 120s mark. The phase markers (full day, full
-// night) drive the city's rising/folding props + worker arrivals/departures.
-const CYCLE = 120
-const DAWN_START = 5
-const DAWN_END = 15 // full sun by 15s
-const DUSK_START = 35 // sun starts to set at 35s
-const DUSK_END = 55 // 20s sunset, then night until the next cycle
+// Day/night cycle (timing in config.dayNight). A long loop so day and night each
+// settle: a short sunrise ramp, a long full-day hold, a dusk ramp, then a long
+// neon night before the next dawn. The phase markers (full day, full night)
+// drive the city's rising/folding props + worker arrivals/departures via the
+// 0..1 dayFactor below, so lengthening the loop leaves those triggers intact.
 function dayCycle(time: number): number {
-  const u = time % CYCLE
-  if (u < DAWN_START) return 0
-  if (u < DAWN_END) return smooth01((u - DAWN_START) / (DAWN_END - DAWN_START))
-  if (u < DUSK_START) return 1
-  if (u < DUSK_END) return 1 - smooth01((u - DUSK_START) / (DUSK_END - DUSK_START))
+  const dn = config.dayNight
+  const u = time % dn.cycle
+  if (u < dn.dawnStart) return 0
+  if (u < dn.dawnEnd) return smooth01((u - dn.dawnStart) / (dn.dawnEnd - dn.dawnStart))
+  if (u < dn.duskStart) return 1
+  if (u < dn.duskEnd) return 1 - smooth01((u - dn.duskStart) / (dn.duskEnd - dn.duskStart))
   return 0
 }
 const NIGHT = {
@@ -246,6 +233,7 @@ export class World {
     this.buildStreetProps()
     this.buildCity()
     this.buildNearbyBuildings()
+    this.buildDistrictAnchors()
     this.finalizeBuildingMerge()
     this.buildElevatedPlatform()
     this.buildDriveHighway()
@@ -424,13 +412,15 @@ export class World {
     this.group.add(posts, heads)
   }
 
-  private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number, neon = 1) {
-    // ~40% of towers are dark, matte concrete/metal with NO glowing window grid.
-    // This is the main lever for both "less neon" and "more variety": the city
-    // becomes lit towers standing among dark ones, instead of every face glowing.
-    // On mobile (low/medium) fewer are dark, so the sparser, bloom-light skyline
-    // still reads as lit windows instead of collapsing into flat black boxes.
-    const darkFrac = config.tier.name === 'high' ? 0.4 : 0.24
+  private addBuilding(cx: number, cz: number, fx: number, fz: number, h: number, seed: number, district: District, neonMul = 1) {
+    // Decorative-neon allowance for this tower: the district's base times any
+    // per-call multiplier (the calm spawn-side blocks pass a low one).
+    const neon = district.neon * neonMul
+    // A fraction of towers are dark, matte concrete/metal with NO glowing window
+    // grid - the main lever for value contrast + variety (lit towers standing
+    // among dark ones). Per-district now: the docks read heavy + dark, the
+    // market bright. Eased back on mobile so the sparser skyline still reads lit.
+    const darkFrac = district.dark * (config.tier.name === 'high' ? 1 : 0.6)
     const dark = hash01(seed * 1.31) < darkFrac
     // ~16% are cylindrical for silhouette variety against the box towers.
     const round = hash01(seed * 2.91) < 0.16
@@ -447,7 +437,7 @@ export class World {
       }
       mat = dm
     } else {
-      const fpal = [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f, 0x0a1117, 0x161019, 0x0a1a1f, 0x161021, 0x1a1410, 0x101a16]
+      const fpal = district.facades
       const facade = fpal[Math.floor(hash01(seed * 1.7) * fpal.length)]
       // Pool the window texture by (base index, repeat) - towers of similar size
       // reuse one GPU texture instead of each cloning its own.
@@ -503,9 +493,9 @@ export class World {
       this.colliders.push(new THREE.Box3(new THREE.Vector3(cx - bw / 2, 0, cz - bd / 2), new THREE.Vector3(cx + bw / 2, bh, cz + bd / 2)))
     }
     // Neon roofline trim on a minority of towers + a vertical spine up tall ones.
-    // Restricted to the 3-hue accent set (cyan / magenta / violet) for palette
-    // discipline so a city block isn't every colour at once.
-    const ACCENTS = [config.palette.cyan, config.palette.magenta, config.palette.purple]
+    // The accent hues come from the district (the market runs magenta/orange,
+    // the spires cool cyan/violet) so each sector reads as its own palette.
+    const ACCENTS = district.accents
     const neonCorner = ACCENTS[Math.floor(hash01(seed * 6.7) * ACCENTS.length)]
     // Trim chance scales with the district neon allowance (NeonManager rule):
     // commercial blocks get more, residential/industrial stay calm.
@@ -619,6 +609,29 @@ export class World {
     }
   }
 
+  // Map a world position to its district: a central core, then four angular
+  // sectors radiating out. Cheap enough to call per-building at build time and
+  // per-frame for the HUD toast. Core radius keeps the plaza + office ring as
+  // one coherent hub before the themed sectors begin.
+  private static readonly CORE_R = 74
+  private districtById = new Map<string, District>(config.districts.map((d) => [d.id, d] as const))
+
+  districtAt(cx: number, cz: number): District {
+    const r = Math.hypot(cx, cz)
+    if (r < World.CORE_R) return this.districtById.get('core')!
+    const a = Math.atan2(cz, cx) // -π..π
+    const q = Math.PI / 4
+    if (a >= -q && a < q) return this.districtById.get('market')! // east (+x)
+    if (a >= q && a < 3 * q) return this.districtById.get('spires')! // north (+z)
+    if (a >= -3 * q && a < -q) return this.districtById.get('undercity')! // south (-z)
+    return this.districtById.get('docks')! // west (-x)
+  }
+
+  /** District name at a world position (for the HUD crossing toast). */
+  districtNameAt(x: number, z: number): string {
+    return this.districtAt(x, z).name
+  }
+
   private buildCity() {
     const pitch = config.world.block + config.world.roadWidth
     const cells = Math.floor(config.world.half / pitch)
@@ -630,15 +643,15 @@ export class World {
         const cz = j * pitch
         const seed = (i + 50) * 131 + (j + 50)
         const distNorm = Math.min(1, Math.hypot(i, j) / cells)
-        // Density falls off with distance from the core: a dense downtown that
-        // thins into sparse sprawl at the edges (skip ~8% near the centre,
-        // ~94% out at the rim).
-        if (hash01(seed) < 0.08 + Math.pow(distNorm, 1.6) * 0.86) continue
-        const maxH = 120 * (1 - distNorm) + 20 // taller glowing towers
-        // District neon rule (NeonManager): a tight inner commercial core is the
-        // bright signage band; the plaza heart stays limited (the hub is the
-        // hero), and the residential/industrial outskirts are calm + ambient.
-        const neon = districtNeon(distNorm)
+        const district = this.districtAt(cx, cz)
+        // Density falls off with distance from the core (dense downtown thinning
+        // to sparse sprawl), then the district's own density biases it: the
+        // docks read sparse + industrial, the market a touch busier.
+        const keep = (1 - (0.08 + Math.pow(distNorm, 1.6) * 0.86)) * district.density
+        if (hash01(seed) > keep) continue
+        // Radial height falloff, shaped by the district: spires reach higher,
+        // the market + docks stay low.
+        const maxH = (120 * (1 - distNorm) + 20) * district.heightMul
         const usable = config.world.block - config.world.sidewalk * 2
         // Twin-tower blocks only in the inner half; the outskirts are single, low.
         const n = distNorm < 0.5 && hash01(seed * 7) < 0.45 ? 2 : 1
@@ -648,9 +661,30 @@ export class World {
           const h = 14 + hash01(seed * 11 + k) * maxH
           const ox = n === 2 ? (k === 0 ? -1 : 1) * (usable * 0.22) : 0
           const oz = n === 2 ? (hash01(seed * 13 + k) - 0.5) * usable * 0.3 : 0
-          this.addBuilding(cx + ox, cz + oz, fx, fz, h, seed * 19 + k, neon)
+          this.addBuilding(cx + ox, cz + oz, fx, fz, h, seed * 19 + k, district)
         }
       }
+    }
+  }
+
+  /**
+   * A handful of supertall hero towers anchoring the themed sectors. They break
+   * the normal height ceiling so the skyline has recognizable landmarks to climb
+   * toward, and use the same merged-body path as every other tower (cheap).
+   */
+  private buildDistrictAnchors() {
+    const anchors: Array<[number, number, number, number]> = [
+      // x, z, footprint, height — one hero tower per sector for a spread skyline
+      [40, 178, 40, 218], // CORPORATE SPIRES megatower (north, +z)
+      [188, 36, 34, 150], // NEON MARKET signal spire (east, +x)
+      [-176, -52, 32, 120], // INDUSTRIAL DOCKS gantry tower (west, -x)
+      [44, -184, 30, 132], // THE UNDERCITY derelict spire (south, -z)
+    ]
+    for (let a = 0; a < anchors.length; a++) {
+      const [cx, cz, f, h] = anchors[a]
+      const lim = config.world.half - 30
+      if (Math.abs(cx) > lim || Math.abs(cz) > lim) continue // skip if the world is too small (mobile)
+      this.addBuilding(cx, cz, f, f, h, 4000 + a * 17, this.districtAt(cx, cz))
     }
   }
 
@@ -669,7 +703,7 @@ export class World {
       const fx = 8 + hash01(seed) * 8
       const fz = 8 + hash01(seed * 1.7) * 8
       const h = 8 + hash01(seed * 2.3) * 16 // short, neighborhood-scale
-      this.addBuilding(cx, cz, fx, fz, h, seed, 0.35) // spawn-side blocks stay calm
+      this.addBuilding(cx, cz, fx, fz, h, seed, this.districtAt(cx, cz), 0.35) // spawn-side blocks stay calm
     }
   }
 

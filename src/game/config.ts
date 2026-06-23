@@ -207,6 +207,39 @@ export const config = {
     police: 3, // police cruisers patrolling staggered beats around the plaza
   },
 
+  // Named districts give the city a mental shape instead of one uniform sprawl.
+  // A central core, then four angular sectors radiating out, each with its own
+  // facade palette, neon allowance, height profile and density. Buildings reuse
+  // the same pooled/merged geometry, so this is colour + tuning, not extra draw
+  // calls. `dark` is the fraction of matte (un-lit) towers; `neon` scales the
+  // decorative-neon allowance; `heightMul`/`density` shape the silhouette.
+  districts: [
+    { id: 'core', name: 'PLAZA CORE', neon: 0.55, density: 1.0, heightMul: 1.0, dark: 0.38,
+      facades: [0x0c0e15, 0x0f1219, 0x12151f, 0x0a0c12, 0x14181f], accents: [0x27e7ff, 0x8a5cff] },
+    { id: 'spires', name: 'CORPORATE SPIRES', neon: 0.7, density: 1.0, heightMul: 1.32, dark: 0.46,
+      facades: [0x0a0e15, 0x0c1019, 0x0a1117, 0x0a1a1f, 0x0e1622], accents: [0x27e7ff, 0x8a5cff] },
+    { id: 'market', name: 'NEON MARKET', neon: 1.0, density: 1.08, heightMul: 0.78, dark: 0.18,
+      facades: [0x161019, 0x1a1410, 0x161021, 0x12101a, 0x1a1014], accents: [0xff2bd0, 0xff8a1e, 0x27e7ff] },
+    { id: 'docks', name: 'INDUSTRIAL DOCKS', neon: 0.35, density: 0.82, heightMul: 0.66, dark: 0.55,
+      facades: [0x14110c, 0x161310, 0x101410, 0x12130f, 0x171612], accents: [0xff8a1e, 0x9bff4d] },
+    { id: 'undercity', name: 'THE UNDERCITY', neon: 0.48, density: 0.95, heightMul: 0.9, dark: 0.5,
+      facades: [0x100c16, 0x0e0c14, 0x130f1a, 0x0c0a12, 0x140f1c], accents: [0x8a5cff, 0x9bff4d, 0xff2bd0] },
+  ] as District[],
+
+  // Day/night cycle timing (seconds within one full loop). Long enough that the
+  // day and the night each SETTLE instead of the old 2-minute strobe. The dawn
+  // ramp is kept short so the opening morning still plays out quickly; the long
+  // hold between dawnEnd and duskStart is the steady daytime, then a dusk ramp
+  // into a long neon night. dayFactor still reaches 1, so the invasion / dawn
+  // show / commuter triggers that key off it are unchanged.
+  dayNight: {
+    cycle: 480, // 8-minute full loop
+    dawnStart: 6,
+    dawnEnd: 16, // ~10s sunrise ramp (matches the old snappy morning)
+    duskStart: 320, // ~5 minutes of full day in between
+    duskEnd: 345, // 25s dusk, then ~2.5 minutes of night before the next dawn
+  },
+
   events: {
     spaceshipInterval: 10, // seconds between landing-ship events (more alien life)
     aliensPerShip: 5,
@@ -249,6 +282,19 @@ export const config = {
     mars: { gravity: -9.5, fog: 0x3a1206, fogNear: 30, fogFar: 200, ground: 0x7a3a1c, ambient: 0x5a2a14, ambientI: 0.7 },
     moon: { gravity: -4.2, fog: 0x05060a, fogNear: 40, fogFar: 320, ground: 0x6a6a73, ambient: 0x1a1a22, ambientI: 0.35 },
   } satisfies Record<Zone, ZoneCfg>,
+}
+
+/** A themed region of the city. The spatial mapping (which sector) lives in
+ *  World; these are the per-district look + tuning knobs. */
+export interface District {
+  id: string
+  name: string
+  neon: number // decorative-neon allowance (0..1+), scales trim/spine/band chance
+  density: number // building keep multiplier (1 = unchanged, <1 = sparser)
+  heightMul: number // tower-height multiplier over the radial falloff
+  dark: number // fraction of matte, un-lit towers (value contrast)
+  facades: number[] // lit-facade base colours (very dark; windows do the glowing)
+  accents: number[] // neon accent hues used for trim/spines/roof caps
 }
 
 export interface Mission {

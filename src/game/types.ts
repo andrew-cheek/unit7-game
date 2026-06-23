@@ -41,6 +41,10 @@ export interface HudState {
   best: number // best score this device (persisted)
   credits: number // spendable currency (persisted)
   captured: number
+  shards: { found: number; total: number } // data shards collected this session / total in zone
+  combo: { active: boolean; points: number; mult: number } // live traversal style combo
+  captureChain: { mult: number; remaining01: number } | null // rapid-capture chain (null when idle)
+  perf: { draws: number; tris: number; geos: number; texs: number } | null // ?debug perf overlay (null in normal play)
   speed: number // m/s
   altitude: number // m above ground
   heading: number // camera yaw, radians (for the compass)
@@ -72,9 +76,9 @@ export interface HudState {
   progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
   warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
   race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
-  // non-null during the orbital drop-in opening: altimeter, ring count, and the
-  // parachute-deploy timing gauge (gauge/sweetLo/sweetHi drive the tap target).
-  drop: { alt: number; rings: number; total: number; speed: number; phase: 'fall' | 'window' | 'canopy' | 'land'; gauge: number | null; sweetLo: number; sweetHi: number; result: string | null } | null
+  // non-null during the playable drop-in opening: altimeter, speed, phase + a
+  // contextual hint, and whether the chute can be deployed yet.
+  drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land'; hint: string | null; canDeploy: boolean; result: string | null } | null
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */

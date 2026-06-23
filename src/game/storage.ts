@@ -8,10 +8,11 @@ export interface Profile {
   lifetimeCaptured: number
   credits: number
   unlocks: string[] // unlocked vehicle kinds (mechM is free by default)
+  shardsFound: number // lifetime data shards collected (discovery layer)
 }
 
 const KEY = 'unit7.profile.v1'
-const DEFAULT: Profile = { best: 0, lifetimeCaptured: 0, credits: 0, unlocks: ['mechM'] }
+const DEFAULT: Profile = { best: 0, lifetimeCaptured: 0, credits: 0, unlocks: ['mechM'], shardsFound: 0 }
 
 export function loadProfile(): Profile {
   try {
@@ -25,6 +26,7 @@ export function loadProfile(): Profile {
       lifetimeCaptured: Number(p.lifetimeCaptured) || 0,
       credits: Number(p.credits) || 0,
       unlocks,
+      shardsFound: Number(p.shardsFound) || 0,
     }
   } catch {
     return { ...DEFAULT, unlocks: [...DEFAULT.unlocks] }
