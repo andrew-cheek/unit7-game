@@ -56,6 +56,21 @@ export class Physics {
     return { y: hit.point.y, normal: this.hitNormal }
   }
 
+  /** Highest collider TOP directly under (x,z) that sits at or just below the
+   *  feet — i.e. a building roof you can stand on. Returns null if none. Lets the
+   *  player land on and walk across rooftops (building colliders aren't in the
+   *  ground-mesh raycast, so without this you'd sink/eject on a roof). */
+  topSupport(x: number, z: number, feetY: number, tol = 0.6): number | null {
+    let best: number | null = null
+    for (const box of this.colliders) {
+      if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z) continue
+      const top = box.max.y
+      if (top > feetY + tol) continue // top is above the feet → it's a wall here, not a floor
+      if (best === null || top > best) best = top
+    }
+    return best
+  }
+
   /**
    * Push a capsule (feet at pos.y, of given radius/height) out of any AABB it
    * overlaps in XZ, and remove the velocity component driving it into the wall.
@@ -63,8 +78,9 @@ export class Physics {
   resolveHorizontal(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, height: number) {
     const r2 = radius * radius
     for (const box of this.colliders) {
-      // Skip boxes the capsule doesn't vertically overlap (e.g. standing on top).
-      if (pos.y >= box.max.y || pos.y + height <= box.min.y) continue
+      // Skip boxes the capsule doesn't vertically overlap. The top margin lets you
+      // rest ON a roof without being shoved sideways (topSupport snaps Y there).
+      if (pos.y >= box.max.y - 0.35 || pos.y + height <= box.min.y) continue
 
       const cx = Math.min(Math.max(pos.x, box.min.x), box.max.x)
       const cz = Math.min(Math.max(pos.z, box.min.z), box.max.z)

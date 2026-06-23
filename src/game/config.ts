@@ -231,9 +231,9 @@ export const config = {
       facades: [0x0a0e15, 0x0c1019, 0x0a1117, 0x0a1a1f, 0x0e1622], accents: [0x27e7ff, 0x8a5cff] },
     { id: 'market', name: 'NEON MARKET', neon: 1.0, density: 1.08, heightMul: 0.78, dark: 0.18,
       facades: [0x161019, 0x1a1410, 0x161021, 0x12101a, 0x1a1014], accents: [0xff2bd0, 0xff8a1e, 0x27e7ff] },
-    { id: 'docks', name: 'INDUSTRIAL DOCKS', neon: 0.35, density: 0.82, heightMul: 0.66, dark: 0.55,
+    { id: 'docks', name: 'INDUSTRIAL DOCKS', neon: 0.35, density: 0.95, heightMul: 0.7, dark: 0.55,
       facades: [0x14110c, 0x161310, 0x101410, 0x12130f, 0x171612], accents: [0xff8a1e, 0x9bff4d] },
-    { id: 'undercity', name: 'THE UNDERCITY', neon: 0.48, density: 0.95, heightMul: 0.9, dark: 0.5,
+    { id: 'undercity', name: 'THE UNDERCITY', neon: 0.48, density: 1.0, heightMul: 0.92, dark: 0.5,
       facades: [0x100c16, 0x0e0c14, 0x130f1a, 0x0c0a12, 0x140f1c], accents: [0x8a5cff, 0x9bff4d, 0xff2bd0] },
   ] as District[],
 
