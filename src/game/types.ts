@@ -43,6 +43,7 @@ export interface HudState {
   captured: number
   shards: { found: number; total: number } // data shards collected this session / total in zone
   combo: { active: boolean; points: number; mult: number } // live traversal style combo
+  captureChain: { mult: number; remaining01: number } | null // rapid-capture chain (null when idle)
   perf: { draws: number; tris: number; geos: number; texs: number } | null // ?debug perf overlay (null in normal play)
   speed: number // m/s
   altitude: number // m above ground

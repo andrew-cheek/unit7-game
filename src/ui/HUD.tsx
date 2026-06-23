@@ -161,6 +161,17 @@ export function HUD({
         </div>
       )}
 
+      {/* capture chain (top-center, under the objective): rapid captures build a
+          multiplier; the bar drains over the 2.5s window. */}
+      {hud.captureChain && !hud.minigame && (
+        <div style={chainStyle}>
+          <span style={{ color: NEON.orange, fontWeight: 800, fontSize: 18 }}>CHAIN ×{hud.captureChain.mult.toFixed(1)}</span>
+          <div style={{ width: 92, height: 4, marginTop: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }}>
+            <div style={{ width: `${Math.round(hud.captureChain.remaining01 * 100)}%`, height: '100%', borderRadius: 2, background: NEON.orange }} />
+          </div>
+        </div>
+      )}
+
       {/* style combo meter (right-center): climbs while you keep expressive
           traversal going, then banks. Colour ramps with the multiplier. */}
       {hud.combo.active && !hud.minigame && (
@@ -637,6 +648,18 @@ const objectiveStyle: CSSProperties = {
   font: '700 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.1em',
   boxShadow: '0 0 16px rgba(155,255,77,0.2)',
+}
+const chainStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '22%',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  font: '700 14px/1 ui-monospace, Menlo, monospace',
+  textShadow: '0 0 12px rgba(255,138,30,0.6)',
+  pointerEvents: 'none',
 }
 const perfStyle: CSSProperties = {
   position: 'absolute',

@@ -27,6 +27,7 @@ import { SystemRegistry } from './System'
 import { FxPool } from './FxPool'
 import { Collectibles } from './Collectibles'
 import { TraversalScore } from './TraversalScore'
+import { CaptureCombo } from './CaptureCombo'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -153,6 +154,8 @@ export class Game {
   private collectibles!: Collectibles
   // Style-combo scoring for expressive traversal (air / board / jet / glide).
   private traversal!: TraversalScore
+  // Capture chain multiplier (rapid captures scale score + credits).
+  private captureCombo!: CaptureCombo
   // Shared-world multiplayer (net socket, remote players, shared aliens, duels,
   // roster). No-ops cleanly when solo; owns its own net state.
   private mp!: MultiplayerManager
@@ -276,6 +279,8 @@ export class Game {
       plane: () => this.player.mode === 'plane',
       onBank: (credits, xp, mult, points) => this.onStyleBank(credits, xp, mult, points),
     }))
+    // Capture chain: rapid captures build a multiplier on score + credits.
+    this.captureCombo = this.systems.register(new CaptureCombo())
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
@@ -404,6 +409,7 @@ export class Game {
       mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
       shards: { found: 0, total: 0 },
       combo: { active: false, points: 0, mult: 1 },
+      captureChain: null,
       perf: null,
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
@@ -975,8 +981,13 @@ export class Game {
 
     if (best) {
       const award = best.capture()
-      this.hud.score += Math.round(award * this.scoreMul)
-      this.addCredits(Math.round(award * 0.5))
+      // Chain multiplier for rapid captures, plus a point-blank "close call" bonus.
+      const chainMul = this.captureCombo.registerCapture()
+      const closeCall = bestD < 4
+      const mul = this.scoreMul * chainMul * (closeCall ? 1.5 : 1)
+      const gained = Math.round(award * mul)
+      this.hud.score += gained
+      this.addCredits(Math.round(award * 0.5 * chainMul * (closeCall ? 1.5 : 1)))
       this.hud.captured += 1
       trackEvent('npc_captured', { total: this.hud.captured })
       // Juice: a quick cyan ring pop + micro freeze-frame where the target netted.
@@ -984,6 +995,13 @@ export class Game {
       this.engine.triggerHitstop(0.035)
       vibrate(25)
       this.audio.play('capture')
+      // Point-blank net refunds a little stamina — rewards taking the risk.
+      if (closeCall) this.player.stamina = Math.min(config.player.staminaMax, this.player.stamina + 25)
+      // Brief feedback only when it's noteworthy (a chain or a close call).
+      if (closeCall || chainMul > 1) {
+        this.hud.banner = `${closeCall ? 'CLOSE CALL  ' : ''}${chainMul > 1 ? `CHAIN ×${chainMul.toFixed(1)}  ` : ''}+${gained}`
+        this.bannerTimer = 1.1
+      }
       this.awardCaptureProgress(1)
       // Let everyone else see the capture happen.
       this.mp.broadcastCapture([best.position.x, best.position.y, best.position.z], award)
@@ -1070,18 +1088,21 @@ export class Game {
   private detonate(pos: THREE.Vector3, radius: number) {
     const r2 = radius * radius
     let hits = 0
+    let rawAward = 0
     for (const c of this.capturables) {
       if (!c.alive) continue
       const dx = c.position.x - pos.x
       const dz = c.position.z - pos.z
       if (dx * dx + dz * dz > r2) continue
-      const award = c.capture()
-      this.hud.score += Math.round(award * this.scoreMul)
-      this.addCredits(Math.round(award * 0.5))
+      rawAward += c.capture()
       this.hud.captured += 1
       hits++
     }
     if (hits > 0) {
+      // One chain tick per blast; the multiplier scales the whole payout.
+      const mul = this.scoreMul * this.captureCombo.registerCapture()
+      this.hud.score += Math.round(rawAward * mul)
+      this.addCredits(Math.round(rawAward * 0.5 * mul))
       vibrate(40)
       this.awardCaptureProgress(hits)
       // One event per blast (not per target) so a big missile hit can't spam GA.
@@ -1243,10 +1264,11 @@ export class Game {
       play: (sfx) => this.audio.play(sfx),
       shockwave: (pos, color, r, dur) => this.missiles.shockwave(pos, color, r, dur),
       applyConfirmedClaim: (award) => {
-        this.hud.score += award
+        const mul = this.captureCombo.registerCapture() // chains across shared captures too
+        this.hud.score += Math.round(award * mul)
         this.hud.captured += 1
         trackEvent('npc_captured', { total: this.hud.captured })
-        this.addCredits(Math.round(award * 0.5))
+        this.addCredits(Math.round(award * 0.5 * mul))
         vibrate(25)
         this.audio.play('capture')
       },
@@ -1981,6 +2003,7 @@ export class Game {
     const mp = this.mp.hudSnapshot()
     this.hud.shards = this.collectibles.counts()
     this.hud.combo = this.traversal.combo()
+    this.hud.captureChain = this.captureCombo.hud()
     // Debug-only perf overlay: live draw calls + GPU memory (spot leaks on switch).
     if (this.debug) {
       const m = this.engine.memoryInfo()
