@@ -39,18 +39,29 @@ interface Bot {
   score: number
   nextScore: number
   t: number
+  huntTarget: THREE.Vector3 | null // an alien this bot is chasing down
+  huntCd: number // cooldown before it hunts again
+}
+
+export interface BotsOpts {
+  /** Nearest live alien to a point (read-only) so bots can hunt convincingly. */
+  nearestAlien?: (x: number, z: number) => THREE.Vector3 | null
+  /** Fired when a bot "captures" — a purely cosmetic net-pop where it stands. */
+  onHunt?: (x: number, y: number, z: number) => void
 }
 
 export class Bots implements GameSystem {
   private scene: THREE.Scene
   private physics: Physics
+  private opts: BotsOpts
   private bots: Bot[] = []
   private visible = true
   private frame = 0
 
-  constructor(scene: THREE.Scene, physics: Physics, count = 8) {
+  constructor(scene: THREE.Scene, physics: Physics, opts: BotsOpts = {}, count = 8) {
     this.scene = scene
     this.physics = physics
+    this.opts = opts
     // Pick distinct names.
     const pool = [...NAMES]
     const n = Math.min(count, pool.length)
@@ -73,6 +84,7 @@ export class Bots implements GameSystem {
         pos, vel: new THREE.Vector3(), yaw: Math.random() * 6.28, target: this.randomPoint(),
         runSpeed: 10 + Math.random() * 4, flying: false, flyT: 0, cruiseH: 24, lastGround: pos.y,
         rayPhase: i % 2, score: 40 + Math.floor(Math.random() * 220), nextScore: 4 + Math.random() * 10, t: 0,
+        huntTarget: null, huntCd: Math.random() * 8,
       })
     }
   }
@@ -116,12 +128,32 @@ export class Bots implements GameSystem {
     this.frame++
     for (const b of this.bots) {
       b.t += dt
+      b.huntCd = Math.max(0, b.huntCd - dt)
       if (b.t > b.nextScore) { b.score += 1 + Math.floor(Math.random() * 3); b.nextScore = b.t + 6 + Math.random() * 16 }
+
+      // Hunt: occasionally lock onto a nearby alien and chase it down, then pop a
+      // cosmetic net where it stands (the real alien is never touched).
+      if (!b.flying && !b.huntTarget && b.huntCd <= 0 && this.opts.nearestAlien && Math.random() < 0.012) {
+        const a = this.opts.nearestAlien(b.pos.x, b.pos.z)
+        if (a && (a.x - b.pos.x) ** 2 + (a.z - b.pos.z) ** 2 < 46 * 46) { b.huntTarget = a.clone(); b.target.copy(a) }
+      }
+      if (b.huntTarget) {
+        const hd = Math.hypot(b.huntTarget.x - b.pos.x, b.huntTarget.z - b.pos.z)
+        if (hd < 5) {
+          this.opts.onHunt?.(b.pos.x, b.pos.y + 1, b.pos.z)
+          b.score += 2 + Math.floor(Math.random() * 4)
+          b.huntTarget = null
+          b.huntCd = 6 + Math.random() * 12
+          b.target.copy(this.randomPoint())
+        } else {
+          b.target.copy(b.huntTarget)
+        }
+      }
 
       // Re-target on arrival; sometimes break into a flight (skilled traversal).
       const tx = b.target.x - b.pos.x, tz = b.target.z - b.pos.z
-      if (tx * tx + tz * tz < 18) { b.target.copy(this.randomPoint()); if (Math.random() < 0.4) this.startFly(b) }
-      else if (!b.flying && Math.random() < 0.004) this.startFly(b)
+      if (!b.huntTarget && tx * tx + tz * tz < 18) { b.target.copy(this.randomPoint()); if (Math.random() < 0.4) this.startFly(b) }
+      else if (!b.flying && !b.huntTarget && Math.random() < 0.004) this.startFly(b)
 
       const d = Math.hypot(tx, tz) || 1
       const sp = b.flying ? 18 : b.runSpeed

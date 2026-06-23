@@ -70,6 +70,7 @@ export class DropIn {
   private pendingDeploy = false
   private wantCut = false // cut the canopy back to free-fall
   private resultT = 0
+  private totalT = 0 // total opening time, for a safety timeout (never soft-lock)
 
   // Destination beacon + optional target orbs.
   private orbs: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; pos: THREE.Vector3; hit: boolean }[] = []
@@ -225,6 +226,15 @@ export class DropIn {
 
   update(dt: number) {
     if (this.done) return
+    // Safety: the opening should finish in ~25s; if anything stalls it, force a
+    // clean handoff so the player is never trapped in the drop-in forever.
+    this.totalT += dt
+    if (this.totalT > 55) {
+      this.landingPos.set(this.pos.x, this.getGround(this.pos.x, this.pos.z), this.pos.z)
+      this.fade = 1
+      this.done = true
+      return
+    }
     if (this.phase === 'crash') { this.updateCrash(dt); return }
 
     const ground = this.getGround(this.pos.x, this.pos.z)

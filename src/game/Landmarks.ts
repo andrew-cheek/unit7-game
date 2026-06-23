@@ -205,9 +205,33 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     lintel.castShadow = true
     scene.add(lintel)
 
-    // floor
+    // floor + a glowing centre medallion so the hall reads as a polished lobby
     const floor = new THREE.Mesh(ownG(new THREE.BoxGeometry(W - t, 0.1, D - t)), floorMat)
     floor.position.set(CX, gy + 0.05, CZ)
+    {
+      const medallion = new THREE.Mesh(ownG(new THREE.CircleGeometry(6, 40)), own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })))
+      medallion.rotation.x = -Math.PI / 2
+      medallion.position.set(CX, gy + 0.12, CZ)
+      scene.add(medallion)
+      const medRing = new THREE.Mesh(ownG(new THREE.TorusGeometry(6.2, 0.18, 8, 48)), own(new THREE.MeshBasicMaterial({ color: config.palette.magenta, fog: false })))
+      medRing.rotation.x = -Math.PI / 2
+      medRing.position.set(CX, gy + 0.14, CZ)
+      scene.add(medRing)
+      // Neon base strips along the inner walls + hanging ceiling light bars.
+      const stripMat = own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
+      const baseStrip = (w: number, d: number, x: number, z: number) => {
+        const s = new THREE.Mesh(ownG(new THREE.BoxGeometry(w, 0.3, d)), stripMat)
+        s.position.set(x, gy + 0.5, z); scene.add(s)
+      }
+      baseStrip(W - 3, 0.3, CX, backZ - t)
+      baseStrip(0.3, D - 3, leftX + t, CZ)
+      baseStrip(0.3, D - 3, rightX - t, CZ)
+      const ceilMat = own(new THREE.MeshBasicMaterial({ color: 0xbfeaff, fog: false }))
+      for (let i = 0; i < 4; i++) {
+        const bar = new THREE.Mesh(ownG(new THREE.BoxGeometry(W - 6, 0.3, 0.6)), ceilMat)
+        bar.position.set(CX, gy + H - 0.6, THREE.MathUtils.lerp(frontZ + 5, backZ - 5, i / 3)); scene.add(bar)
+      }
+    }
     floor.receiveShadow = true
     scene.add(floor)
 
@@ -290,6 +314,28 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     cap.rotation.x = Math.PI / 2
     cap.position.set(CX, towerTopY + 0.5, CZ)
     scene.add(cap)
+
+    // Giant hero BILLBOARD reading "ARCADE": a framed lit backing panel on the
+    // tower facade with a big camera-facing sign, readable from across the city.
+    const billY = gy + H + TOWER_H * 0.52
+    const billW = towerW * 0.92, billH = 18
+    const billBack = new THREE.Mesh(ownG(new THREE.BoxGeometry(billW, billH, 1.4)), own(new THREE.MeshStandardMaterial({ color: 0x07060e, emissive: config.palette.magenta, emissiveIntensity: 1.3, roughness: 0.4 })))
+    billBack.position.set(CX, billY, towerFrontZ - 0.7)
+    scene.add(billBack)
+    // Neon frame around the billboard.
+    for (const [w, h, oy] of [[billW + 1, 0.7, billH / 2], [billW + 1, 0.7, -billH / 2]] as [number, number, number][]) {
+      const bar = new THREE.Mesh(ownG(new THREE.BoxGeometry(w, h, 0.5)), trimMat)
+      bar.position.set(CX, billY + oy, towerFrontZ - 1.3); scene.add(bar)
+    }
+    for (const ox of [-billW / 2, billW / 2]) {
+      const bar = new THREE.Mesh(ownG(new THREE.BoxGeometry(0.7, billH, 0.5)), trimMat)
+      bar.position.set(CX + ox, billY, towerFrontZ - 1.3); scene.add(bar)
+    }
+    const billTex = makeLabelTexture('ARCADE', 0xffffff); texs.push(billTex)
+    const bill = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: billTex, transparent: true, depthWrite: false })))
+    bill.position.set(CX, billY, towerFrontZ - 1.6)
+    bill.scale.set(billW * 0.86, billW * 0.86 * 0.32, 1)
+    scene.add(bill)
 
     // Big back-wall header so the hall reads as "pick a game".
     const headerTex = makeLabelTexture('SELECT A GAME', config.palette.cyan); texs.push(headerTex)
