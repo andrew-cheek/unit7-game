@@ -110,6 +110,17 @@ export const config = {
     lean: 0.5, // max roll into a turn (radians)
   },
 
+  // Grind rails: hop onto a neon rail on the hoverboard and slide it. The board
+  // locks to the rail, builds a little speed, and launches you off the end (or
+  // when you jump). Snap only triggers while boarding and moving.
+  grind: {
+    minSpeed: 11, // min board speed to latch a rail (and the floor speed once on)
+    maxSpeed: 36, // speed cap while grinding (you accelerate up to this)
+    accel: 7, // speed gained per second while riding
+    snapRadius: 2.6, // how close the board must pass a rail to latch (m)
+    boardOffset: 0.9, // ride height above the rail line (m)
+  },
+
   parachute: {
     terminalVelocity: -3, // m/s, never falls faster than this while deployed
     horizontalDrift: 7,
