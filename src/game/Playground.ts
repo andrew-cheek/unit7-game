@@ -50,7 +50,9 @@ export class Playground {
   private cannons: Record<Zone, Cannon[]> = { earth: [], mars: [], moon: [] }
   private lowZones: Record<Zone, LowG[]> = { earth: [], mars: [], moon: [] }
   private floorTiles: THREE.MeshStandardMaterial[] = []
-  private floor = { x: 0, z: 34, half: 7 }
+  // Open ground SOUTH of spawn - well clear of the arcade interior (north) so you
+  // never get stuck auto-dancing when you walk in to play the minigames.
+  private floor = { x: 0, z: -44, half: 7 }
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
   private t = 0

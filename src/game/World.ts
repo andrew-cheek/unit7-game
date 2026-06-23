@@ -28,13 +28,15 @@ export interface OfficeAnchor {
 // centre (front +Z local rotated by `face`), with a door + bus stop stepped in
 // along the same axis. Commuters (Events) and the dawn/dusk shuttle (DawnShow)
 // both iterate these, so adding more here expands the whole working district.
+// Note: the two former north offices at z=48 were removed - the (now larger)
+// walk-in arcade occupies that ground, and offices there would clutter its
+// interior (and collide with it). The remaining ring still reads as a working
+// district around the plaza.
 export const OFFICE_ANCHORS: OfficeAnchor[] = [
   { office: new THREE.Vector3(48, 0, 10), door: new THREE.Vector3(44, 0, 10), stop: new THREE.Vector3(38, 0, 10), face: -Math.PI / 2 },
-  { office: new THREE.Vector3(10, 0, 48), door: new THREE.Vector3(10, 0, 44), stop: new THREE.Vector3(10, 0, 38), face: Math.PI },
   { office: new THREE.Vector3(-48, 0, -10), door: new THREE.Vector3(-44, 0, -10), stop: new THREE.Vector3(-38, 0, -10), face: Math.PI / 2 },
   { office: new THREE.Vector3(-48, 0, 10), door: new THREE.Vector3(-44, 0, 10), stop: new THREE.Vector3(-38, 0, 10), face: Math.PI / 2 },
   { office: new THREE.Vector3(48, 0, -10), door: new THREE.Vector3(44, 0, -10), stop: new THREE.Vector3(38, 0, -10), face: -Math.PI / 2 },
-  { office: new THREE.Vector3(-10, 0, 48), door: new THREE.Vector3(-10, 0, 44), stop: new THREE.Vector3(-10, 0, 38), face: Math.PI },
   { office: new THREE.Vector3(10, 0, -48), door: new THREE.Vector3(10, 0, -44), stop: new THREE.Vector3(10, 0, -38), face: 0 },
 ]
 
@@ -693,9 +695,11 @@ export class World {
   /** Cluster of smaller buildings around the spawn plaza (kept clear of the
    *  portals/vehicles) so the immediate area has structures, not empty ground. */
   private buildNearbyBuildings() {
+    // (Spots that fell inside the enlarged arcade footprint - around x±22, z28..64 -
+    // were removed so they don't clutter the hall interior.)
     const spots: Array<[number, number]> = [
-      [-26, 24], [24, 26], [-30, -6], [30, -4], [-16, 34], [16, 36],
-      [-38, 16], [38, 18], [-22, -28], [22, -30], [0, 42], [-40, -22], [40, -24],
+      [-26, 24], [24, 26], [-30, -6], [30, -4],
+      [-38, 16], [38, 18], [-22, -28], [22, -30], [-40, -22], [40, -24],
     ]
     for (let i = 0; i < spots.length; i++) {
       const [cx, cz] = spots[i]

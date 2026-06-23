@@ -279,7 +279,7 @@ export const config = {
   // off-world objective points at a portal that actually has a beacon. Each step
   // pays escalating XP/credits so the guided chain is itself a progression hook.
   missions: [
-    { id: 'plaza', title: 'Find Portal Plaza', type: 'reach', x: 0, z: 13, radius: 10, xp: 50 },
+    { id: 'plaza', title: 'Find Portal Plaza', type: 'reach', x: 46, z: 12, radius: 10, xp: 50 },
     { id: 'mech', title: 'Pilot a battle mech', type: 'mech', xp: 75, credits: 40 },
     { id: 'moon', title: 'Travel to the Moon', type: 'zone', zone: 'moon', xp: 100, credits: 50 },
     { id: 'mars', title: 'Travel to Mars', type: 'zone', zone: 'mars', xp: 120, credits: 75 },

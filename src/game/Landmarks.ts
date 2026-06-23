@@ -167,12 +167,12 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
   // so it's the first thing you see; the Mars ring (below) is in front of it.
   // ===========================================================================
   {
-    const CX = 0, CZ = 42 // building center
-    const W = 30, D = 24, H = 10, t = 0.7 // footprint + wall height + thickness
+    const CX = 0, CZ = 46 // building center
+    const W = 44, D = 36, H = 14, t = 0.7 // bigger hall so the games read + you have room to walk
     const gy = physics.sampleGround(CX, CZ, 60)?.y ?? 0
     const frontZ = CZ - D / 2, backZ = CZ + D / 2
     const leftX = CX - W / 2, rightX = CX + W / 2
-    const ENTRANCE = 9 // wide front opening (walk + camera room)
+    const ENTRANCE = 13 // wide front opening (walk + camera room)
 
     const wallMat = own(new THREE.MeshStandardMaterial({ color: 0x14171f, metalness: 0.4, roughness: 0.6 }))
     const trimMat = own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, fog: false }))
@@ -214,10 +214,10 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     // Interior lighting so the room + doors read (cheap, no shadows). The main
     // cool key always lights the hall; the two colored fills are accent-only, so
     // the low/mobile tier sheds them like World's accent lights do.
-    const lampA = new THREE.PointLight(0x9fe8ff, 1.8, 46, 2); lampA.position.set(CX, gy + 8.5, CZ); scene.add(lampA)
+    const lampA = new THREE.PointLight(0x9fe8ff, 2.2, 60, 2); lampA.position.set(CX, gy + 11, CZ); scene.add(lampA)
     if (config.tier.accentLights) {
-      const lampB = new THREE.PointLight(0xff2bd0, 0.9, 30, 2); lampB.position.set(CX, gy + 5, frontZ + 5); scene.add(lampB)
-      const lampC = new THREE.PointLight(0x27e7ff, 0.9, 30, 2); lampC.position.set(CX, gy + 5, backZ - 5); scene.add(lampC)
+      const lampB = new THREE.PointLight(0xff2bd0, 1.1, 40, 2); lampB.position.set(CX, gy + 6, frontZ + 6); scene.add(lampB)
+      const lampC = new THREE.PointLight(0x27e7ff, 1.1, 40, 2); lampC.position.set(CX, gy + 6, backZ - 6); scene.add(lampC)
     }
 
     // roof: open frame (perimeter beams + a couple crossbeams) so the third-person
@@ -328,12 +328,13 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
   }
 
   // ===========================================================================
-  // PORTAL PLAZA hero ring (Mars gateway) — sits in front of the arcade.
+  // PORTAL PLAZA hero ring (Mars gateway) — set off to the EAST of the spawn axis
+  // so it no longer blocks the line of sight to the arcade tower straight ahead.
   // ===========================================================================
   let plazaHub: PlazaHub
   let plazaMars: { pos: THREE.Vector3; radius: number }
   {
-    const cx = 0, cz = 13
+    const cx = 46, cz = 12
     const g = new THREE.Group()
     const gy = physics.sampleGround(cx, cz, 40)?.y ?? 0
     g.position.set(cx, gy, cz)
