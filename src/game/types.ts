@@ -42,6 +42,7 @@ export interface HudState {
   credits: number // spendable currency (persisted)
   captured: number
   shards: { found: number; total: number } // data shards collected this session / total in zone
+  combo: { active: boolean; points: number; mult: number } // live traversal style combo
   speed: number // m/s
   altitude: number // m above ground
   heading: number // camera yaw, radians (for the compass)

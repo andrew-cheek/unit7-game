@@ -149,6 +149,26 @@ export function HUD({
         </div>
       )}
 
+      {/* style combo meter (right-center): climbs while you keep expressive
+          traversal going, then banks. Colour ramps with the multiplier. */}
+      {hud.combo.active && !hud.minigame && (
+        <div style={comboStyle}>
+          <span style={{ color: NEON.dim, fontSize: 11, letterSpacing: 2 }}>STYLE</span>
+          <span
+            style={{
+              fontSize: 30,
+              fontWeight: 800,
+              lineHeight: 1,
+              color: hud.combo.mult >= 4 ? NEON.magenta : hud.combo.mult >= 2.5 ? NEON.orange : NEON.cyan,
+              textShadow: '0 0 12px currentColor',
+            }}
+          >
+            ×{hud.combo.mult.toFixed(1)}
+          </span>
+          <span style={{ color: NEON.text, fontSize: 13 }}>{hud.combo.points}</span>
+        </div>
+      )}
+
       {/* current objective (top-center, persistent + readable). On touch it drops
           below the corner control row so it never collides with the PAUSE button. */}
       {hud.objective && !hud.minigame && (
@@ -605,6 +625,21 @@ const objectiveStyle: CSSProperties = {
   font: '700 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.1em',
   boxShadow: '0 0 16px rgba(155,255,77,0.2)',
+}
+const comboStyle: CSSProperties = {
+  position: 'absolute',
+  right: 'max(16px, env(safe-area-inset-right))',
+  top: '42%',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-end',
+  gap: 2,
+  padding: '8px 14px',
+  background: 'rgba(6,10,22,0.55)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 12,
+  font: '700 14px/1 ui-monospace, Menlo, monospace',
+  pointerEvents: 'none',
 }
 const raceStyle: CSSProperties = {
   position: 'absolute',

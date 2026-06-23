@@ -26,6 +26,7 @@ import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
 import { FxPool } from './FxPool'
 import { Collectibles } from './Collectibles'
+import { TraversalScore } from './TraversalScore'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -150,6 +151,8 @@ export class Game {
   private fxPool!: FxPool
   // Data-shard discovery layer (instanced pickups across the city).
   private collectibles!: Collectibles
+  // Style-combo scoring for expressive traversal (air / board / jet / glide).
+  private traversal!: TraversalScore
   // Shared-world multiplayer (net socket, remote players, shared aliens, duels,
   // roster). No-ops cleanly when solo; owns its own net state.
   private mp!: MultiplayerManager
@@ -258,6 +261,17 @@ export class Game {
       getZone: () => this.zone,
       getPlayer: () => this.player.position,
       onCollect: (value, x, y, z) => this.onShardCollected(value, x, y, z),
+    }))
+    // Style-combo scoring: expressive traversal builds a multiplier that banks
+    // into credits + XP. Reads player state; pays out via onStyleBank.
+    this.traversal = this.systems.register(new TraversalScore({
+      active: () => !this.vehicles.current,
+      speed: () => this.player.speed,
+      grounded: () => this.player.grounded,
+      jetting: () => this.input.held.jet && !this.player.grounded,
+      boarding: () => this.player.boarding,
+      plane: () => this.player.mode === 'plane',
+      onBank: (credits, xp, mult, points) => this.onStyleBank(credits, xp, mult, points),
     }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
@@ -386,6 +400,7 @@ export class Game {
     this.hud = {
       mode: 'robot', zone: this.zone, stamina: 1, fuel: 1, score: 0, best: this.profile.best, credits: this.profile.credits, captured: 0,
       shards: { found: 0, total: 0 },
+      combo: { active: false, points: 0, mult: 1 },
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
       loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
@@ -1311,6 +1326,16 @@ export class Game {
     this.awardXp(4) // also refreshes progression -> re-checks shard achievements
   }
 
+  /** A style combo banked: pay out credits + XP and flash the multiplier. */
+  private onStyleBank(credits: number, xp: number, mult: number, _points: number) {
+    this.addCredits(credits)
+    this.awardXp(xp)
+    this.hud.banner = `STYLE x${mult.toFixed(1)}  +${credits}c`
+    this.bannerTimer = 1.8
+    this.audio.play('objective')
+    vibrate(20)
+  }
+
   /** One capture's worth of progress: XP + daily objective. */
   private awardCaptureProgress(n = 1) {
     this.awardXp(5 * n)
@@ -1939,6 +1964,7 @@ export class Game {
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
     const mp = this.mp.hudSnapshot()
     this.hud.shards = this.collectibles.counts()
+    this.hud.combo = this.traversal.combo()
     this.hud.online = mp.online
     this.hud.leaderboard = mp.leaderboard
     this.hud.profiles = mp.profiles
