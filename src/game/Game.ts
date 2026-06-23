@@ -343,13 +343,6 @@ export class Game {
       vibrate(50)
     }
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
-    this.events.onSoak = () => {
-      this.hud.banner = 'SPLASH!'
-      this.bannerTimer = 0.45 // brief, fades fast (it's a side gag now)
-      vibrate(30)
-      this.audio.play('soak')
-      this.onPlayerCaught()
-    }
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)

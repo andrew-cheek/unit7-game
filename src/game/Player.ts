@@ -548,6 +548,7 @@ export class Player {
     // boost that climbs PAST the steady cruise cap, so tapping repeatedly lets
     // you stack height (a key vertical-traversal move).
     const canHop = this.grounded || this.airTime < config.player.coyoteTime
+    let applyGravity = true
     if (jetting) {
       const risingEdge = !this.prevJet
       if (risingEdge && canHop && this.velocity.y <= 0.1) {
@@ -556,11 +557,15 @@ export class Player {
         // Mid-air re-press: an upward burst on top of current rise (can exceed cap).
         this.velocity.y = Math.max(this.velocity.y, 0) + config.jetpack.pulseBoost
       }
-      // Steady cruise ramps toward the cap, but never drags a higher pulse down.
-      if (this.velocity.y < config.jetpack.maxAscend) {
-        this.velocity.y = Math.min(this.velocity.y + config.jetpack.thrust * dt, config.jetpack.maxAscend)
-      }
+      // Smoothly EASE the climb rate toward the cruise cap instead of clamping it
+      // every frame while gravity tugs the other way - that tug-of-war made the
+      // ascent feel jerky. A pulse above the cap bleeds back down to it gently,
+      // and gravity is skipped while thrusting (the cruise target nets the climb).
+      const cap = config.jetpack.maxAscend
+      const ease = this.velocity.y > cap ? config.jetpack.thrust * 0.5 : config.jetpack.thrust
+      this.velocity.y = approach(this.velocity.y, cap, ease * dt)
       this.model.setThrust(1)
+      applyGravity = false
     } else {
       // Held already released this frame, but a latched tap still owes one hop.
       if (jetEdge && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
@@ -570,10 +575,12 @@ export class Player {
     this.prevJet = input.held.jet
     this.model.setFlyPose(this.grounded ? 0 : 0.7)
 
-    // Heavier gravity on the way down (and when not thrusting up) kills the
-    // floaty hang-time so jumps land with weight.
-    const falling = this.velocity.y < 0 || !jetting
-    this.velocity.y += gravity * (falling ? config.player.fallGravityMult : 1) * dt
+    // Heavier gravity on the way down kills floaty hang-time so jumps land with
+    // weight. Skipped while actively thrusting (handled by the eased cruise above).
+    if (applyGravity) {
+      const falling = this.velocity.y < 0
+      this.velocity.y += gravity * (falling ? config.player.fallGravityMult : 1) * dt
+    }
   }
 
   private updatePlane(dt: number, input: Input, gravity: number) {
