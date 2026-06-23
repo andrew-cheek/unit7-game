@@ -163,10 +163,11 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     if (b.type === 'hold') controls.pressAction(b.action, false)
   }
 
-  // Chute button action and label depend on parachute state.
+  // CHUTE / CUT stacks directly above JUMP (right side) while airborne, so it's a
+  // prominent second action under the right thumb and never overlaps the floating
+  // joystick on the left. Label + color flip once the canopy is open.
   const showChuteBtn = !inVehicle && airborne
   const chuteLabel = hud.mode === 'parachute' ? 'CUT' : 'CHUTE'
-  const chuteAction = hud.mode === 'parachute' ? 'chute' : 'chute'
   const chuteColor = hud.mode === 'parachute' ? '#ff8a1e' : '#ff2bd0'
 
   return (
@@ -179,18 +180,6 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
       {joyAt && (
         <div style={{ ...joyBase, left: joyAt.x - JOY_R, top: joyAt.y - JOY_R }}>
           <div style={{ ...joyKnob, transform: `translate(${knob.x}px, ${knob.y}px)` }} />
-        </div>
-      )}
-
-      {/* Dedicated CHUTE / CUT button on the left side, mirroring JUMP on right */}
-      {showChuteBtn && (
-        <div
-          style={{ ...chuteBtn, borderColor: chuteColor, color: chuteColor, boxShadow: `0 0 22px ${chuteColor}66` }}
-          onPointerDown={(e) => { e.stopPropagation(); controls.pressAction(chuteAction as GameAction, true) }}
-          onPointerUp={(e) => { e.stopPropagation(); controls.pressAction(chuteAction as GameAction, false) }}
-          onPointerCancel={(e) => { e.stopPropagation(); controls.pressAction(chuteAction as GameAction, false) }}
-        >
-          {chuteLabel}
         </div>
       )}
 
@@ -212,6 +201,16 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
             )
           })}
         </div>
+        {showChuteBtn && (
+          <div
+            style={{ ...chuteBtn, borderColor: chuteColor, color: chuteColor, boxShadow: `0 0 18px ${chuteColor}66` }}
+            onPointerDown={(e) => { e.stopPropagation(); controls.pressAction('chute', true) }}
+            onPointerUp={(e) => { e.stopPropagation(); controls.pressAction('chute', false) }}
+            onPointerCancel={(e) => { e.stopPropagation(); controls.pressAction('chute', false) }}
+          >
+            {chuteLabel}
+          </div>
+        )}
         <div
           style={{ ...primaryBtn, borderColor: primary.color, color: primary.color, boxShadow: `0 0 22px ${primary.color}66` }}
           onPointerDown={btnDown(primary)}
@@ -269,11 +268,11 @@ const helperPill: CSSProperties = {
 }
 const secWrap: CSSProperties = {
   display: 'flex',
-  flexDirection: 'row-reverse',
-  flexWrap: 'wrap',
-  gap: 9,
-  justifyContent: 'flex-start',
-  width: 168,
+  flexDirection: 'row',
+  flexWrap: 'nowrap',
+  gap: 10,
+  justifyContent: 'flex-end',
+  alignItems: 'center',
   pointerEvents: 'none',
 }
 const secBtn: CSSProperties = {
@@ -296,13 +295,9 @@ const primaryBtn: CSSProperties = {
   letterSpacing: '0.06em', textAlign: 'center', userSelect: 'none', WebkitUserSelect: 'none',
 }
 const chuteBtn: CSSProperties = {
-  position: 'absolute',
-  left: 'max(16px, env(safe-area-inset-left))',
-  bottom: 'max(22px, env(safe-area-inset-bottom))',
   pointerEvents: 'auto',
   touchAction: 'none',
-  zIndex: 10,
-  width: 80, height: 80, borderRadius: '50%',
+  width: 68, height: 68, borderRadius: '50%',
   border: '3px solid',
   background: 'rgba(8,12,24,0.66)',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
