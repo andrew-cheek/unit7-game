@@ -158,6 +158,7 @@ export class Game {
   private race!: RaceActivity
   private raceHud: RaceHud = { state: 'idle', cp: 0, total: 0, time: 0, best: 0, countdown: 0, result: 0, near: false }
   private danceToggle = false // 'B' key toggle for the robot dance emote
+  private currentDistrict = '' // last district name shown (toasts on crossing)
   private stuckT = 0 // time spent wedged while trying to move (triggers recovery)
   private timeFromQuery = false // ?time= debug override present (skip morning start)
   // Neon density/quality setting (persisted): scales city neon + bloom.
@@ -224,6 +225,8 @@ export class Game {
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
     this.player = new Player(this.engine.scene)
     this.player.object.position.copy(this.world.spawn)
+    // Seed the district so we don't toast the spawn sector on the first step.
+    this.currentDistrict = this.world.districtNameAt(this.world.spawn.x, this.world.spawn.z)
     // A soft "hero" fill light that follows the player so the robot reads against
     // dark backgrounds (rim/hero lighting). Cheap: one point light.
     this.heroLight = new THREE.PointLight(0x9fd8ff, 22, 16, 2)
@@ -1656,6 +1659,16 @@ export class Game {
     if (onEarth) this.robotFactory.update(dt)
     if (onEarth) this.raceHud = this.race.update(dt, this.player.position.x, this.player.position.z)
     this.updateBubbleShots(dt)
+
+    // District crossing toast: a brief label as you pass between themed sectors,
+    // so the map reads as named neighborhoods. Only when nothing else is banner'd.
+    if (onEarth) {
+      const dn = this.world.districtNameAt(this.focus.x, this.focus.z)
+      if (dn !== this.currentDistrict) {
+        this.currentDistrict = dn
+        if (this.bannerTimer <= 0) { this.hud.banner = `▸ ${dn}`; this.bannerTimer = 1.8 }
+      }
+    }
 
     // Arcade: advance the transport beam every frame; only start a new one when
     // on foot, on Earth, not transitioning, and not in/cooling-down a minigame.
