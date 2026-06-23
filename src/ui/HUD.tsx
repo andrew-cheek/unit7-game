@@ -232,7 +232,7 @@ export function HUD({
       {/* control hints (desktop) */}
       {!touch && (
         <div style={hints}>
-          WASD move · SPACE jump (hold to fly) · SHIFT sprint · SCROLL zoom · H fire · G enter/ride · R warp · F boost · T transform · O chute · ESC pause
+          WASD move · SPACE fly (tap again = boost) · SHIFT sprint · Q grapple · O chute (tap again = CUT) · C board · G enter/ride · H capture · F boost · T transform · ESC = pause + all controls
         </div>
       )}
 
@@ -760,15 +760,18 @@ const clickHint: CSSProperties = {
 const hints: CSSProperties = {
   position: 'absolute',
   left: '50%',
-  bottom: 'max(12px, env(safe-area-inset-bottom))',
+  bottom: 'max(10px, env(safe-area-inset-bottom))',
   transform: 'translateX(-50%)',
-  font: '600 10px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.08em',
-  color: 'rgba(223,238,255,0.45)',
-  whiteSpace: 'nowrap',
-  maxWidth: '96vw',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
+  font: '600 12px/1.3 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.06em',
+  color: 'rgba(223,238,255,0.82)',
+  textAlign: 'center',
+  maxWidth: '94vw',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.62)',
+  border: '1px solid rgba(39,231,255,0.22)',
+  borderRadius: 10,
+  pointerEvents: 'none',
 }
 const pilotsBtn: CSSProperties = {
   position: 'absolute',

@@ -489,17 +489,20 @@ export class Game {
    * through the descent so you land as the sun finishes cresting.
    */
   private beginDropIn() {
-    // Steer toward the open spawn plaza - a clear, safe destination marked by a
-    // green beacon. You actually land wherever you steer (no relocation), so
-    // this is the aim point, not a forced touchdown spot.
-    const sp = this.world.spawn
-    this.dropLand.set(sp.x, this.physics.sampleGround(sp.x, sp.z, 120)?.y ?? 0, sp.z)
+    // Steer toward the open plaza right in front of the ARCADE - the activity hub
+    // (arcade doors, bounce pads, cannons, the mech, the Mars gate are all here),
+    // so you touch down in the middle of the fun instead of an empty edge.
+    const tx = 0, tz = 20
+    this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
 
     this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
     this.hud.intro = true // surfaces the SKIP button
     this.player.setVisible(false)
-    this.input.setLockEnabled(true)
+    // Keep the cursor FREE during the drop (drag to look) so the DEPLOY / CUT
+    // buttons stay clickable on desktop - clicking to look would otherwise lock
+    // the pointer and you couldn't press them.
+    this.input.setLockEnabled(false)
     this.input.exitLock()
     if (!this.timeFromQuery) {
       this.world.setDebugTime(9) // mid-sunrise: gold and lit, not dark
@@ -510,7 +513,7 @@ export class Game {
     if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
     this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD or the stick toward the green beacon. Hold Space (or drag forward) to nose-dive, pull back to slow. Clip the glowing orbs for a bonus. DEPLOY the chute before you hit the ground - or you smash and a repair drone rebuilds you.' }
+    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD (or drag) toward the green beacon. Hold Space to nose-dive, pull back to slow. Press O or tap DEPLOY to pop the chute (O again, or CUT, drops you back into free-fall). Land before you hit the ground or a repair drone rebuilds you.' }
     this.missionPopupTimer = 8
   }
 
@@ -1686,6 +1689,8 @@ export class Game {
         if (this.player.mode === 'parachute') this.player.cutChute()
         else if (this.player.deployChute()) trackEvent('ability_used', { ability: 'parachute' })
       }
+      // Pressing jetpack under canopy also cuts it and resumes flight (intuitive).
+      if (this.player.mode === 'parachute' && this.input.held.jet) this.player.cutChute()
       if (this.input.consumeEdge('net')) this.fireNet()
       // Grapple arm: hold to fire toward where you aim and zip in; release to let go.
       this.updateGrapple()
