@@ -472,20 +472,11 @@ export class Game {
    * through the descent so you land as the sun finishes cresting.
    */
   private beginDropIn() {
-    // Land in the open plaza just in front of the arcade (averaged from the
-    // arcade doorways, stepped a little toward spawn so we touch down on clear
-    // ground, not on a cabinet). This is the point the dive steers toward.
-    let tx = 0, tz = 22
-    if (this.arcadePortals.length) {
-      let sx = 0, sz = 0
-      for (const p of this.arcadePortals) { sx += p.pos.x; sz += p.pos.z }
-      tx = sx / this.arcadePortals.length
-      tz = sz / this.arcadePortals.length
-      const dx = this.world.spawn.x - tx, dz = this.world.spawn.z - tz
-      const dl = Math.hypot(dx, dz)
-      if (dl > 0.01) { tx += (dx / dl) * 7; tz += (dz / dl) * 7 }
-    }
-    this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
+    // Steer toward the open spawn plaza - a clear, safe destination marked by a
+    // green beacon. You actually land wherever you steer (no relocation), so
+    // this is the aim point, not a forced touchdown spot.
+    const sp = this.world.spawn
+    this.dropLand.set(sp.x, this.physics.sampleGround(sp.x, sp.z, 120)?.y ?? 0, sp.z)
 
     this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
@@ -502,27 +493,32 @@ export class Game {
     if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
     this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD or the stick. Hold Space (or drag forward) to nose-dive, pull back to slow. When you are low, tap DEPLOY to pop the chute and glide into the arcade plaza.' }
-    this.missionPopupTimer = 7
+    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD or the stick toward the green beacon. Hold Space (or drag forward) to nose-dive, pull back to slow. Clip the glowing orbs for a bonus. DEPLOY the chute before you hit the ground - or you smash and a repair drone rebuilds you.' }
+    this.missionPopupTimer = 8
   }
 
   private finishDrop() {
-    // Reward the drop: how cleanly (how high) you popped the canopy.
-    const q = this.dropIn?.chuteQuality ?? 0
-    const chuteBonus = q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
-    const credits = 120 + chuteBonus
-    const xp = 50 + (q >= 0.78 ? 40 : 0)
+    // Reward the drop: how cleanly (how high) you popped the canopy, plus any
+    // target orbs threaded. A crash pays little (but the repair drone saves you).
+    const di = this.dropIn
+    const crashed = di?.crashed ?? false
+    const q = di?.chuteQuality ?? 0
+    const orbBonus = (di?.bonusTargets ?? 0) * 30
+    const land = di ? di.landingPos.clone() : this.dropLand.clone()
+    const chuteBonus = crashed ? 0 : q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
+    const credits = (crashed ? 40 : 120) + chuteBonus + orbBonus
+    const xp = (crashed ? 20 : 50) + (q >= 0.78 ? 40 : 0)
     this.dropIn?.dispose()
     this.dropIn = null
     this.addCredits(credits)
     this.awardXp(xp)
-    const grade = q >= 0.78 ? 'CLEAN LANDING' : q >= 0.5 ? 'GOOD LANDING' : 'TOUCHDOWN'
+    const grade = crashed ? 'REASSEMBLED' : q >= 0.78 ? 'CLEAN LANDING' : q >= 0.5 ? 'GOOD LANDING' : 'TOUCHDOWN'
     this.hud.banner = `${grade}  +${credits}c`
     this.bannerTimer = 3.4
     this.hud.intro = false
     this.hud.drop = null
-    // Hand off standing in the plaza right where the chute set you down.
-    this.player.exitVehicle(this.dropLand.clone())
+    // Hand off standing exactly where you came down - no relocation.
+    this.player.exitVehicle(land)
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
@@ -535,8 +531,12 @@ export class Game {
     // Grace period so the player can orient before the Mars gate (which sits on
     // the route out) can fire — stops an accidental yank to Mars on hand-off.
     this.travelCooldown = 3
-    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'You touched down by the arcade. Follow the green beacon to Portal Plaza - the OBJECTIVE readout shows the distance.' }
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'You touched down in the plaza. Follow the green beacon to your objective - the OBJECTIVE readout shows the distance.' }
     this.missionPopupTimer = 6
+    // On a restart replay the solo/multiplayer choice was already made, so
+    // re-announce game_start; on a first solo run with no join prompt, begin now.
+    if (this.startedMode) this.emitGameStart(this.startedMode)
+    else if (!this.multiplayerEnabled) this.emitGameStart('solo')
   }
 
   /**
@@ -587,23 +587,16 @@ export class Game {
 
   /** Replay the opening cinematic from the top (triggered by the HUD button). */
   private restartIntro() {
-    if (this.intro || this.inMinigame || this.paused) return
-    // Replaying the cinematic ends the current run; finishIntro re-emits
-    // game_start (with the same mode) when control hands back.
+    if (this.intro || this.dropIn || this.inMinigame || this.paused) return
+    // Replaying ends the current run; finishDrop re-emits game_start (with the
+    // same mode) when control hands back. Restart now replays the playable dive
+    // opening (the same one you get on a fresh load), not the old cinematic.
     this.emitGameOver()
     this.gameStarted = false
+    this.warpRevert()
     if (this.vehicles.current) this.player.exitVehicle(this.player.position)
-    // The cinematic stages over Earth and hands off at the Earth spawn.
     if (this.zone !== 'earth') this.doTravel('earth')
-    this.intro = new Intro(this.engine.scene, this.engine.camera)
-    this.hud.intro = true
-    this.player.setVisible(false)
-    this.input.setLockEnabled(false)
-    this.input.exitLock()
-    this.patrols.setVisible(false)
-    this.sky.setVisible(false)
-    for (const p of this.arcadePortals) p.group.visible = false
-    if (this.arcadeRobot) this.arcadeRobot.group.visible = false
+    this.beginDropIn()
     this.hudListener({ ...this.hud, radar: this.radar })
   }
 
