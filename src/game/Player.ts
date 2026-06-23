@@ -149,6 +149,12 @@ export class Player {
     this.grounded = false
     this.airTime = 0
   }
+  /** Fling along a launch vector (cannon / slingshot). */
+  launchVec(vx: number, vy: number, vz: number) {
+    this.velocity.set(vx, vy, vz)
+    this.grounded = false
+    this.airTime = 0
+  }
   /** Sustained lift from an updraft column (adds to rise, capped). */
   rideUpdraft(dv: number) {
     this.velocity.y = Math.min(this.velocity.y + dv, config.jetpack.maxAscend + 5)

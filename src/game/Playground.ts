@@ -25,11 +25,30 @@ interface Updraft {
   colMat: THREE.MeshBasicMaterial
 }
 
+interface Cannon {
+  x: number
+  z: number
+  r: number
+  vel: THREE.Vector3 // launch velocity applied as a one-shot when you step in
+  glowMat: THREE.MeshStandardMaterial
+}
+
+interface LowG {
+  x: number
+  y: number
+  z: number
+  r: number
+  factor: number // gravity multiplier inside (e.g. 0.3 = floaty)
+  mat: THREE.MeshBasicMaterial
+}
+
 export class Playground {
   private scene: THREE.Scene
   private groups: Record<Zone, THREE.Group>
   private pads: Record<Zone, Pad[]> = { earth: [], mars: [], moon: [] }
   private updrafts: Record<Zone, Updraft[]> = { earth: [], mars: [], moon: [] }
+  private cannons: Record<Zone, Cannon[]> = { earth: [], mars: [], moon: [] }
+  private lowZones: Record<Zone, LowG[]> = { earth: [], mars: [], moon: [] }
   private floorTiles: THREE.MeshStandardMaterial[] = []
   private floor = { x: 0, z: 34, half: 7 }
   private mats: THREE.Material[] = []
@@ -53,10 +72,23 @@ export class Playground {
     this.buildPad('moon', 18, -20, 34) // lowest gravity → huge air
     this.buildPad('moon', -18, -18, 34)
     this.buildPad('moon', 30, 26, 64, { mega: true })
+    // A couple more bounce pads for rooftop-hopping routes.
+    this.buildPad('earth', 120, -90, 30)
+    this.buildPad('earth', -130, -30, 30)
     // Updraft columns: ride the rising air to hover + climb (like a thermal).
     this.buildUpdraft('earth', 60, -64, 7, 30, 150)
     this.buildUpdraft('earth', -96, 70, 7, 30, 150)
     this.buildUpdraft('mars', -52, 36, 8, 26, 140)
+    // Launch cannons: step in, get flung across the map on a clean arc.
+    this.buildCannon('earth', -64, -40, 30, 30, 34) // toward the plaza/center
+    this.buildCannon('earth', 110, 60, -34, 32, -20)
+    this.buildCannon('mars', 60, -60, -28, 26, 30)
+    this.buildCannon('moon', -40, 40, 26, 22, -26)
+    // Low-G bubbles: float + triple-hop inside (per-zone gravity scaled down more).
+    this.buildLowG('earth', 30, 14, -70, 16, 0.35)
+    this.buildLowG('earth', -110, 110, 18, 18, 0.3)
+    this.buildLowG('mars', 40, 16, 40, 20, 0.4)
+    this.buildLowG('moon', -30, 16, -30, 22, 0.45)
     this.buildDanceFloor()
     for (const z of ['earth', 'mars', 'moon'] as Zone[]) {
       this.groups[z].visible = z === 'earth'
@@ -84,7 +116,30 @@ export class Playground {
     }
     for (const z of ['earth', 'mars', 'moon'] as Zone[]) {
       for (const u of this.updrafts[z]) u.colMat.opacity = 0.12 + Math.sin(this.t * 2 + u.x) * 0.06
+      for (const c of this.cannons[z]) c.glowMat.emissiveIntensity = 2 + Math.sin(this.t * 5 + c.x) * 1
+      for (const l of this.lowZones[z]) l.mat.opacity = 0.1 + Math.sin(this.t * 1.5 + l.x) * 0.05
     }
+  }
+
+  /** Launch velocity if the player is standing on a cannon in `zone`, else null. */
+  cannonAt(zone: Zone, x: number, z: number): THREE.Vector3 | null {
+    for (const c of this.cannons[zone]) {
+      const dx = x - c.x
+      const dz = z - c.z
+      if (dx * dx + dz * dz < c.r * c.r) return c.vel
+    }
+    return null
+  }
+
+  /** Gravity multiplier at a point (1 = normal, <1 = floaty low-G bubble). */
+  lowGFactor(zone: Zone, x: number, y: number, z: number): number {
+    for (const l of this.lowZones[zone]) {
+      const dx = x - l.x
+      const dy = y - l.y
+      const dz = z - l.z
+      if (dx * dx + dy * dy + dz * dz < l.r * l.r) return l.factor
+    }
+    return 1
   }
 
   /** Upward acceleration if the player is inside an updraft column in `zone` and
@@ -177,6 +232,35 @@ export class Playground {
     const arch = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(7, 0.3, 8, 28, Math.PI)), archMat)
     arch.position.set(this.floor.x, 0.1, this.floor.z)
     g.add(arch)
+  }
+
+  /** A glowing barrel tilted along the launch vector + a pad you step onto. */
+  private buildCannon(zone: Zone, x: number, z: number, vx: number, vy: number, vz: number) {
+    const g = this.groups[zone]
+    const glowMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 2.4, roughness: 0.4 }))
+    const barrel = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.6, 2.0, 5, 16, 1, true)), glowMat)
+    // Aim the barrel along the launch direction.
+    const dir = new THREE.Vector3(vx, vy, vz).normalize()
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
+    barrel.quaternion.copy(q)
+    barrel.position.set(x, 2.2, z)
+    g.add(barrel)
+    const ringMat = this.own(new THREE.MeshBasicMaterial({ color: config.palette.orange, transparent: true, opacity: 0.7, fog: false }))
+    const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(2.2, 0.3, 8, 24)), ringMat)
+    ring.rotation.x = Math.PI / 2
+    ring.position.set(x, 0.4, z)
+    g.add(ring)
+    this.cannons[zone].push({ x, z, r: 2.4, vel: new THREE.Vector3(vx, vy, vz), glowMat })
+  }
+
+  /** A translucent low-gravity bubble you can float + triple-hop inside. */
+  private buildLowG(zone: Zone, x: number, y: number, z: number, r: number, factor: number) {
+    const g = this.groups[zone]
+    const mat = this.own(new THREE.MeshBasicMaterial({ color: 0x8a5cff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const bubble = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(r, 20, 14)), mat)
+    bubble.position.set(x, y, z)
+    g.add(bubble)
+    this.lowZones[zone].push({ x, y, z, r, factor, mat })
   }
 
   dispose() {

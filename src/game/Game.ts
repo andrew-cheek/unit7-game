@@ -151,6 +151,7 @@ export class Game {
   private inMinigame = false
   private activePortal = new THREE.Vector3()
   private arcadeCooldown = 0
+  private cannonCd = 0 // launch-cannon refire cooldown (so it fires once per entry)
 
   // Ordered registry for systems added without growing update()'s body.
   private systems = new SystemRegistry()
@@ -1646,6 +1647,7 @@ export class Game {
 
     this.travelCooldown = Math.max(0, this.travelCooldown - dt)
     this.arcadeCooldown = Math.max(0, this.arcadeCooldown - dt)
+    this.cannonCd = Math.max(0, this.cannonCd - dt)
     this.updateMorningSunrise()
     this.updateWarp(dt)
     this.playClock += dt
@@ -1709,7 +1711,9 @@ export class Game {
       }
     } else {
       this.mechAirborne = false
-      this.player.update(dt, this.input, this.physics, gravity)
+      // Low-G bubbles scale the player's gravity down locally (floaty triple-hops).
+      const pg = gravity * this.playground.lowGFactor(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
+      this.player.update(dt, this.input, this.physics, pg)
       const lim = config.world.half - 1
       this.player.position.x = clamp(this.player.position.x, -lim, lim)
       this.player.position.z = clamp(this.player.position.z, -lim, lim)
@@ -1726,6 +1730,18 @@ export class Game {
       if (this.player.grounded) {
         const s = this.playground.bouncePadAt(this.zone, this.player.position.x, this.player.position.z)
         if (s > 0) { this.player.launch(s); this.audio.play('portal'); vibrate(20) }
+        // Launch cannons: a one-shot fling on a fixed arc (cooldown = fires once).
+        if (this.cannonCd <= 0) {
+          const v = this.playground.cannonAt(this.zone, this.player.position.x, this.player.position.z)
+          if (v) {
+            this.player.launchVec(v.x, v.y, v.z)
+            this.cannonCd = 1.4
+            this.audio.play('portal')
+            this.hud.banner = 'LAUNCH!'
+            this.bannerTimer = 1.0
+            vibrate(35)
+          }
+        }
       }
       // Updraft columns: ride the rising air upward (works grounded or airborne).
       const lift = this.playground.updraftAt(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
