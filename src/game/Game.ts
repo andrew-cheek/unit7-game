@@ -21,9 +21,10 @@ import { CameraController } from './Camera'
 import { buildLandmarks } from './Landmarks'
 import { MissionSystem } from './MissionSystem'
 import { ArcadeSystem } from './ArcadeSystem'
-import { Net, type NetState, type ScoreRow, type NetProfile, type WireGames } from './Net'
-import { RemotePlayers } from './RemotePlayers'
-import { SharedAliens } from './SharedAliens'
+import { type NetState } from './Net'
+import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
+import { SystemRegistry } from './System'
+import { FxPool } from './FxPool'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -32,14 +33,14 @@ import { RobotFactory } from './RobotFactory'
 import { RaceActivity, type RaceHud } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
-import { clamp } from './utils'
+import { clamp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, recordGameResult, type Profile } from './storage'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
 import {
-  loadProgression, addXp, noteLogin, noteDaily, recordDuel, levelForXp, levelInfo, tierForRating, cosmeticById,
+  loadProgression, addXp, noteLogin, noteDaily, levelForXp, levelInfo, tierForRating, cosmeticById,
   ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
 } from './progression'
-import type { HudState, MatchView, MinigameKind, PlayerProfile, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
+import type { HudState, MinigameKind, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
 export interface Capturable {
@@ -53,15 +54,6 @@ const NET_SEGMENTS = 22
 // Mech unlock costs (credits). mechM is free so the "pilot a mech" objective is
 // always reachable; the bigger mechs are earned by capturing aliens.
 const MECH_COST: Record<string, number> = { mechM: 0, mechL: 400, mechXL: 1200 }
-
-/** Short haptic pulse on capable devices (mobile). No-op where unsupported. */
-function vibrate(pattern: number | number[]) {
-  try {
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern)
-  } catch {
-    /* ignore */
-  }
-}
 
 /**
  * Top-level orchestrator. Owns the Engine and every gameplay subsystem, drives
@@ -151,10 +143,13 @@ export class Game {
   private activePortal = new THREE.Vector3()
   private arcadeCooldown = 0
 
-  // Shared-world multiplayer. `net` is null until the player joins with a name.
-  private net: Net | null = null
-  private remotePlayers!: RemotePlayers
-  private sharedAliens!: SharedAliens
+  // Ordered registry for systems added without growing update()'s body.
+  private systems = new SystemRegistry()
+  // Pooled transient FX (mech boot steam, energy bursts). No per-spawn alloc.
+  private fxPool!: FxPool
+  // Shared-world multiplayer (net socket, remote players, shared aliens, duels,
+  // roster). No-ops cleanly when solo; owns its own net state.
+  private mp!: MultiplayerManager
   private worldEvents!: WorldEvents
   private exploration!: ExplorationPoints
   private playground!: Playground
@@ -168,22 +163,10 @@ export class Game {
   // Neon density/quality setting (persisted): scales city neon + bloom.
   private neonLevel: 'low' | 'med' | 'high' = (() => { const v = loadHighScore('neon'); return v === 1 ? 'low' : v === 2 ? 'med' : 'high' })()
   private neonBloomMul = 1
-  // Transient steam puffs for the mech boot-up burst.
-  private bootPuffs: { mesh: THREE.Mesh; vy: number; t: number; ttl: number; mat: THREE.MeshBasicMaterial }[] = []
-  private bootGeo = new THREE.SphereGeometry(1, 10, 8)
   // Bubble-gun projectiles that burst into the crowd-floating effect.
   private bubbleShots: { mesh: THREE.Mesh; vel: THREE.Vector3; t: number }[] = []
   private bubbleShotGeo = new THREE.SphereGeometry(0.5, 12, 10)
   private bubbleShotMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-  private netAccum = 0
-  private online = 1 // players in the world incl. self (1 = solo)
-  private leaderboard: ScoreRow[] = []
-  private remoteProfiles: NetProfile[] = [] // other pilots' viewable profiles (networked)
-  private hudProfiles: PlayerProfile[] = [] // built roster (self + others) for the HUD
-  private profilesDirty = true // rebuild hudProfiles only when stats/roster change
-  private username = '' // callsign we joined the shared world under (empty when solo)
-  private incomingChallenge: { fromId: string; name: string } | null = null
-  private matchView: MatchView | null = null // live Beam Wars duel state (null when not dueling)
   private progression: Progression = loadProgression()
   private morningSunrise = false // true while the scripted opening sunrise is slowing the clock
   // Warp ability: a charge fills over 30s of play; press R to open the picker and
@@ -257,8 +240,11 @@ export class Game {
     this.npcs = new NPCManager(this.engine.scene, this.physics, this.capturables, npcCount)
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
-    this.remotePlayers = new RemotePlayers(this.engine.scene)
-    this.sharedAliens = new SharedAliens(this.engine.scene)
+    // Pooled transient FX, registered so it advances + disposes with the others.
+    this.fxPool = this.systems.register(new FxPool(this.engine.scene))
+    // Shared-world multiplayer: owns the net socket + remote/shared renderers and
+    // talks back through the host callbacks below. Registered for update/dispose.
+    this.mp = this.systems.register(new MultiplayerManager(this.engine.scene, this.multiplayerHost()))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
@@ -370,24 +356,12 @@ export class Game {
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
-      challengePilot: (id: string) => this.net?.sendChallenge(id, this.equippedTrailColor()),
-      acceptChallenge: () => {
-        if (!this.incomingChallenge) return
-        this.net?.sendAccept(this.incomingChallenge.fromId, this.equippedTrailColor())
-        this.incomingChallenge = null
-      },
-      declineChallenge: () => {
-        if (!this.incomingChallenge) return
-        this.net?.sendDecline(this.incomingChallenge.fromId)
-        this.incomingChallenge = null
-      },
-      matchDir: (dx: number, dy: number) => this.net?.sendMatchDir(dx, dy),
-      quitMatch: () => this.leaveMatch(),
-      rematch: () => {
-        const oppId = this.matchView?.oppId
-        this.leaveMatch()
-        if (oppId) this.net?.sendChallenge(oppId, this.equippedTrailColor())
-      },
+      challengePilot: (id: string) => this.mp.challenge(id, this.equippedTrailColor()),
+      acceptChallenge: () => this.mp.accept(this.equippedTrailColor()),
+      declineChallenge: () => this.mp.decline(),
+      matchDir: (dx: number, dy: number) => this.mp.matchDir(dx, dy),
+      quitMatch: () => this.mp.leaveMatch(),
+      rematch: () => this.mp.rematch(this.equippedTrailColor()),
       buyCosmetic: (id: string) => this.buyCosmetic(id),
       equipCosmetic: (slot: 'trail' | 'accent', id: string) => this.equipCosmetic(slot, id),
       toggleWarp: () => this.toggleWarp(),
@@ -692,7 +666,7 @@ export class Game {
     this.refreshProgression()
     this.hudListener({ ...this.hud, radar: this.radar })
     // A minigame may have changed our W/L record; refresh the shared profile.
-    this.publishProfile()
+    this.mp.publishProfile()
   }
 
   // --- warp ability -----------------------------------------------------------
@@ -767,15 +741,6 @@ export class Game {
       grp.rotation.y = this.input.yaw
       this.warpModel.update(dt)
     }
-  }
-
-  /** Leave the live duel view: forfeit if still running, then return to the city. */
-  private leaveMatch() {
-    if (!this.matchView) return
-    if (this.matchView.status !== 'over') this.net?.sendMatchQuit()
-    this.matchView = null
-    this.input.consumePause() // drop any Escape pressed inside the duel view
-    this.input.setLockEnabled(true)
   }
 
   // --- zone travel ---------------------------------------------------------
@@ -971,16 +936,7 @@ export class Game {
     // Multiplayer: if a shared (server-owned) alien is in reach and at least as
     // close as any local target, claim it instead. The server resolves it
     // first-claim-wins and confirms the removal + score via `onAlienGone`.
-    if (this.net) {
-      const claim = this.sharedAliens.nearestClaimable(sx, sz, this.scratchFwd.x, this.scratchFwd.z, range, 0.45)
-      if (claim) {
-        const cd = Math.hypot(claim.pos.x - sx, claim.pos.z - sz)
-        if (!best || cd <= bestD) {
-          this.net.sendClaim(claim.id)
-          return
-        }
-      }
-    }
+    if (this.mp.tryClaim(sx, sz, this.scratchFwd.x, this.scratchFwd.z, range, 0.45, bestD)) return
 
     if (best) {
       const award = best.capture()
@@ -994,7 +950,7 @@ export class Game {
       this.audio.play('capture')
       this.awardCaptureProgress(1)
       // Let everyone else see the capture happen.
-      this.net?.sendCapture([best.position.x, best.position.y, best.position.z], award)
+      this.mp.broadcastCapture([best.position.x, best.position.y, best.position.z], award)
     }
   }
 
@@ -1226,125 +1182,44 @@ export class Game {
    * robots with name tags.
    */
   connectMultiplayer(username: string, host?: string) {
-    if (this.net) return // already connected/connecting
-    this.username = username
+    if (this.mp.connected) return // already connected/connecting
     this.emitGameStart('multiplayer')
-    this.net = new Net(
-      username,
-      {
-        onWelcome: (players) => {
-          for (const p of players) this.remotePlayers.applySnapshot(p)
-          this.online = this.remotePlayers.count + 1
-        },
-        onJoin: (id, name) => {
-          // A bare join with no transform yet; seed at the origin until first state.
-          this.remotePlayers.applySnapshot({ id, name, p: [this.player.position.x, 0, this.player.position.z], y: 0, m: 'robot', v: null, z: this.zone, s: 0, g: true })
-          this.online = this.remotePlayers.count + 1
-        },
-        onLeave: (id) => {
-          this.remotePlayers.remove(id)
-          this.online = this.remotePlayers.count + 1
-        },
-        onState: (id, s) => this.remotePlayers.onState(id, s),
-        onCapture: (_id, p) => {
-          // See other players' captures: pop the same cyan ring where they netted.
-          this.missiles.shockwave({ x: p[0], y: p[1], z: p[2] }, 0x27e7ff, 3, 0.4)
-        },
-        onStatus: (connected) => {
-          if (!connected) this.online = this.remotePlayers.count + 1
-        },
-        onFull: () => {
-          this.hud.banner = 'WORLD FULL — TRY AGAIN'
-          this.bannerTimer = 3
-        },
-        onAliens: (list) => this.sharedAliens.sync(list),
-        onAlienGone: (id, by, award) => {
-          // Pop a ring where it was netted; credit our own confirmed claims.
-          const p = this.sharedAliens.positionOf(id)
-          this.sharedAliens.remove(id)
-          if (p) this.missiles.shockwave({ x: p.x, y: p.y, z: p.z }, 0x27e7ff, 3, 0.4)
-          if (by === this.net?.myId) {
-            this.hud.score += award
-            this.hud.captured += 1
-            trackEvent('npc_captured', { total: this.hud.captured })
-            this.addCredits(Math.round(award * 0.5))
-            vibrate(25)
-            this.audio.play('capture')
-            this.publishProfile() // capture count changed; refresh shared profile
-          }
-        },
-        onScores: (board) => {
-          this.leaderboard = board
-        },
-        onProfiles: (list) => {
-          this.remoteProfiles = list
-          this.profilesDirty = true
-          // Dress the remote avatars: accent colour + a nametag showing level + rank.
-          this.remotePlayers.applyProfiles(
-            list.map((p) => ({ id: p.id, name: p.name, accent: p.accent ?? 0x27e7ff, level: p.level ?? 1, tier: tierForRating(p.rating ?? 1000).name })),
-          )
-        },
-        onChallenged: (fromId, name) => {
-          // Ignore a new offer if one is already pending or we're mid-duel.
-          if (this.incomingChallenge || this.matchView) return
-          this.incomingChallenge = { fromId, name }
-          this.audio.play('ui')
-          vibrate(30)
-        },
-        onChallengeDeclined: (name) => {
-          this.hud.banner = `${name} DECLINED`
-          this.bannerTimer = 2
-        },
-        onChallengeBusy: (name) => {
-          this.hud.banner = `${name} IS BUSY`
-          this.bannerTimer = 2
-        },
-        onMatchStart: (info) => {
-          this.warpRevert() // duels are robot-only
-          this.incomingChallenge = null
-          this.matchView = {
-            side: info.side, opp: info.opp, oppId: info.oppId, cols: info.cols, rows: info.rows,
-            a: info.a, b: info.b, aAlive: true, bAlive: true, status: 'ready', winner: null, seq: 0,
-            trailA: info.trailA, trailB: info.trailB, result: null,
-          }
-          this.input.setLockEnabled(false)
-          this.audio.play('ui')
-        },
-        onMatchTick: (a, b, aAlive, bAlive) => {
-          if (!this.matchView) return
-          const m = this.matchView
-          m.a = a; m.b = b; m.aAlive = aAlive; m.bAlive = bAlive
-          if (m.status === 'ready') m.status = 'play'
-          m.seq += 1
-        },
-        onMatchEnd: (winner) => {
-          const m = this.matchView
-          if (!m) return
-          m.status = 'over'
-          m.winner = winner
-          if (winner !== 'draw') {
-            const won = winner === m.side
-            recordGameResult('beamwars', won ? 'win' : 'loss')
-            const r = recordDuel(won)
-            m.result = { delta: r.delta, rating: r.rating, tier: r.tier.name, tierColor: r.tier.color, streak: r.streak }
-            this.awardXp(won ? 60 : 15)
-            if (won) {
-              const d = noteDaily('duelWins', 1)
-              if (d.completed && d.reward) this.grantDailyReward(d.reward)
-            }
-          } else {
-            this.awardXp(20) // a draw still earns a little
-          }
-          this.refreshProgression()
-          this.publishProfile() // duel changed our W/L + level; refresh the shared profile
-        },
+    this.mp.connect(username, host)
+  }
+
+  /** The callback surface the MultiplayerManager uses to read player state and
+   *  push rewards/HUD/audio back into the game, keeping the net glue out of Game. */
+  private multiplayerHost(): MultiplayerHost {
+    return {
+      netState: () => this.buildNetState(),
+      selfIdentity: () => ({
+        aliens: this.profile.lifetimeCaptured + this.hud.captured,
+        level: levelForXp(this.progression.xp),
+        rating: this.progression.duelRating,
+        badges: this.progression.achievements.length,
+        accent: cosmeticById(this.progression.cosmetics.accent).color,
+      }),
+      callsign: () => loadStats().callsign,
+      joinSeed: () => ({ x: this.player.position.x, z: this.player.position.z }),
+      zone: () => this.zone,
+      banner: (text, secs = 2) => { this.hud.banner = text; this.bannerTimer = secs },
+      play: (sfx) => this.audio.play(sfx),
+      shockwave: (pos, color, r, dur) => this.missiles.shockwave(pos, color, r, dur),
+      applyConfirmedClaim: (award) => {
+        this.hud.score += award
+        this.hud.captured += 1
+        trackEvent('npc_captured', { total: this.hud.captured })
+        this.addCredits(Math.round(award * 0.5))
+        vibrate(25)
+        this.audio.play('capture')
       },
-      { host },
-    )
-    // Publish our profile shortly after connecting (gives the socket time to
-    // open + the server to register us), then it refreshes on captures / game
-    // results via publishProfile().
-    setTimeout(() => this.publishProfile(), 800)
+      warpRevert: () => this.warpRevert(),
+      setInputLock: (enabled) => this.input.setLockEnabled(enabled),
+      consumePause: () => this.input.consumePause(),
+      awardXp: (amount) => this.awardXp(amount),
+      grantDailyReward: (reward) => this.grantDailyReward(reward),
+      refreshProgression: () => this.refreshProgression(),
+    }
   }
 
   // --- progression / gamification ---------------------------------------------
@@ -1352,7 +1227,7 @@ export class Game {
   /** Refresh the cached progression snapshot and mark the HUD roster dirty. */
   private refreshProgression() {
     this.progression = loadProgression()
-    this.profilesDirty = true
+    this.mp.markProfileDirty()
     this.checkAchievements()
   }
 
@@ -1451,25 +1326,6 @@ export class Game {
     this.player.setAccent(color)
   }
 
-  /** Build our wire profile from persisted stats + lifetime captures and send it. */
-  private publishProfile() {
-    this.profilesDirty = true // our own stats changed; rebuild the HUD roster (solo + networked)
-    if (!this.net) return
-    const stats = loadStats()
-    const games: WireGames = {}
-    for (const [game, r] of Object.entries(stats.games)) {
-      games[game] = [r.played, r.won, r.lost, r.best]
-    }
-    this.net.sendProfile(
-      this.profile.lifetimeCaptured + this.hud.captured,
-      games,
-      levelForXp(this.progression.xp),
-      this.progression.duelRating,
-      this.progression.achievements.length,
-      cosmeticById(this.progression.cosmetics.accent).color,
-    )
-  }
-
   /** Snapshot the gamification state for the HUD (level/streak/daily/rank/cosmetics). */
   private buildProgressHud(): ProgressHud {
     const p = this.progression
@@ -1492,55 +1348,6 @@ export class Game {
     }
   }
 
-  /** Rebuild the HUD profile roster (self first, then networked pilots). */
-  private buildHudProfiles(): PlayerProfile[] {
-    const stats = loadStats()
-    const selfGames = Object.entries(stats.games).map(([game, r]) => ({
-      game,
-      played: r.played,
-      won: r.won,
-      lost: r.lost,
-      best: r.best,
-    }))
-    const selfTier = tierForRating(this.progression.duelRating)
-    const self: PlayerProfile = {
-      id: this.net?.myId ?? '',
-      name: this.username || stats.callsign || 'YOU',
-      self: true,
-      aliens: this.profile.lifetimeCaptured + this.hud.captured,
-      level: levelForXp(this.progression.xp),
-      duelTier: selfTier.name,
-      duelTierColor: selfTier.color,
-      rating: this.progression.duelRating,
-      badges: this.progression.achievements.length,
-      games: selfGames,
-    }
-    const others: PlayerProfile[] = this.remoteProfiles
-      .filter((p) => p.id !== this.net?.myId)
-      .map((p) => {
-        const t = tierForRating(p.rating ?? 1000)
-        return {
-          id: p.id,
-          name: p.name,
-          self: false,
-          aliens: p.aliens,
-          level: p.level ?? 1,
-          duelTier: t.name,
-          duelTierColor: t.color,
-          rating: p.rating ?? 1000,
-          badges: p.badges ?? 0,
-          games: Object.entries(p.games).map(([game, tup]) => ({
-            game,
-            played: tup[0] ?? 0,
-            won: tup[1] ?? 0,
-            lost: tup[2] ?? 0,
-            best: tup[3] ?? 0,
-          })),
-        }
-      })
-    return [self, ...others]
-  }
-
   /**
    * Mech boot-up burst: layered energy shockwave rings + rising steam puffs at
    * the mech's feet. Tier-scaled puff count; puffs fade and self-dispose.
@@ -1548,30 +1355,16 @@ export class Game {
   private spawnMechBoot(pos: THREE.Vector3) {
     this.missiles.shockwave({ x: pos.x, y: pos.y + 0.4, z: pos.z }, 0x27e7ff, 7, 0.7)
     this.missiles.shockwave({ x: pos.x, y: pos.y + 0.4, z: pos.z }, 0xff8a1e, 11, 0.95)
-    const n = Math.round(6 * config.tier.fxScale) + 3
-    for (let i = 0; i < n; i++) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.5, depthWrite: false, fog: false })
-      const m = new THREE.Mesh(this.bootGeo, mat)
-      m.position.set(pos.x + (Math.random() * 2 - 1) * 3.5, pos.y + 0.6 + Math.random() * 1.5, pos.z + (Math.random() * 2 - 1) * 3.5)
-      m.scale.setScalar(1.2 + Math.random() * 1.5)
-      this.engine.scene.add(m)
-      this.bootPuffs.push({ mesh: m, vy: 2.2 + Math.random() * 2, t: 0, ttl: 1.1 + Math.random() * 0.7, mat })
-    }
-  }
-
-  private updateBootPuffs(dt: number) {
-    for (let i = this.bootPuffs.length - 1; i >= 0; i--) {
-      const p = this.bootPuffs[i]
-      p.t += dt
-      p.mesh.position.y += p.vy * dt
-      p.mesh.scale.multiplyScalar(1 + dt * 0.9)
-      p.mat.opacity = 0.5 * Math.max(0, 1 - p.t / p.ttl)
-      if (p.t >= p.ttl) {
-        this.engine.scene.remove(p.mesh)
-        p.mat.dispose()
-        this.bootPuffs.splice(i, 1)
-      }
-    }
+    // Rising steam puffs from the pool (no per-spawn material allocation).
+    this.fxPool.puff(pos.x, pos.y + 0.6, pos.z, {
+      color: 0xcfe6ff,
+      count: Math.round(6 * config.tier.fxScale) + 3,
+      spread: 3.5,
+      rise: 3.2,
+      ttl: 1.4,
+      scale: 1.9,
+      opacity: 0.5,
+    })
   }
 
   /** Apply the current neon level to city neon density + the bloom multiplier. */
@@ -1651,11 +1444,11 @@ export class Game {
     }
   }
 
-  /** Push the local player's transform to the server (throttled by the caller). */
-  private sendNetState() {
-    if (!this.net) return
+  /** Build the local player's transform for the network broadcast (the manager
+   *  throttles + sends it). */
+  private buildNetState(): NetState {
     const v = this.vehicles.current
-    const s: NetState = {
+    return {
       p: [this.player.position.x, this.player.position.y, this.player.position.z],
       y: this.input.yaw,
       m: this.player.mode,
@@ -1664,7 +1457,6 @@ export class Game {
       s: clamp(this.hud.speed / 30, 0, 1),
       g: this.hud.altitude < 1.2,
     }
-    this.net.sendState(s)
   }
 
   /**
@@ -1711,7 +1503,7 @@ export class Game {
     }
 
     // A live duel owns the screen (overlay UI); freeze the city cheaply behind it.
-    if (this.matchView) {
+    if (this.mp.inMatch) {
       this.pushHud(dt)
       return
     }
@@ -1805,7 +1597,7 @@ export class Game {
     // Let the peaceful morning - sunrise, shuttle arrival, the crew filing into
     // the offices - fully play out before the aliens invade (once). In
     // multiplayer the shared server swarm is the content, so it's suppressed.
-    if (onEarth && !this.net && !this.invasionTriggered && !this.morningSunrise && this.playClock > 45 && this.world.dayFactor >= 0.96) {
+    if (onEarth && !this.mp.connected && !this.invasionTriggered && !this.morningSunrise && this.playClock > 45 && this.world.dayFactor >= 0.96) {
       this.invasionTriggered = true
       this.events.startInvasion(this.player.position)
       this.hud.banner = 'ALIEN INVASION'
@@ -1853,12 +1645,9 @@ export class Game {
     // so daylight reads warm/calm and night reads as the bright neon city.
     this.engine.setBloomScale((1 - this.world.dayFactor * 0.62) * this.neonBloomMul)
 
-    // Multiplayer: advance the other players' avatars and broadcast our own
-    // transform a few times a second. No-ops cleanly when playing solo.
-    this.remotePlayers.setLocalZone(this.zone)
-    this.remotePlayers.update(dt)
-    this.sharedAliens.setVisible(this.zone === 'earth')
-    this.sharedAliens.update(dt)
+    // Registered systems: pooled FX, and multiplayer (advances remote avatars +
+    // the shared swarm and broadcasts our transform). No-ops cleanly when solo.
+    this.systems.update(dt)
     // Ambient events + exploration rewards run in every zone.
     this.worldEvents.update(dt, this.focus)
     this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
@@ -1866,15 +1655,7 @@ export class Game {
     this.dawnShow.update(dt, this.world.dayFactor)
     if (onEarth) this.robotFactory.update(dt)
     if (onEarth) this.raceHud = this.race.update(dt, this.player.position.x, this.player.position.z)
-    this.updateBootPuffs(dt)
     this.updateBubbleShots(dt)
-    if (this.net) {
-      this.netAccum += dt
-      if (this.netAccum >= 1 / 12) {
-        this.netAccum = 0
-        this.sendNetState()
-      }
-    }
 
     // Arcade: advance the transport beam every frame; only start a new one when
     // on foot, on Earth, not transitioning, and not in/cooling-down a minigame.
@@ -1929,7 +1710,7 @@ export class Game {
    */
   private renderFrame = (frameDt: number) => {
     this.input.drainLook()
-    if (this.dropIn || this.intro || this.matchView || this.paused || this.inMinigame || this.launch.active) return
+    if (this.dropIn || this.intro || this.mp.inMatch || this.paused || this.inMinigame || this.launch.active) return
     this.camera.update(frameDt, this.input, this.focus, this.buildFollowState())
     // Keep the (desktop-only) depth-of-field focused on the subject.
     this.engine.setFocusDistance(this.engine.camera.position.distanceTo(this.focus))
@@ -1945,7 +1726,7 @@ export class Game {
       const d = (c.position.x - x) ** 2 + (c.position.z - z) ** 2
       if (d < bestD) { bestD = d; best = c.position }
     }
-    const shared = this.sharedAliens.nearestTo(x, z)
+    const shared = this.mp.nearestSharedAlien(x, z)
     if (shared && (shared.x - x) ** 2 + (shared.z - z) ** 2 < bestD) best = shared
     return best ? best.clone() : null
   }
@@ -2112,15 +1893,12 @@ export class Game {
     this.hud.shield = this.fx.shield > 0
     this.hud.powerup =
       this.fx.speed > 0 ? { kind: 'speed', remaining: this.fx.speed } : this.fx.score > 0 ? { kind: 'score', remaining: this.fx.score } : null
-    this.hud.online = this.online
-    this.hud.leaderboard = this.leaderboard
-    if (this.profilesDirty) {
-      this.hudProfiles = this.buildHudProfiles()
-      this.profilesDirty = false
-    }
-    this.hud.profiles = this.hudProfiles
-    this.hud.challenge = this.incomingChallenge
-    this.hud.match = this.matchView ? { ...this.matchView } : null
+    const mp = this.mp.hudSnapshot()
+    this.hud.online = mp.online
+    this.hud.leaderboard = mp.leaderboard
+    this.hud.profiles = mp.profiles
+    this.hud.challenge = mp.challenge
+    this.hud.match = mp.match
     this.hud.progress = this.buildProgressHud()
     this.hud.warp = {
       charge01: Math.min(1, this.warpCharge / Game.WARP_TIME),
@@ -2141,18 +1919,14 @@ export class Game {
     this.profile.credits = this.credits
     saveProfile(this.profile)
     this.clearWarpModel()
-    this.net?.close()
-    this.remotePlayers.dispose()
-    this.sharedAliens.dispose()
+    // Tears down registered systems (multiplayer net + renderers, pooled FX).
+    this.systems.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()
     this.dawnShow.dispose()
     this.robotFactory.dispose()
     this.race.dispose()
-    for (const p of this.bootPuffs) { this.engine.scene.remove(p.mesh); p.mat.dispose() }
-    this.bootPuffs = []
-    this.bootGeo.dispose()
     for (const s of this.bubbleShots) this.engine.scene.remove(s.mesh)
     this.bubbleShots = []
     this.bubbleShotGeo.dispose()
