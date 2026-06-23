@@ -125,6 +125,7 @@ export class Game {
   private invasionTriggered = false
   private playClock = 0 // seconds of active gameplay (lets the peaceful morning play before the invasion)
   private profile: Profile = loadProfile()
+  private readonly soloName = loadStats().callsign || 'YOU' // own row in the solo leaderboard
   private credits = 0
   private unlocked = new Set<string>()
   private scratchFwd = new THREE.Vector3()
@@ -2089,9 +2090,18 @@ export class Game {
       const m = this.engine.memoryInfo()
       this.hud.perf = { draws: this.engine.drawCalls, tris: this.engine.triangles, geos: m.geometries, texs: m.textures }
     }
-    // Pad presence with the cosmetic bots so the world reads as populated.
-    this.hud.online = mp.online + this.bots.count
-    this.hud.leaderboard = [...mp.leaderboard, ...this.bots.leaderboard()].sort((a, b) => b.score - a.score).slice(0, 10)
+    // Presence: when truly connected, show the real room. When solo, pad it with
+    // the cosmetic bots (a stable count that doesn't crash to 1 off-world) and
+    // rank YOU among them so the competition reads as real.
+    if (this.mp.connected) {
+      this.hud.online = mp.online
+      this.hud.leaderboard = mp.leaderboard
+    } else {
+      this.hud.online = 1 + this.bots.rosterSize
+      this.hud.leaderboard = [{ name: this.soloName, score: this.hud.score }, ...this.bots.leaderboard()]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10)
+    }
     this.hud.profiles = mp.profiles
     this.hud.challenge = mp.challenge
     this.hud.match = mp.match
