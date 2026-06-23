@@ -79,12 +79,23 @@ export const config = {
 
   jetpack: {
     thrust: 26,
-    maxAscend: 13, // fast climb while the boost reserve has charge
+    maxAscend: 13, // steady cruise cap while holding
     cruiseAscend: 4, // steady climb once the reserve is spent (never runs out)
+    pulseBoost: 9, // re-press mid-air for an upward burst that climbs PAST the cruise cap
     fuelMax: 100,
     fuelDrain: 34,
     fuelRegen: 18,
     fuelMinToFly: 4,
+  },
+
+  // Grapple arm: aim with the camera, fire, and get yanked toward the hit point
+  // on a building so you can quickly hop around the city (Spider-Man style).
+  grapple: {
+    range: 95, // max reach (m)
+    pull: 130, // acceleration toward the anchor (m/s^2)
+    maxSpeed: 52, // capped zip speed
+    arriveDist: 4.5, // release automatically when this close to the anchor
+    maxTime: 2.5, // safety timeout (s)
   },
 
   // Summonable hover skateboard (C / mobile BOARD): the robot rides it visibly

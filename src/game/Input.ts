@@ -9,10 +9,10 @@ const GAME_CODES = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space',
-  'KeyJ', 'KeyH', 'KeyG', 'KeyF', 'KeyT', 'KeyO', 'KeyB', 'KeyV', 'KeyC', 'KeyR',
+  'KeyJ', 'KeyH', 'KeyG', 'KeyF', 'KeyT', 'KeyO', 'KeyB', 'KeyV', 'KeyC', 'KeyR', 'KeyQ',
 ])
 
-const HELD: GameAction[] = ['sprint', 'jet', 'boost']
+const HELD: GameAction[] = ['sprint', 'jet', 'boost', 'grapple']
 
 /**
  * One place that turns keyboard, pointer-lock mouse and touch into a clean
@@ -30,7 +30,7 @@ export class Input {
   pitch = config.camera.startPitch
 
   held: Record<GameAction, boolean> = {
-    sprint: false, jet: false, net: false, enter: false, boost: false, morph: false, chute: false, dance: false, bubble: false, board: false, warp: false,
+    sprint: false, jet: false, net: false, enter: false, boost: false, morph: false, chute: false, dance: false, bubble: false, board: false, warp: false, grapple: false,
   }
   locked = false
   pausePressed = false
@@ -147,6 +147,9 @@ export class Input {
       case 'KeyF':
         this.held.boost = true
         break
+      case 'KeyQ':
+        this.held.grapple = true
+        break
       case 'KeyH':
         this.edges.add('net')
         break
@@ -193,12 +196,15 @@ export class Input {
       case 'KeyF':
         this.held.boost = false
         break
+      case 'KeyQ':
+        this.held.grapple = false
+        break
     }
   }
 
   private onBlur = () => {
     this.keys.clear()
-    this.held.sprint = this.held.jet = this.held.boost = false
+    this.held.sprint = this.held.jet = this.held.boost = this.held.grapple = false
     // Also drop queued one-shot edges, else a net/enter/morph/chute fires on refocus.
     this.edges.clear()
   }
