@@ -176,6 +176,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           touch={touch}
           onDeploy={() => controlsRef.current?.dropDeploy()}
           onTrick={() => controlsRef.current?.dropTrick()}
+          onJet={(down) => controlsRef.current?.pressAction('jet', down)}
           onSteer={(x, y) => controlsRef.current?.setVirtualMove(x, y)}
         />
       )}
@@ -422,7 +423,7 @@ type DropState = NonNullable<HudState['drop']>
  * full-screen drag-to-steer layer behind the buttons (drag forward to nose-dive,
  * back to flatten and slow).
  */
-function DropOverlay({ drop, touch, onDeploy, onTrick, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onTrick: () => void; onSteer: (x: number, y: number) => void }) {
+function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onTrick: () => void; onJet: (down: boolean) => void; onSteer: (x: number, y: number) => void }) {
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
   const onDown = (e: ReactPointerEvent) => {
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
@@ -476,6 +477,15 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onSteer }: { drop: DropSt
       )}
       {drop.canTrick && (
         <button style={trickBtn} onClick={onTrick}>FLIP + FIREWORKS ✦</button>
+      )}
+      {touch && drop.phase === 'dive' && (
+        <button
+          style={jetBtn}
+          onPointerDown={(e) => { e.preventDefault(); onJet(true) }}
+          onPointerUp={() => onJet(false)}
+          onPointerCancel={() => onJet(false)}
+          onPointerLeave={() => onJet(false)}
+        >JET ▲</button>
       )}
     </>
   )
@@ -570,6 +580,22 @@ const trickBtn: CSSProperties = {
   color: '#ffd24a',
   background: 'rgba(8,12,24,0.7)',
   border: '2px solid #ff2bd0',
+  borderRadius: 999,
+}
+const jetBtn: CSSProperties = {
+  position: 'absolute',
+  right: 24,
+  bottom: 30,
+  zIndex: 16,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  touchAction: 'none',
+  padding: '16px 28px',
+  font: '800 16px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  color: '#27e7ff',
+  background: 'rgba(8,12,24,0.7)',
+  border: '2px solid #27e7ff',
   borderRadius: 999,
 }
 const skipBtn: CSSProperties = {
