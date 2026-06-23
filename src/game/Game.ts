@@ -1749,8 +1749,17 @@ export class Game {
       this.player.position.z = clamp(this.player.position.z, -lim, lim)
       this.focus.copy(this.player.position)
       this.checkRecovery(dt)
-      // Robot dance: 'B' toggles it; standing on the city dance floor auto-dances.
-      if (this.input.consumeEdge('dance')) this.danceToggle = !this.danceToggle
+      // Robot dance: first B press starts move 0; each additional press cycles combos.
+      // Moving fast auto-stops so you're not locked in while trying to run.
+      if (this.input.consumeEdge('dance')) {
+        if (!this.danceToggle) {
+          this.danceToggle = true
+          this.player.startDance()
+        } else {
+          this.player.advanceDanceMove()
+        }
+      }
+      if (this.danceToggle && Math.hypot(this.player.velocity.x, this.player.velocity.z) > 4) this.danceToggle = false
       const onFloor = this.playground.onDanceFloor(this.zone, this.player.position.x, this.player.position.z)
       this.player.setDancing(this.danceToggle || onFloor)
       // Hover skateboard (C / BOARD) and bubble gun (V / BUBBLE).

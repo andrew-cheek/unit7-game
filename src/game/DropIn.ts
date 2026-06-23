@@ -99,7 +99,6 @@ export class DropIn {
   private finishing = false
   private flipT = 0 // remaining time in a somersault (0 = not flipping)
   private static readonly FLIP_DUR = 0.7
-  private fireworks: { pts: THREE.Points; vel: Float32Array; mat: THREE.PointsMaterial; t: number }[] = []
   private chute!: THREE.Mesh
   private chuteRig!: THREE.Group // canopy + suspension cords, scaled together
   private streaks!: THREE.Points
@@ -367,58 +366,12 @@ export class DropIn {
     else if (this.phase === 'canopy') this.wantCut = true
   }
 
-  /** TRICK button / key: a somersault + a burst of fireworks (small style bonus). */
+  /** TRICK button / key: a somersault (small style bonus during freefall). */
   trick() {
     if (this.done || this.finishing || this.phase === 'crash' || this.phase === 'land') return
     if (this.flipT <= 0) this.flipT = DropIn.FLIP_DUR
-    this.spawnFirework()
     this.tricks++
     this.onSfx?.('ring')
-  }
-
-  private spawnFirework() {
-    const N = 64
-    const p = new Float32Array(N * 3)
-    const vel = new Float32Array(N * 3)
-    for (let i = 0; i < N; i++) {
-      // random direction on a sphere * a burst speed
-      const a = Math.random() * Math.PI * 2, b = Math.acos(2 * Math.random() - 1)
-      const sp = 10 + Math.random() * 14
-      vel[i * 3] = Math.sin(b) * Math.cos(a) * sp
-      vel[i * 3 + 1] = Math.cos(b) * sp
-      vel[i * 3 + 2] = Math.sin(b) * Math.sin(a) * sp
-    }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(p, 3))
-    const hue = [0xff2bd0, 0x27e7ff, 0x9dff5a, 0xffd24a, 0x8a5cff][Math.floor(Math.random() * 5)]
-    const mat = new THREE.PointsMaterial({ color: hue, size: 0.6, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    const pts = new THREE.Points(geo, mat)
-    pts.position.set(this.pos.x, this.pos.y + 2, this.pos.z)
-    pts.frustumCulled = false
-    this.group.add(pts)
-    this.fireworks.push({ pts, vel, mat, t: 0 })
-  }
-
-  private updateFireworks(dt: number) {
-    for (let i = this.fireworks.length - 1; i >= 0; i--) {
-      const f = this.fireworks[i]
-      f.t += dt
-      const arr = (f.pts.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array
-      for (let j = 0; j < arr.length; j += 3) {
-        f.vel[j + 1] -= 14 * dt // gravity
-        arr[j] += f.vel[j] * dt
-        arr[j + 1] += f.vel[j + 1] * dt
-        arr[j + 2] += f.vel[j + 2] * dt
-      }
-      ;(f.pts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
-      f.mat.opacity = Math.max(0, 1 - f.t / 1.3)
-      if (f.t > 1.3) {
-        this.group.remove(f.pts)
-        f.pts.geometry.dispose()
-        f.mat.dispose()
-        this.fireworks.splice(i, 1)
-      }
-    }
   }
 
   private cutCanopy() {
@@ -455,7 +408,6 @@ export class DropIn {
     // Flew through a destination portal: fade out and hand off (Game routes it).
     if (this.finishing) {
       this.updateTraffic(dt)
-      this.updateFireworks(dt)
       this.fade = clamp(this.fade + dt * 2, 0, 1)
       this.placeCamera(false)
       if (this.fade >= 1) this.done = true
@@ -471,10 +423,9 @@ export class DropIn {
       else if (this.phase === 'canopy') this.wantCut = true // cut back to free-fall
     }
     if (this.wantCut && this.phase === 'canopy') this.cutCanopy()
-    // TRICK (H / button): a somersault + fireworks.
+    // TRICK (H / button): a somersault.
     if (this.input.consumeEdge('net')) this.trick()
     if (this.flipT > 0) this.flipT = Math.max(0, this.flipT - dt)
-    this.updateFireworks(dt)
 
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
@@ -797,7 +748,6 @@ export class DropIn {
     this.rb.dispose()
     this.helper?.dispose()
     for (const t of this.traffic) t.v.dispose()
-    for (const f of this.fireworks) { f.pts.geometry.dispose(); f.mat.dispose() }
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
   }

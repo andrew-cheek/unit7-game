@@ -73,9 +73,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     if (nearVehicle) secondary.unshift(ENTER)
     if (hud.warp.ready || hud.warp.active) secondary.unshift(WARP)
     if (hud.canCapture) secondary.push(CAPTURE)
-    if (airborne) secondary.push(hud.mode === 'parachute' ? CUT : CHUTE)
-    else secondary.push(MORPH, BOARD)
+    if (!airborne) secondary.push(MORPH, BOARD)
     secondary.push(GRAPPLE) // hold to fire the grapple arm and zip around
+    // CHUTE / CUT is a dedicated left-side button (see below) -- not in this cluster
   }
 
   const helper = inMech
@@ -163,6 +163,12 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     if (b.type === 'hold') controls.pressAction(b.action, false)
   }
 
+  // Chute button action and label depend on parachute state.
+  const showChuteBtn = !inVehicle && airborne
+  const chuteLabel = hud.mode === 'parachute' ? 'CUT' : 'CHUTE'
+  const chuteAction = hud.mode === 'parachute' ? 'chute' : 'chute'
+  const chuteColor = hud.mode === 'parachute' ? '#ff8a1e' : '#ff2bd0'
+
   return (
     <div style={root}>
       {/* camera area (right) handles look-drag + pinch zoom */}
@@ -173,6 +179,18 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
       {joyAt && (
         <div style={{ ...joyBase, left: joyAt.x - JOY_R, top: joyAt.y - JOY_R }}>
           <div style={{ ...joyKnob, transform: `translate(${knob.x}px, ${knob.y}px)` }} />
+        </div>
+      )}
+
+      {/* Dedicated CHUTE / CUT button on the left side, mirroring JUMP on right */}
+      {showChuteBtn && (
+        <div
+          style={{ ...chuteBtn, borderColor: chuteColor, color: chuteColor, boxShadow: `0 0 22px ${chuteColor}66` }}
+          onPointerDown={(e) => { e.stopPropagation(); controls.pressAction(chuteAction as GameAction, true) }}
+          onPointerUp={(e) => { e.stopPropagation(); controls.pressAction(chuteAction as GameAction, false) }}
+          onPointerCancel={(e) => { e.stopPropagation(); controls.pressAction(chuteAction as GameAction, false) }}
+        >
+          {chuteLabel}
         </div>
       )}
 
@@ -275,5 +293,19 @@ const primaryBtn: CSSProperties = {
   background: 'rgba(8,12,24,0.66)',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   font: '800 14px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.06em', textAlign: 'center', userSelect: 'none', WebkitUserSelect: 'none',
+}
+const chuteBtn: CSSProperties = {
+  position: 'absolute',
+  left: 'max(16px, env(safe-area-inset-left))',
+  bottom: 'max(22px, env(safe-area-inset-bottom))',
+  pointerEvents: 'auto',
+  touchAction: 'none',
+  zIndex: 10,
+  width: 80, height: 80, borderRadius: '50%',
+  border: '3px solid',
+  background: 'rgba(8,12,24,0.66)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  font: '800 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.06em', textAlign: 'center', userSelect: 'none', WebkitUserSelect: 'none',
 }

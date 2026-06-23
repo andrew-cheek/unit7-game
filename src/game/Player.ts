@@ -35,6 +35,8 @@ export class Player {
   shield = false // shield powerup
   dancing = false // robot-dance emote (set by Game from the dance floor / key)
   private danceT = 0
+  private danceMoveT = 0  // time elapsed within the current move
+  private danceMove = 0   // 0-4: spin, moonwalk, flip, pop-lock, raise-the-roof
   boarding = false // riding the summonable hover skateboard
   private board: THREE.Group
   private boardLean = 0
@@ -191,7 +193,19 @@ export class Player {
     if (this.grounded && this.velocity.y > 0) { this.grounded = false; this.airTime = 0 }
   }
   setDancing(v: boolean) {
+    if (!v && this.dancing) { this.danceMove = 0; this.danceMoveT = 0 }
     this.dancing = v
+  }
+  /** Call when first starting a manual dance to reset to move 0. */
+  startDance() {
+    this.danceMove = 0
+    this.danceMoveT = 0
+    this.danceT = 0
+  }
+  /** Advance to the next combo move (0-4 wrap). */
+  advanceDanceMove() {
+    this.danceMove = (this.danceMove + 1) % 5
+    this.danceMoveT = 0
   }
 
   private buildCanopy(): THREE.Group {
@@ -353,7 +367,7 @@ export class Player {
     if (this.grinding) {
       // updateGrind already set rotation; nothing to do here.
     } else if (dancing) {
-      this.object.rotation.set(0, this.danceT * 4.5, 0) // spin
+      this.danceRotation()
     } else if (this.mode === 'plane') {
       const targetYaw = moving ? Math.atan2(this.moveDir.x, this.moveDir.z) : this.yaw
       this.yaw = dampAngle(this.yaw, targetYaw, 5, dt)
@@ -381,8 +395,7 @@ export class Player {
 
     this.speed = Math.hypot(this.velocity.x, this.velocity.z)
     if (dancing) {
-      this.model.group.position.y = Math.abs(Math.sin(this.danceT * 7)) * 0.35 // bob
-      this.model.update(dt, 0.6, true)
+      this.danceModel(dt)
     } else {
       this.model.group.position.y = 0
       this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
@@ -533,8 +546,80 @@ export class Player {
     this.moveDir.set(0, 0, 0)
     this.velocity.x = approach(this.velocity.x, 0, 40 * dt)
     this.velocity.z = approach(this.velocity.z, 0, 40 * dt)
-    this.velocity.y += gravity * dt // stay planted on the floor
+    this.velocity.y += gravity * dt
     this.danceT += dt
+    this.danceMoveT += dt
+    // Move 2 (flip): brief hop at start of each flip cycle.
+    if (this.danceMove === 2) {
+      const flipPeriod = 2.0
+      const ct = this.danceMoveT % flipPeriod
+      if (ct < dt * 2 && this.grounded) this.velocity.y = Math.max(this.velocity.y, 5.5)
+    }
+  }
+
+  private danceRotation() {
+    const t = this.danceT, mt = this.danceMoveT
+    switch (this.danceMove) {
+      case 0: // Spin: continuous Y rotation + body bob
+        this.object.rotation.set(0, t * 4.5, 0)
+        break
+      case 1: // Moonwalk: lean forward, slow turn, side sway
+        this.object.rotation.set(0.22, t * 0.7, Math.sin(t * 4) * 0.16)
+        break
+      case 2: { // Flip: full forward somersault with leg tuck at apex
+        const flipPeriod = 2.0, flipDur = 0.72
+        const ct = mt % flipPeriod
+        const flipping = ct < flipDur
+        const flipAngle = flipping ? -(ct / flipDur) * Math.PI * 2 : 0
+        this.object.rotation.set(flipAngle, this.yaw + mt * 0.25, 0)
+        this.model.setFlyPose(flipping ? Math.sin((ct / flipDur) * Math.PI) * 0.85 : 0)
+        break
+      }
+      case 3: { // Pop-lock: snap to 90° increments, hold with a lean
+        const snapInterval = 0.42
+        const step = Math.floor(mt / snapInterval)
+        const snapAngle = this.yaw + step * (Math.PI / 2)
+        const snapProg = (mt % snapInterval) / snapInterval
+        this.object.rotation.set(0, snapAngle, snapProg < 0.25 ? snapProg * 1.2 : 0)
+        this.model.setFlyPose(snapProg < 0.18 ? snapProg / 0.18 * 0.5 : 0)
+        break
+      }
+      default: // Raise the roof: upright spin, arms pump via flyPose
+        this.object.rotation.set(0, t * 0.4, Math.sin(t * 8) * 0.12)
+        this.model.setFlyPose(0.5 + Math.sin(t * 6) * 0.28)
+        break
+    }
+  }
+
+  private danceModel(dt: number) {
+    const t = this.danceT, mt = this.danceMoveT
+    switch (this.danceMove) {
+      case 0: // Spin
+        this.model.setFlyPose(0)
+        this.model.group.position.y = Math.abs(Math.sin(t * 7)) * 0.35
+        this.model.update(dt, 0.6, true)
+        break
+      case 1: // Moonwalk: forward lean with shuffle walk
+        this.model.setFlyPose(0)
+        this.model.group.position.y = Math.abs(Math.sin(t * 4.5)) * 0.2
+        this.model.update(dt, 0.5, true)
+        break
+      case 2: { // Flip: idle between flips, walk cycle during
+        const flipPeriod = 2.0, flipDur = 0.72
+        const ct = mt % flipPeriod
+        this.model.group.position.y = 0
+        this.model.update(dt, ct < flipDur ? 0.4 : 0.1, ct >= flipDur)
+        break
+      }
+      case 3: // Pop-lock: frozen pose (speed 0) with snap arm movement via flyPose above
+        this.model.group.position.y = 0
+        this.model.update(dt, 0.05, true)
+        break
+      default: // Raise the roof: fast bob, arms pumping
+        this.model.group.position.y = Math.abs(Math.sin(t * 10)) * 0.38
+        this.model.update(dt, 0.3, true)
+        break
+    }
   }
 
   private camRelative(input: Input, out: THREE.Vector3) {
