@@ -21,6 +21,8 @@ interface Agent {
   kind: AgentKind
   flee: boolean // aliens scatter when the player closes in
   value: number // score for catching this one
+  speedMul: number // per-agent speed scale (alien archetypes move differently)
+  retargetR: number // distance at which a new wander target is picked (erratic = larger)
   // Bubble-gun state: floatT>0 = trapped + rising/floating; then it pops and the
   // agent falls back down before resuming normal wandering.
   floatT: number
@@ -93,11 +95,34 @@ export class NPCManager {
     let kind: AgentKind
     let model: CharacterModel
     let value: number
+    // Alien archetypes give the capture loop variety: common Drones, fast erratic
+    // Skitterers worth more, and rare slow Brutes worth a lot that stand their
+    // ground instead of fleeing. (Local single-player crowd; the server-synced
+    // shared swarm is unchanged.) Defaults for non-alien agents.
+    let speedMul = 1
+    let retargetR = 3
+    let flee = false
     if (roll < config.city.smallAlienRatio) {
       kind = 'alien'
-      const big = hash01(i * 4.2) < config.city.bigAlienChance
-      model = createAlien({ big, color: [0x3ba86a, 0x6a3ba8, 0xa83b6a][Math.floor(hash01(i * 8.1) * 3)], eye: accent })
-      value = big ? 140 : 90
+      flee = true
+      const arche = hash01(i * 4.2)
+      if (arche < 0.16) {
+        // Brute: big, slow, high value, does not flee (a lumbering target).
+        model = createAlien({ big: true, color: 0x6a3ba8, eye: accent })
+        value = 200
+        speedMul = 0.55
+        flee = false
+      } else if (arche < 0.46) {
+        // Skitterer: small, fast, erratic (darts to new targets often), worth more.
+        model = createAlien({ big: false, color: 0x3ba86a, eye: accent })
+        value = 130
+        speedMul = 1.85
+        retargetR = 7
+      } else {
+        // Drone: common baseline.
+        model = createAlien({ big: false, color: 0xa83b6a, eye: accent })
+        value = 90
+      }
     } else if (roll < config.city.smallAlienRatio + config.city.robotRatio) {
       kind = 'robot'
       model = createCitizen({ robot: true, accent, outfit: [0x39414f, 0x2f3a4a, 0x444b5a][Math.floor(hash01(i * 7.7) * 3)] })
@@ -124,8 +149,10 @@ export class NPCManager {
       alive: true,
       respawn: 0,
       kind,
-      flee: kind === 'alien',
+      flee,
       value,
+      speedMul,
+      retargetR,
       floatT: 0,
       falling: false,
       fallV: 0,
@@ -251,6 +278,9 @@ export class NPCManager {
         continue
       }
 
+      // Per-agent max speed (alien archetypes move at different rates).
+      const maxSp = speed * a.speedMul
+
       // Distance-culled cheap path: far NPCs (off-screen) skip the boids
       // separation, the per-frame ground raycast and animation. They keep
       // drifting toward their target on their last ground height; full detail
@@ -259,10 +289,10 @@ export class NPCManager {
         const tx = a.target.x - a.pos.x
         const tz = a.target.z - a.pos.z
         const td = Math.hypot(tx, tz)
-        if (td < 3) a.target = this.randomPoint()
+        if (td < a.retargetR) a.target = this.randomPoint()
         else {
-          a.pos.x += (tx / td) * speed * dt
-          a.pos.z += (tz / td) * speed * dt
+          a.pos.x += (tx / td) * maxSp * dt
+          a.pos.z += (tz / td) * maxSp * dt
         }
         a.model.group.position.copy(a.pos)
         a.model.group.visible = false
@@ -276,7 +306,7 @@ export class NPCManager {
         const fz = a.pos.z - playerPos.z
         const fd = Math.hypot(fx, fz)
         if (fd < fleeR && fd > 0.01) {
-          this.desired.set((fx / fd) * speed * 1.7, 0, (fz / fd) * speed * 1.7)
+          this.desired.set((fx / fd) * maxSp * 1.7, 0, (fz / fd) * maxSp * 1.7)
           fled = true
         }
       }
@@ -286,8 +316,8 @@ export class NPCManager {
         const tx = a.target.x - a.pos.x
         const tz = a.target.z - a.pos.z
         const td = Math.hypot(tx, tz)
-        if (td < 3) a.target = this.randomPoint()
-        this.desired.set(td > 0.01 ? (tx / td) * speed : 0, 0, td > 0.01 ? (tz / td) * speed : 0)
+        if (td < a.retargetR) a.target = this.randomPoint()
+        this.desired.set(td > 0.01 ? (tx / td) * maxSp : 0, 0, td > 0.01 ? (tz / td) * maxSp : 0)
       }
 
       // Boids separation from neighbors (3x3-cell spatial-hash scan, not O(n^2)).
@@ -337,7 +367,7 @@ export class NPCManager {
       // Agents reaching here are within the cull radius (far ones took the cheap
       // path above), so they are always visible + animated.
       a.model.group.visible = true
-      a.model.update(dt, sp / speed, true)
+      a.model.update(dt, sp / maxSp, true)
     }
   }
 
