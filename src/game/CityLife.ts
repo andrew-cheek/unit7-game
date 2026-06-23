@@ -57,6 +57,12 @@ export class CityLife implements GameSystem {
   private podT: number[] = []
   private podSpeed: number[] = []
 
+  private cars: THREE.InstancedMesh | null = null
+  private carLanes: Lane[] = []
+  private carLane: number[] = []
+  private carT: number[] = []
+  private carSpeed: number[] = []
+
   private blimps: Blimp[] = []
   private reactors: Reactor[] = []
   private crane: { jib: THREE.Group; hook: THREE.Group; sparks: THREE.MeshStandardMaterial[] } | null = null
@@ -78,6 +84,7 @@ export class CityLife implements GameSystem {
   constructor(scene: THREE.Scene, opts: CityLifeOpts) {
     this.scene = scene
     this.buildSkyLanes()
+    this.buildGroundTraffic()
     this.buildBlimps()
     this.buildSetPieces(opts)
     this.buildStreetDrones()
@@ -126,6 +133,49 @@ export class CityLife implements GameSystem {
     if (pods.instanceColor) pods.instanceColor.needsUpdate = true
     this.pods = pods
     this.group.add(pods)
+  }
+
+  // --- ground traffic -------------------------------------------------------
+
+  /** Hover-cars streaming along the road grid at street level, as one
+   *  InstancedMesh. Lanes ride the true road centrelines so the cars stay on the
+   *  avenues; alternating lanes run opposite directions for two-way traffic. */
+  private buildGroundTraffic() {
+    const half = config.world.half
+    const pitch = config.world.block + config.world.roadWidth
+    const laneN = this.fx >= 0.9 ? 12 : this.fx >= 0.6 ? 7 : 3
+    const perLane = this.fx >= 0.9 ? 5 : this.fx >= 0.6 ? 4 : 3
+    const fwd = new THREE.Vector3(0, 0, 1)
+    const tints = [0xfff2cf, 0x9fe8ff, 0xff6a6a, 0x9bff4d, 0xffb14a]
+    const lines = Math.floor(half / pitch)
+    for (let i = 0; i < laneN; i++) {
+      const axisX = i % 2 === 0
+      const k = (i * 5 + 2) % (lines * 2) - lines // spread across the grid
+      const off = k * pitch + pitch / 2
+      const back = i % 4 >= 2 // half the lanes run the other way
+      const y = 1.6
+      let from = axisX ? new THREE.Vector3(-half - 20, y, off) : new THREE.Vector3(off, y, -half - 20)
+      let to = axisX ? new THREE.Vector3(half + 20, y, off) : new THREE.Vector3(off, y, half + 20)
+      if (back) { const s = from; from = to; to = s }
+      const quat = new THREE.Quaternion().setFromUnitVectors(fwd, this.v.copy(to).sub(from).normalize())
+      this.carLanes.push({ from, to, quat })
+      for (let j = 0; j < perLane; j++) {
+        this.carLane.push(i)
+        this.carT.push((j / perLane + Math.random() * 0.05) % 1)
+        this.carSpeed.push(0.035 + Math.random() * 0.035)
+      }
+    }
+    const count = this.carLane.length
+    if (count === 0) return
+    const geo = this.ownG(new THREE.BoxGeometry(1.9, 0.9, 3.8))
+    const mat = this.own(new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const cars = new THREE.InstancedMesh(geo, mat, count)
+    cars.frustumCulled = false
+    const col = new THREE.Color()
+    for (let m = 0; m < count; m++) cars.setColorAt(m, col.setHex(tints[m % tints.length]))
+    if (cars.instanceColor) cars.instanceColor.needsUpdate = true
+    this.cars = cars
+    this.group.add(cars)
   }
 
   // --- freight blimps -------------------------------------------------------
@@ -281,7 +331,7 @@ export class CityLife implements GameSystem {
    *  road centrelines (multiples of the block pitch) to stay clear of buildings. */
   private buildStreetDrones() {
     const half = config.world.half
-    const pitch = config.world.block
+    const pitch = config.world.block + config.world.roadWidth // true road grid pitch
     const n = this.fx >= 0.9 ? 10 : this.fx >= 0.6 ? 6 : 3
     const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x12151d, metalness: 0.7, roughness: 0.4 }))
     const tints = [0x27e7ff, 0xff2bd0, 0x9bff4d, 0xffb14a]
@@ -298,9 +348,10 @@ export class CityLife implements GameSystem {
       g.add(beam)
       this.group.add(g)
       const axis: 'x' | 'z' = i % 2 === 0 ? 'x' : 'z'
-      // snap the perpendicular offset to a road centreline out in the city
+      // snap the perpendicular offset to a road centreline (c = k*pitch + pitch/2)
       const lines = Math.floor(half / pitch)
-      const off = (Math.floor(Math.random() * (lines * 2 + 1)) - lines) * pitch
+      const k = Math.floor(Math.random() * (lines * 2)) - lines
+      const off = k * pitch + pitch / 2
       this.streetDrones.push({ g, axis, off, pos: (Math.random() * 2 - 1) * half, dir: Math.random() < 0.5 ? 1 : -1, spd: 12 + Math.random() * 10, bob: Math.random() * 6 })
     }
   }
@@ -436,6 +487,20 @@ export class CityLife implements GameSystem {
       this.pods.instanceMatrix.needsUpdate = true
     }
 
+    // Ground traffic: stream cars along the road grid.
+    if (this.cars) {
+      for (let k = 0; k < this.carLane.length; k++) {
+        let tt = this.carT[k] + this.carSpeed[k] * dt
+        if (tt >= 1) tt -= 1
+        this.carT[k] = tt
+        const lane = this.carLanes[this.carLane[k]]
+        this.v.copy(lane.from).lerp(lane.to, tt)
+        this.m.compose(this.v, lane.quat, this.one)
+        this.cars.setMatrixAt(k, this.m)
+      }
+      this.cars.instanceMatrix.needsUpdate = true
+    }
+
     // Blimps circle their loops; belly strip pulses.
     for (const b of this.blimps) {
       b.ang += b.spd * dt
@@ -513,5 +578,6 @@ export class CityLife implements GameSystem {
     this.geos = []
     this.mats = []
     this.pods = null
+    this.cars = null
   }
 }

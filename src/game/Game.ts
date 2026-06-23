@@ -30,6 +30,7 @@ import { TraversalScore } from './TraversalScore'
 import { CaptureCombo } from './CaptureCombo'
 import { Bots } from './Bots'
 import { CityLife } from './CityLife'
+import { GrindRails } from './GrindRails'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -308,6 +309,12 @@ export class Game {
     this.systems.register(new CityLife(this.engine.scene, {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
+    // Grind rails: neon rails the player rides on the hoverboard. The system owns
+    // the rail meshes + snap query; Player owns the slide. Earth-only.
+    const grindRails = this.systems.register(new GrindRails(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    this.player.setGrindSnap((x, y, z) => grindRails.querySnap(x, y, z))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)

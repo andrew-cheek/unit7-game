@@ -5,6 +5,7 @@ import { clamp, damp, dampAngle } from './utils'
 import type { Input } from './Input'
 import type { Physics } from './Physics'
 import type { PlayerMode } from './types'
+import type { GrindHit } from './GrindRails'
 
 function approach(current: number, target: number, maxDelta: number) {
   return current < target ? Math.min(current + maxDelta, target) : Math.max(current - maxDelta, target)
@@ -37,6 +38,15 @@ export class Player {
   boarding = false // riding the summonable hover skateboard
   private board: THREE.Group
   private boardLean = 0
+  // Grind state: locked to a neon rail on the board (see GrindRails). The snap
+  // query is injected by Game; null when there are no rails (off-world).
+  grinding = false
+  private grindAx = 0; private grindAy = 0; private grindAz = 0
+  private grindBx = 0; private grindBy = 0; private grindBz = 0
+  private grindT = 0
+  private grindDir = 1
+  private grindSpeed = 0
+  private grindSnap: ((x: number, y: number, z: number) => GrindHit | null) | null = null
 
   private model: RobotModel
   private moveDir = new THREE.Vector3()
@@ -135,6 +145,11 @@ export class Player {
       this.boardLean = 0
       this.object.rotation.z = 0
     }
+  }
+
+  /** Game injects the rail-snap query (GrindRails.querySnap). */
+  setGrindSnap(fn: (x: number, y: number, z: number) => GrindHit | null) {
+    this.grindSnap = fn
   }
 
   get position() {
@@ -288,19 +303,26 @@ export class Player {
     this.model.setPlanePose(this.morphT)
     if (this.mode !== 'parachute') this.mode = this.planeTarget === 1 ? 'plane' : 'robot'
 
+    // Latch a grind rail when boarding + moving (Player owns the slide).
+    if (!this.grappling && !this.grinding && this.boarding && this.mode === 'robot') this.maybeStartGrind()
+
     const dancing = this.dancing && this.grounded && this.mode === 'robot'
     if (this.grappling) this.updateGrapple(dt, input, physics, gravity)
+    else if (this.grinding) this.updateGrind(dt, input)
     else if (dancing) this.updateDance(dt, gravity)
     else if (this.mode === 'parachute') this.updateParachute(dt, input, gravity)
     else if (this.mode === 'plane') this.updatePlane(dt, input, gravity)
     else this.updateRobot(dt, input, gravity)
 
-    this.integrateAndCollide(dt, physics)
+    // Grinding sets its own position on the rail; skip the collide/ground-snap.
+    if (!this.grinding) this.integrateAndCollide(dt, physics)
     this.updateGrappleLine()
 
     // Face + animate.
     const moving = this.moveDir.lengthSq() > 1e-4
-    if (dancing) {
+    if (this.grinding) {
+      // updateGrind already set rotation; nothing to do here.
+    } else if (dancing) {
       this.object.rotation.set(0, this.danceT * 4.5, 0) // spin
     } else if (this.mode === 'plane') {
       const targetYaw = moving ? Math.atan2(this.moveDir.x, this.moveDir.z) : this.yaw
@@ -336,6 +358,63 @@ export class Player {
       this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
     }
     this.updateCanopy(dt)
+  }
+
+  /** Latch onto a nearby rail if the board is moving fast enough. */
+  private maybeStartGrind() {
+    if (!this.grindSnap) return
+    const pos = this.object.position
+    const spd = Math.hypot(this.velocity.x, this.velocity.z)
+    if (spd < config.grind.minSpeed * 0.5) return // need some pace to jump on
+    const hit = this.grindSnap(pos.x, pos.y, pos.z)
+    if (!hit) return
+    this.grindAx = hit.ax; this.grindAy = hit.ay; this.grindAz = hit.az
+    this.grindBx = hit.bx; this.grindBy = hit.by; this.grindBz = hit.bz
+    this.grindT = hit.t
+    // Ride toward whichever end our momentum points at.
+    const sdx = hit.bx - hit.ax, sdz = hit.bz - hit.az
+    this.grindDir = this.velocity.x * sdx + this.velocity.z * sdz >= 0 ? 1 : -1
+    this.grindSpeed = Math.max(spd, config.grind.minSpeed)
+    this.grinding = true
+    this.grounded = false
+    this.airTime = 0
+  }
+
+  /** Slide along the latched rail; launch off the end or on a jump press. */
+  private updateGrind(dt: number, input: Input) {
+    const g = config.grind
+    const sdx = this.grindBx - this.grindAx
+    const sdy = this.grindBy - this.grindAy
+    const sdz = this.grindBz - this.grindAz
+    const len = Math.hypot(sdx, sdy, sdz) || 1
+    const inv = 1 / len
+    const tx = sdx * inv * this.grindDir, ty = sdy * inv * this.grindDir, tz = sdz * inv * this.grindDir
+    this.grindT += (this.grindDir * this.grindSpeed * dt) * inv
+
+    const jet = input.held.jet
+    const jumpEdge = (jet && !this.prevJet) || input.consumeEdge('jet')
+    const offEnd = this.grindT <= 0 || this.grindT >= 1
+    if (jumpEdge || offEnd || !this.boarding) {
+      // Launch: carry the rail speed along the tangent, pop up off the end / jump.
+      this.velocity.set(tx * this.grindSpeed, jumpEdge ? config.player.jumpSpeed : ty * this.grindSpeed + 3.5, tz * this.grindSpeed)
+      this.grinding = false
+      this.grounded = false
+      this.airTime = 0
+      this.prevJet = jet
+      return
+    }
+    // Ride: lock the board onto the rail line + offset, build a little speed.
+    const t = this.grindT
+    this.object.position.set(this.grindAx + sdx * t, this.grindAy + sdy * t + g.boardOffset, this.grindAz + sdz * t)
+    this.velocity.set(tx * this.grindSpeed, ty * this.grindSpeed, tz * this.grindSpeed)
+    this.grounded = false
+    this.airTime = 0
+    this.grindSpeed = Math.min(this.grindSpeed + g.accel * dt, g.maxSpeed)
+    this.yaw = Math.atan2(tx, tz)
+    this.boardLean = damp(this.boardLean, 0, 8, dt)
+    this.object.rotation.set(0, this.yaw, 0)
+    this.model.setFlyPose(0.3)
+    this.prevJet = jet
   }
 
   /** Drive the grapple: extend the tendril along the aim until it hits a surface,
