@@ -41,6 +41,8 @@ interface Bot {
   t: number
   huntTarget: THREE.Vector3 | null // an alien this bot is chasing down
   huntCd: number // cooldown before it hunts again
+  style: 'runner' | 'flyer' | 'hunter' // behaviour bias so they don't all act alike
+  idleT: number // >0 while pausing to "look around"
 }
 
 export interface BotsOpts {
@@ -65,9 +67,11 @@ export class Bots implements GameSystem {
     // Pick distinct names.
     const pool = [...NAMES]
     const n = Math.min(count, pool.length)
+    const styles: Bot['style'][] = ['runner', 'flyer', 'hunter']
     for (let i = 0; i < n; i++) {
       const ni = Math.floor(Math.random() * pool.length)
       const name = pool.splice(ni, 1)[0]
+      const style = styles[i % styles.length]
       const trim = TRIMS[i % TRIMS.length]
       const model = createRobot({ trim, accent: trim })
       const group = new THREE.Group()
@@ -82,15 +86,21 @@ export class Bots implements GameSystem {
       this.bots.push({
         name, model, group, tagMat: mat, tagTex: tex,
         pos, vel: new THREE.Vector3(), yaw: Math.random() * 6.28, target: this.randomPoint(),
-        runSpeed: 10 + Math.random() * 4, flying: false, flyT: 0, cruiseH: 24, lastGround: pos.y,
+        runSpeed: (style === 'runner' ? 14 : 10) + Math.random() * 4, flying: false, flyT: 0, cruiseH: 24, lastGround: pos.y,
         rayPhase: i % 2, score: 40 + Math.floor(Math.random() * 220), nextScore: 4 + Math.random() * 10, t: 0,
-        huntTarget: null, huntCd: Math.random() * 8,
+        huntTarget: null, huntCd: Math.random() * 8, style, idleT: 0,
       })
     }
   }
 
   get count(): number {
     return this.visible ? this.bots.length : 0
+  }
+
+  /** Total bots regardless of zone visibility — for a stable "online" count + the
+   *  leaderboard, so the presence illusion doesn't crash to 1 when you go off-world. */
+  get rosterSize(): number {
+    return this.bots.length
   }
 
   /** Fake leaderboard rows (name + score) for the HUD, highest first. */
@@ -131,11 +141,22 @@ export class Bots implements GameSystem {
       b.huntCd = Math.max(0, b.huntCd - dt)
       if (b.t > b.nextScore) { b.score += 1 + Math.floor(Math.random() * 3); b.nextScore = b.t + 6 + Math.random() * 16 }
 
-      // Hunt: occasionally lock onto a nearby alien and chase it down, then pop a
-      // cosmetic net where it stands (the real alien is never touched).
-      if (!b.flying && !b.huntTarget && b.huntCd <= 0 && this.opts.nearestAlien && Math.random() < 0.012) {
+      // Idle: occasionally stop and look around (only when grounded + free), which
+      // reads as a real player pausing. Holds the bot in place + slowly turns.
+      if (b.idleT > 0) {
+        b.idleT -= dt
+        b.target.copy(b.pos)
+        b.yaw += dt * 0.7
+      } else if (!b.flying && !b.huntTarget && Math.random() < 0.0025) {
+        b.idleT = 1.2 + Math.random() * 2.5
+      }
+
+      // Hunt: lock onto a nearby alien and chase it, then pop a cosmetic net where
+      // it stands (the real alien is never touched). Hunters do it far more.
+      const huntChance = b.style === 'hunter' ? 0.03 : 0.008
+      if (b.idleT <= 0 && !b.flying && !b.huntTarget && b.huntCd <= 0 && this.opts.nearestAlien && Math.random() < huntChance) {
         const a = this.opts.nearestAlien(b.pos.x, b.pos.z)
-        if (a && (a.x - b.pos.x) ** 2 + (a.z - b.pos.z) ** 2 < 46 * 46) { b.huntTarget = a.clone(); b.target.copy(a) }
+        if (a && (a.x - b.pos.x) ** 2 + (a.z - b.pos.z) ** 2 < 50 * 50) { b.huntTarget = a.clone(); b.target.copy(a) }
       }
       if (b.huntTarget) {
         const hd = Math.hypot(b.huntTarget.x - b.pos.x, b.huntTarget.z - b.pos.z)
@@ -150,10 +171,11 @@ export class Bots implements GameSystem {
         }
       }
 
-      // Re-target on arrival; sometimes break into a flight (skilled traversal).
+      // Re-target on arrival; flyers break into flight far more often.
+      const flyChance = b.style === 'flyer' ? 0.012 : 0.0035
       const tx = b.target.x - b.pos.x, tz = b.target.z - b.pos.z
-      if (!b.huntTarget && tx * tx + tz * tz < 18) { b.target.copy(this.randomPoint()); if (Math.random() < 0.4) this.startFly(b) }
-      else if (!b.flying && !b.huntTarget && Math.random() < 0.004) this.startFly(b)
+      if (b.idleT <= 0 && !b.huntTarget && tx * tx + tz * tz < 18) { b.target.copy(this.randomPoint()); if (Math.random() < (b.style === 'flyer' ? 0.6 : 0.3)) this.startFly(b) }
+      else if (b.idleT <= 0 && !b.flying && !b.huntTarget && Math.random() < flyChance) this.startFly(b)
 
       const d = Math.hypot(tx, tz) || 1
       const sp = b.flying ? 18 : b.runSpeed
