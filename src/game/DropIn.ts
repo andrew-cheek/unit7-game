@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { clamp } from './utils'
+import { config } from './config'
 import { createRobot, createRocket, createSpaceship, type RobotModel, type VehicleModel } from './procedural'
 import type { Input } from './Input'
 
@@ -289,41 +290,50 @@ export class DropIn {
   /** Four floating ringed platforms spread across the descent. Steer through one
    *  to pick where you come down: the open city, the arcade, Mars, or the Moon. */
   private buildPlatforms() {
-    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number, number]> = [
-      // dest, x offset, z offset, accent colour, altitude above ground (staggered)
-      ['city', -120, -60, 0x27e7ff, 360],
-      ['arcade', 130, -10, 0xff2bd0, 285],
-      ['mars', -130, 70, 0xff8a1e, 215],
-      ['moon', 120, 130, 0xbfe6ff, 150],
-    ]
+    const C = { city: 0x27e7ff, arcade: 0xff2bd0, mars: 0xff8a1e, moon: 0xbfe6ff }
     const labels: Record<string, string> = { city: 'CITY', arcade: 'ARCADE', mars: 'MARS', moon: 'MOON' }
-    for (const [dest, ox, oz, col, alt] of defs) {
-      const x = this.target.x + ox
-      const z = this.target.z + oz
+    // Two pads per destination, spread wide on a ring around the descent at big
+    // staggered altitudes - so they're easy to spot, you commit to one (they're
+    // not clustered), and there's always a backup of each. The jetpack lets you
+    // climb to the high ones. [dest, angle, ring radius, altitude]
+    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number]> = [
+      ['moon', 0.5, 150, 170],
+      ['mars', 1.2, 250, 150],
+      ['city', 2.0, 190, 300],
+      ['arcade', 2.9, 280, 250],
+      ['moon', 3.7, 230, 470],
+      ['mars', 4.4, 170, 400],
+      ['city', 5.1, 280, 540],
+      ['arcade', 5.9, 200, 360],
+    ]
+    for (const [dest, ang, rad, alt] of defs) {
+      const col = C[dest]
+      const x = this.target.x + Math.cos(ang) * rad
+      const z = this.target.z + Math.sin(ang) * rad
       const y = this.getGround(x, z) + alt
       const group = new THREE.Group()
       group.position.set(x, y, z)
-      // Big landing disk.
-      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(11, 12, 0.8, 32)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.4, roughness: 0.5, metalness: 0.4 })))
+      // Huge landing disk.
+      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(16, 17, 1, 36)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.5, roughness: 0.5, metalness: 0.4 })))
       group.add(disk)
-      const rim = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(11, 0.5, 8, 40)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      const rim = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(16, 0.7, 8, 44)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
       rim.rotation.x = Math.PI / 2
       group.add(rim)
       // Big upright portal ring you fly through.
-      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(8.5, 0.9, 14, 40)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
-      ring.position.y = 9
+      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(12, 1.2, 14, 44)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      ring.position.y = 12
       group.add(ring)
-      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(8, 32)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-      disc.position.y = 9
+      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(11.2, 36)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      disc.position.y = 12
       group.add(disc)
-      // A tall light column under each pad so it's unmistakable from a distance.
-      const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2.4, 2.4, alt, 12, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      // A tall light column down to the ground so each pad is unmistakable.
+      const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(3, 3, alt, 12, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
       beam.position.y = -alt / 2
       group.add(beam)
-      // Big floating label.
+      // Big floating label above the ring.
       const sprite = this.labelSprite(labels[dest], col)
-      sprite.position.set(0, 17, 0)
-      sprite.scale.set(16, 6, 1)
+      sprite.position.set(0, 22, 0)
+      sprite.scale.set(22, 8, 1)
       group.add(sprite)
       this.group.add(group)
       this.platforms.push({ group, ring, x, y, z, dest })
@@ -492,12 +502,21 @@ export class DropIn {
 
     // --- phase machine ---
     if (this.phase === 'dive') {
-      let diveAmt = 0.5
-      if (this.input.held.jet || this.input.moveY > 0.35) diveAmt = 1
-      else if (this.input.moveY < -0.35) diveAmt = 0.08
-      this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3)
-      const term = diveAmt >= 0.99 ? TERM_DIVE : diveAmt <= 0.1 ? TERM_FLARE : TERM_NEUTRAL
-      this.vy += (term - this.vy) * Math.min(1, dt * 1.5)
+      if (this.input.held.jet) {
+        // Jetpack while falling: thrust upward toward the cruise cap so you can
+        // arrest the fall, hover, or even climb to line up a high portal pad.
+        const cap = config.jetpack.maxAscend
+        const rate = config.jetpack.thrust * dt
+        this.vy = this.vy < cap ? Math.min(this.vy + rate, cap) : Math.max(this.vy - rate, cap)
+        this.pitch += (0 - this.pitch) * Math.min(1, dt * 4) // upright jet pose
+      } else {
+        let diveAmt = 0.5
+        if (this.input.moveY > 0.35) diveAmt = 1
+        else if (this.input.moveY < -0.35) diveAmt = 0.08
+        this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3)
+        const term = diveAmt >= 0.99 ? TERM_DIVE : diveAmt <= 0.1 ? TERM_FLARE : TERM_NEUTRAL
+        this.vy += (term - this.vy) * Math.min(1, dt * 1.5)
+      }
 
       this.checkOrbs()
 
@@ -537,7 +556,7 @@ export class DropIn {
     const bodyPitch = diving ? THREE.MathUtils.lerp(0.2, 1.25, this.pitch) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     this.diver.rotation.set(bodyPitch + flip, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
-    this.rb.setThrust(0)
+    this.rb.setThrust(this.phase === 'dive' && this.input.held.jet ? 1 : 0) // jetpack flame
     this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
     this.updateAi(dt)
@@ -551,9 +570,9 @@ export class DropIn {
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
     this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
-    this.hud.hint = this.phase === 'canopy' ? 'STEER TO THE BEACON'
+    this.hud.hint = this.phase === 'canopy' ? 'STEER TO A PORTAL OR THE BEACON'
       : this.phase === 'land' ? 'TOUCHDOWN'
-      : 'STEER · DEPLOY THE CHUTE ANYTIME'
+      : 'STEER · SPACE = JETPACK · DEPLOY ANYTIME'
     if (this.hud.result) { this.resultT += dt; if (this.resultT > 2.2) this.hud.result = null }
 
     if (this.phase === 'land' && alt <= 0.6) {
@@ -718,8 +737,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 20) continue
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 13) {
+      if (Math.abs(this.pos.y - p.y) > 24) continue
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 17) {
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true

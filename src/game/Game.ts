@@ -527,7 +527,7 @@ export class Game {
     if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
     this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD (or drag) toward the green beacon. Hold Space to nose-dive, pull back to slow. Press O or tap DEPLOY to pop the chute (O again, or CUT, drops you back into free-fall). Land before you hit the ground or a repair drone rebuilds you.' }
+    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD (or drag). Push forward to nose-dive, pull back to slow. Hold SPACE for the JETPACK to slow, hover, or climb - fly through a glowing portal pad to pick where you land (city, arcade, Mars, Moon). H or TRICK does a flip + fireworks. Press O or DEPLOY for the chute. Land before you hit the ground or a repair drone rebuilds you.' }
     this.missionPopupTimer = 8
   }
 
