@@ -413,7 +413,7 @@ function DropOverlay({ drop, touch, onSkip, onDeploy, onSteer }: { drop: DropSta
   }
   const onUp = () => { dragRef.current = null; onSteer(0, 0) }
 
-  const phase = drop.phase === 'dive' ? 'NOSE-DIVE' : drop.phase === 'canopy' ? 'CANOPY' : 'TOUCHDOWN'
+  const phase = drop.phase === 'dive' ? 'NOSE-DIVE' : drop.phase === 'canopy' ? 'CANOPY' : drop.phase === 'crash' ? 'WRECKED' : 'TOUCHDOWN'
   const armed = drop.canDeploy
   return (
     <>
