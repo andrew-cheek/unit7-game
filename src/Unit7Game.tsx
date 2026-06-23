@@ -111,6 +111,22 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     }
   }, [])
 
+  // The welcome panel needs the cursor free (pointer-lock would hide it and
+  // swallow clicks), so disable lock while it's up and restore it once the
+  // player picks solo / multiplayer. Only touch lock around the panel - never
+  // during the intro/drop, which manages the cursor itself.
+  const joinPanelVisible = multiplayer && !mpJoined && !!hud && !hud.intro
+  const wasPanelRef = useRef(false)
+  useEffect(() => {
+    if (joinPanelVisible) {
+      controlsRef.current?.setCursorLockEnabled(false)
+      wasPanelRef.current = true
+    } else if (wasPanelRef.current) {
+      controlsRef.current?.setCursorLockEnabled(true)
+      wasPanelRef.current = false
+    }
+  }, [joinPanelVisible])
+
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
@@ -159,6 +175,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           drop={hud.drop}
           touch={touch}
           onDeploy={() => controlsRef.current?.dropDeploy()}
+          onTrick={() => controlsRef.current?.dropTrick()}
           onSteer={(x, y) => controlsRef.current?.setVirtualMove(x, y)}
         />
       )}
@@ -405,7 +422,7 @@ type DropState = NonNullable<HudState['drop']>
  * full-screen drag-to-steer layer behind the buttons (drag forward to nose-dive,
  * back to flatten and slow).
  */
-function DropOverlay({ drop, touch, onDeploy, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onSteer: (x: number, y: number) => void }) {
+function DropOverlay({ drop, touch, onDeploy, onTrick, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onTrick: () => void; onSteer: (x: number, y: number) => void }) {
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
   const onDown = (e: ReactPointerEvent) => {
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
@@ -456,6 +473,9 @@ function DropOverlay({ drop, touch, onDeploy, onSteer }: { drop: DropState; touc
       )}
       {drop.phase === 'canopy' && (
         <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onClick={onDeploy}>CUT CHUTE ✂</button>
+      )}
+      {drop.canTrick && (
+        <button style={trickBtn} onClick={onTrick}>FLIP + FIREWORKS ✦</button>
       )}
     </>
   )
@@ -535,6 +555,21 @@ const deployBtn: CSSProperties = {
   letterSpacing: '0.2em',
   background: 'rgba(8,12,24,0.7)',
   border: '2px solid #9dff5a',
+  borderRadius: 999,
+}
+const trickBtn: CSSProperties = {
+  position: 'absolute',
+  left: 24,
+  bottom: 30,
+  zIndex: 16,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '13px 22px',
+  font: '800 14px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  color: '#ffd24a',
+  background: 'rgba(8,12,24,0.7)',
+  border: '2px solid #ff2bd0',
   borderRadius: 999,
 }
 const skipBtn: CSSProperties = {

@@ -10,6 +10,7 @@ export interface DropHud {
   phase: 'dive' | 'canopy' | 'land' | 'crash'
   hint: string | null
   canDeploy: boolean // the chute can be popped now (drives the DEPLOY button)
+  canTrick: boolean // flips + fireworks available (drives the TRICK button)
   result: string | null
 }
 
@@ -49,7 +50,9 @@ export class DropIn {
   chosenDest: 'arcade' | 'mars' | 'moon' | 'city' | null = null
   /** Where you ended up - the handoff places the player here. */
   readonly landingPos = new THREE.Vector3()
-  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, result: null }
+  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null }
+  /** Flips + fireworks pulled on the way down (small style bonus). */
+  tricks = 0
 
   /** Fired on a target-orb pass, the canopy pop, and touchdown/crash, for SFX. */
   onSfx: ((kind: 'ring' | 'deploy' | 'land') => void) | null = null
@@ -87,12 +90,15 @@ export class DropIn {
   private repairBeam!: THREE.Mesh
   private impact = new THREE.Vector3()
 
-  private ai: { g: THREE.Group; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number }[] = []
+  private ai: { g: THREE.Group; canopy: THREE.Mesh; chute: boolean; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number }[] = []
   // Decorative air traffic (rockets + shuttles) cruising the sky as you fall.
   private traffic: { v: VehicleModel; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number; spin: number }[] = []
   // Floating destination portals you can steer into mid-dive.
   private platforms: { group: THREE.Group; ring: THREE.Mesh; x: number; y: number; z: number; dest: 'arcade' | 'mars' | 'moon' | 'city' }[] = []
   private finishing = false
+  private flipT = 0 // remaining time in a somersault (0 = not flipping)
+  private static readonly FLIP_DUR = 0.7
+  private fireworks: { pts: THREE.Points; vel: Float32Array; mat: THREE.PointsMaterial; t: number }[] = []
   private chute!: THREE.Mesh
   private chuteRig!: THREE.Group // canopy + suspension cords, scaled together
   private streaks!: THREE.Points
@@ -195,21 +201,48 @@ export class DropIn {
     this.repairBeam.visible = false
     this.group.add(this.repairBeam)
 
-    const aiBody = this.own(new THREE.MeshStandardMaterial({ color: 0x223040, metalness: 0.5, roughness: 0.5 }))
-    for (let i = 0; i < 5; i++) {
+    // Other "pilots" sharing the sky: tinted little robots, some freefalling in a
+    // head-down tuck, some already gliding under a canopy. Reads as a busy jump.
+    const aiBody = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3650, metalness: 0.55, roughness: 0.45 }))
+    const tints = [0xff2bd0, 0x8a5cff, 0xff8a1e, 0x9dff5a, 0x27e7ff, 0xffd24a]
+    const N_AI = 9
+    for (let i = 0; i < N_AI; i++) {
       const g = new THREE.Group()
-      const body = new THREE.Mesh(this.ownG(new THREE.CapsuleGeometry(0.5, 1.1, 4, 8)), aiBody)
-      g.add(body)
-      const col = [0xff2bd0, 0x8a5cff, 0xff8a1e, 0x9dff5a][i % 4]
-      const canopy = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.6, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.1)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85, side: THREE.DoubleSide, fog: false })))
-      canopy.position.y = 3.4
+      const torso = new THREE.Mesh(this.ownG(new THREE.CapsuleGeometry(0.5, 1.1, 4, 8)), aiBody)
+      g.add(torso)
+      const col = tints[i % tints.length]
+      const head = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 0.5, 0.5)), this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: col, emissiveIntensity: 1.6, roughness: 0.4 })))
+      head.position.y = 1.1
+      g.add(head)
+      // Limbs (thin boxes) so the silhouette reads as a flailing skydiver.
+      for (const sx of [-1, 1]) {
+        const arm = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.22, 1.0, 0.22)), aiBody)
+        arm.position.set(sx * 0.6, 0.2, 0); arm.rotation.z = sx * 0.9
+        g.add(arm)
+      }
+      const chute = i % 2 === 0 // half under canopy, half in freefall
+      const canopy = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.8, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.1)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85, side: THREE.DoubleSide, fog: false })))
+      canopy.position.y = 4.0
+      canopy.visible = chute
       g.add(canopy)
-      const cx = this.start.x + (Math.random() - 0.5) * 100
-      const cz = this.start.z * 0.5 + (Math.random() - 0.5) * 140
-      const y = START_Y - Math.random() * 420
+      // Suspension lines for the canopied ones.
+      if (chute) {
+        const cordMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.5, fog: false }))
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2
+          const cord = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.04, 0.04, 3.6, 4)), cordMat)
+          cord.position.set(Math.cos(a) * 1.2, 2.2, Math.sin(a) * 1.2)
+          cord.rotation.z = Math.cos(a) * 0.4; cord.rotation.x = Math.sin(a) * 0.4
+          g.add(cord)
+        }
+      }
+      const cx = this.start.x + (Math.random() - 0.5) * 220
+      const cz = this.start.z * 0.5 + (Math.random() - 0.5) * 260
+      const y = this.target.y + 120 + Math.random() * 620
       g.position.set(cx, y, cz)
+      if (!chute) g.rotation.x = 1.2 // head-down tuck
       this.group.add(g)
-      this.ai.push({ g, cx, cz, r: 6 + Math.random() * 14, ang: Math.random() * 6.28, spd: 0.2 + Math.random() * 0.3, y, vy: 28 + Math.random() * 20 })
+      this.ai.push({ g, canopy, chute, cx, cz, r: 5 + Math.random() * 16, ang: Math.random() * 6.28, spd: 0.15 + Math.random() * 0.35, y, vy: chute ? 10 + Math.random() * 8 : 42 + Math.random() * 30 })
     }
 
     const NF = 130
@@ -234,7 +267,10 @@ export class DropIn {
   /** Rockets + shuttles cruising the sky around the drop, so the air feels busy
    *  on the way down. Each circles a slow loop and climbs/falls gently. */
   private buildTraffic() {
-    const specs: Array<['rocket' | 'ship', number]> = [['rocket', 1.4], ['rocket', 2.0], ['ship', 1.0], ['ship', 1.0]]
+    const specs: Array<['rocket' | 'ship', number]> = [
+      ['rocket', 1.4], ['rocket', 2.0], ['rocket', 1.1], ['rocket', 1.7],
+      ['ship', 1.0], ['ship', 1.0], ['ship', 1.0], ['ship', 1.0],
+    ]
     for (let i = 0; i < specs.length; i++) {
       const [kind, scale] = specs[i]
       const v = kind === 'rocket'
@@ -253,33 +289,41 @@ export class DropIn {
   /** Four floating ringed platforms spread across the descent. Steer through one
    *  to pick where you come down: the open city, the arcade, Mars, or the Moon. */
   private buildPlatforms() {
-    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number]> = [
-      // dest, x offset, z offset, accent colour
-      ['city', -78, -30, 0x27e7ff],
-      ['arcade', 78, -30, 0xff2bd0],
-      ['mars', -78, 46, 0xff8a1e],
-      ['moon', 78, 46, 0xbfe6ff],
+    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number, number]> = [
+      // dest, x offset, z offset, accent colour, altitude above ground (staggered)
+      ['city', -120, -60, 0x27e7ff, 360],
+      ['arcade', 130, -10, 0xff2bd0, 285],
+      ['mars', -130, 70, 0xff8a1e, 215],
+      ['moon', 120, 130, 0xbfe6ff, 150],
     ]
     const labels: Record<string, string> = { city: 'CITY', arcade: 'ARCADE', mars: 'MARS', moon: 'MOON' }
-    for (const [dest, ox, oz, col] of defs) {
+    for (const [dest, ox, oz, col, alt] of defs) {
       const x = this.target.x + ox
       const z = this.target.z + oz
-      const y = this.getGround(x, z) + 150
+      const y = this.getGround(x, z) + alt
       const group = new THREE.Group()
       group.position.set(x, y, z)
-      // Landing disk.
-      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(7, 7.6, 0.6, 28)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.2, roughness: 0.5, metalness: 0.4 })))
+      // Big landing disk.
+      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(11, 12, 0.8, 32)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.4, roughness: 0.5, metalness: 0.4 })))
       group.add(disk)
-      // Upright portal ring you fly through.
-      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(5, 0.55, 12, 32)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
-      ring.position.y = 5.5
+      const rim = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(11, 0.5, 8, 40)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      rim.rotation.x = Math.PI / 2
+      group.add(rim)
+      // Big upright portal ring you fly through.
+      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(8.5, 0.9, 14, 40)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      ring.position.y = 9
       group.add(ring)
-      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(4.6, 28)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.22, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-      disc.position.y = 5.5
+      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(8, 32)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.26, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      disc.position.y = 9
       group.add(disc)
-      // Floating label.
+      // A tall light column under each pad so it's unmistakable from a distance.
+      const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2.4, 2.4, alt, 12, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      beam.position.y = -alt / 2
+      group.add(beam)
+      // Big floating label.
       const sprite = this.labelSprite(labels[dest], col)
-      sprite.position.set(0, 11.5, 0)
+      sprite.position.set(0, 17, 0)
+      sprite.scale.set(16, 6, 1)
       group.add(sprite)
       this.group.add(group)
       this.platforms.push({ group, ring, x, y, z, dest })
@@ -311,6 +355,60 @@ export class DropIn {
     // it CUTS the chute and drops you back into the dive.
     if (this.phase === 'dive') this.pendingDeploy = true
     else if (this.phase === 'canopy') this.wantCut = true
+  }
+
+  /** TRICK button / key: a somersault + a burst of fireworks (small style bonus). */
+  trick() {
+    if (this.done || this.finishing || this.phase === 'crash' || this.phase === 'land') return
+    if (this.flipT <= 0) this.flipT = DropIn.FLIP_DUR
+    this.spawnFirework()
+    this.tricks++
+    this.onSfx?.('ring')
+  }
+
+  private spawnFirework() {
+    const N = 64
+    const p = new Float32Array(N * 3)
+    const vel = new Float32Array(N * 3)
+    for (let i = 0; i < N; i++) {
+      // random direction on a sphere * a burst speed
+      const a = Math.random() * Math.PI * 2, b = Math.acos(2 * Math.random() - 1)
+      const sp = 10 + Math.random() * 14
+      vel[i * 3] = Math.sin(b) * Math.cos(a) * sp
+      vel[i * 3 + 1] = Math.cos(b) * sp
+      vel[i * 3 + 2] = Math.sin(b) * Math.sin(a) * sp
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(p, 3))
+    const hue = [0xff2bd0, 0x27e7ff, 0x9dff5a, 0xffd24a, 0x8a5cff][Math.floor(Math.random() * 5)]
+    const mat = new THREE.PointsMaterial({ color: hue, size: 0.6, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const pts = new THREE.Points(geo, mat)
+    pts.position.set(this.pos.x, this.pos.y + 2, this.pos.z)
+    pts.frustumCulled = false
+    this.group.add(pts)
+    this.fireworks.push({ pts, vel, mat, t: 0 })
+  }
+
+  private updateFireworks(dt: number) {
+    for (let i = this.fireworks.length - 1; i >= 0; i--) {
+      const f = this.fireworks[i]
+      f.t += dt
+      const arr = (f.pts.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array
+      for (let j = 0; j < arr.length; j += 3) {
+        f.vel[j + 1] -= 14 * dt // gravity
+        arr[j] += f.vel[j] * dt
+        arr[j + 1] += f.vel[j + 1] * dt
+        arr[j + 2] += f.vel[j + 2] * dt
+      }
+      ;(f.pts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
+      f.mat.opacity = Math.max(0, 1 - f.t / 1.3)
+      if (f.t > 1.3) {
+        this.group.remove(f.pts)
+        f.pts.geometry.dispose()
+        f.mat.dispose()
+        this.fireworks.splice(i, 1)
+      }
+    }
   }
 
   private cutCanopy() {
@@ -347,6 +445,7 @@ export class DropIn {
     // Flew through a destination portal: fade out and hand off (Game routes it).
     if (this.finishing) {
       this.updateTraffic(dt)
+      this.updateFireworks(dt)
       this.fade = clamp(this.fade + dt * 2, 0, 1)
       this.placeCamera(false)
       if (this.fade >= 1) this.done = true
@@ -362,6 +461,10 @@ export class DropIn {
       else if (this.phase === 'canopy') this.wantCut = true // cut back to free-fall
     }
     if (this.wantCut && this.phase === 'canopy') this.cutCanopy()
+    // TRICK (H / button): a somersault + fireworks.
+    if (this.input.consumeEdge('net')) this.trick()
+    if (this.flipT > 0) this.flipT = Math.max(0, this.flipT - dt)
+    this.updateFireworks(dt)
 
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
@@ -432,7 +535,8 @@ export class DropIn {
     if (hs > 0.5) this.camHeading = Math.atan2(this.hVel.x, this.hVel.z)
     const diving = this.phase === 'dive'
     const bodyPitch = diving ? THREE.MathUtils.lerp(0.2, 1.25, this.pitch) : 0
-    this.diver.rotation.set(bodyPitch, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
+    const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
+    this.diver.rotation.set(bodyPitch + flip, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
     this.rb.setThrust(0)
     this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
@@ -446,6 +550,7 @@ export class DropIn {
     this.hud.speed = Math.hypot(hs, this.vy)
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
+    this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
     this.hud.hint = this.phase === 'canopy' ? 'STEER TO THE BEACON'
       : this.phase === 'land' ? 'TOUCHDOWN'
       : 'STEER · DEPLOY THE CHUTE ANYTIME'
@@ -582,12 +687,18 @@ export class DropIn {
   }
 
   private updateAi(dt: number) {
+    const floor = this.target.y + 4
     for (const a of this.ai) {
       a.ang += a.spd * dt
       a.y -= a.vy * dt
-      if (a.y < 6) { a.y = START_Y - Math.random() * 80; a.vy = 28 + Math.random() * 20 }
+      // Loop back to the top when they reach the deck so the sky stays populated.
+      if (a.y < floor) { a.y = this.target.y + 560 + Math.random() * 160; a.vy = a.chute ? 10 + Math.random() * 8 : 42 + Math.random() * 30 }
       a.g.position.set(a.cx + Math.cos(a.ang) * a.r, a.y, a.cz + Math.sin(a.ang) * a.r)
-      a.g.rotation.y = -a.ang
+      if (a.chute) {
+        a.g.rotation.set(0, -a.ang, Math.sin(a.ang * 2) * 0.12) // sway under canopy
+      } else {
+        a.g.rotation.set(1.2, -a.ang, Math.sin(a.ang * 3) * 0.25) // head-down flail
+      }
     }
   }
 
@@ -607,8 +718,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 12) continue
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 8) {
+      if (Math.abs(this.pos.y - p.y) > 20) continue
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 13) {
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true
@@ -667,6 +778,7 @@ export class DropIn {
     this.rb.dispose()
     this.helper?.dispose()
     for (const t of this.traffic) t.v.dispose()
+    for (const f of this.fireworks) { f.pts.geometry.dispose(); f.mat.dispose() }
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
   }

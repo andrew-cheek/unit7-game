@@ -78,7 +78,7 @@ export interface HudState {
   race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
   // non-null during the playable drop-in opening: altimeter, speed, phase + a
   // contextual hint, and whether the chute can be deployed yet.
-  drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land' | 'crash'; hint: string | null; canDeploy: boolean; result: string | null } | null
+  drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land' | 'crash'; hint: string | null; canDeploy: boolean; canTrick: boolean; result: string | null } | null
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */
@@ -146,8 +146,10 @@ export interface GameControls {
   pause(): void
   skipIntro(): void
   dropDeploy(): void // pop the parachute during the orbital drop-in
+  dropTrick(): void // flip + fireworks during the drop-in
   adjustZoom(factor: number): void // pinch / scroll camera zoom (>1 = further out)
   requestPointerLock(): void
+  setCursorLockEnabled(on: boolean): void // free/lock the pointer (welcome panel)
   exitMinigame(): void // leave a minigame and return to the city
   restartIntro(): void // replay the opening cinematic from the start
   toggleMute(): void // toggle game audio
