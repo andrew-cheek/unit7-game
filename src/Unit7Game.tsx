@@ -446,6 +446,9 @@ function DropOverlay({ drop, touch, onDeploy, onSteer }: { drop: DropState; touc
       {drop.phase === 'dive' && (
         <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
       )}
+      {drop.phase === 'canopy' && (
+        <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onClick={onDeploy}>CUT CHUTE ✂</button>
+      )}
     </>
   )
 }
