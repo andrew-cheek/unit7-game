@@ -29,6 +29,7 @@ import { Collectibles } from './Collectibles'
 import { TraversalScore } from './TraversalScore'
 import { CaptureCombo } from './CaptureCombo'
 import { Bots } from './Bots'
+import { CityLife } from './CityLife'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -300,6 +301,12 @@ export class Game {
     this.bots = this.systems.register(new Bots(this.engine.scene, this.physics, {
       nearestAlien: (x, z) => this.nearestCapturable(x, z),
       onHunt: (x, y, z) => this.missiles.shockwave({ x, y, z }, 0x9bff4d, 3, 0.45),
+    }))
+    // Persistent sci-fi activity out in the districts (sky traffic, freight
+    // blimps, fusion reactors, a construction crane) so the world stays alive
+    // away from the spawn square. Earth-only; the registry forwards setZone.
+    this.systems.register(new CityLife(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
