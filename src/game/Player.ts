@@ -46,7 +46,9 @@ export class Player {
   private grappleAnchor = new THREE.Vector3()
   private grappleT = 0
   private scene: THREE.Scene
-  private grappleLine!: THREE.Line
+  private grappleBeam!: THREE.Mesh
+  private gbFrom = new THREE.Vector3()
+  private gbMid = new THREE.Vector3()
   private planeTarget = 0 // 0 robot, 1 plane
   private morphT = 0
   private chuteT = 0
@@ -60,13 +62,15 @@ export class Player {
     this.model = createRobot()
     this.object.add(this.model.group)
 
-    // Grapple cable: a 2-point line drawn in world space from hand to anchor.
-    const glGeo = new THREE.BufferGeometry()
-    glGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3))
-    this.grappleLine = new THREE.Line(glGeo, new THREE.LineBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.9 }))
-    this.grappleLine.frustumCulled = false
-    this.grappleLine.visible = false
-    scene.add(this.grappleLine)
+    // Grapple cable: a thick emissive beam (a thin line is near-invisible). A unit
+    // cylinder along Y, stretched/oriented from hand to anchor each frame.
+    this.grappleBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.16, 1, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+    )
+    this.grappleBeam.frustumCulled = false
+    this.grappleBeam.visible = false
+    scene.add(this.grappleBeam)
 
     this.canopyMat = new THREE.MeshStandardMaterial({
       color: 0xff5db0,
@@ -208,7 +212,7 @@ export class Player {
   /** Release the grapple, keeping momentum so you fling/hop off it. */
   endGrapple() {
     this.grappling = false
-    this.grappleLine.visible = false
+    this.grappleBeam.visible = false
   }
   enterVehicle() {
     this.mode = 'vehicle'
@@ -323,15 +327,18 @@ export class Player {
     this.object.rotation.set(0, this.yaw, 0)
   }
 
-  /** Keep the grapple cable drawn from the hand to the anchor while zipping. */
+  /** Keep the grapple beam stretched from the hand to the anchor while zipping. */
   private updateGrappleLine() {
-    if (!this.grappling) { if (this.grappleLine.visible) this.grappleLine.visible = false; return }
-    const attr = (this.grappleLine.geometry as THREE.BufferGeometry).attributes.position as THREE.BufferAttribute
+    if (!this.grappling) { if (this.grappleBeam.visible) this.grappleBeam.visible = false; return }
     const p = this.object.position
-    attr.setXYZ(0, p.x, p.y + 1.3, p.z)
-    attr.setXYZ(1, this.grappleAnchor.x, this.grappleAnchor.y, this.grappleAnchor.z)
-    attr.needsUpdate = true
-    this.grappleLine.visible = true
+    this.gbFrom.set(p.x, p.y + 1.3, p.z)
+    const len = this.gbFrom.distanceTo(this.grappleAnchor)
+    this.gbMid.copy(this.gbFrom).lerp(this.grappleAnchor, 0.5)
+    this.grappleBeam.position.copy(this.gbMid)
+    this.grappleBeam.scale.set(1, Math.max(0.1, len), 1)
+    this.grappleBeam.lookAt(this.grappleAnchor)
+    this.grappleBeam.rotateX(Math.PI / 2) // cylinder is along Y; aim it down the look axis
+    this.grappleBeam.visible = true
   }
 
   private updateDance(dt: number, gravity: number) {
@@ -450,14 +457,20 @@ export class Player {
     pos.z += this.velocity.z * dt
 
     physics.resolveHorizontal(pos, this.velocity, config.player.radius, config.player.height)
+    // Landing surface = the higher of the terrain below and any building roof
+    // whose footprint we're over, so you can touch down on and run across rooftops.
     const ground = physics.sampleGround(pos.x, pos.z, pos.y + 2.5)
+    const roof = physics.topSupport(pos.x, pos.z, pos.y)
+    let surfaceY = ground ? ground.y : -Infinity
+    if (roof !== null && roof > surfaceY) surfaceY = roof
+    const hasSurface = surfaceY > -Infinity
     const wasGrounded = this.grounded
-    if (ground && pos.y <= ground.y) {
-      pos.y = ground.y
+    if (hasSurface && pos.y <= surfaceY) {
+      pos.y = surfaceY
       if (this.velocity.y < 0) this.velocity.y = 0
       this.grounded = true
-    } else if (ground && wasGrounded && pos.y <= ground.y + config.player.stepDown && this.velocity.y <= 0) {
-      pos.y = ground.y
+    } else if (hasSurface && wasGrounded && pos.y <= surfaceY + config.player.stepDown && this.velocity.y <= 0) {
+      pos.y = surfaceY
       this.velocity.y = 0
       this.grounded = true
     } else {
@@ -485,9 +498,9 @@ export class Player {
   }
 
   dispose() {
-    this.scene.remove(this.grappleLine)
-    this.grappleLine.geometry.dispose()
-    ;(this.grappleLine.material as THREE.Material).dispose()
+    this.scene.remove(this.grappleBeam)
+    this.grappleBeam.geometry.dispose()
+    ;(this.grappleBeam.material as THREE.Material).dispose()
     this.model.dispose()
     this.canopy.traverse((o) => {
       const m = o as THREE.Mesh

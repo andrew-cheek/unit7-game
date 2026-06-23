@@ -217,7 +217,7 @@ export class Game {
     config.tier = tier
     // A much larger world on capable devices (it thins out toward the edges), but
     // kept smaller on mobile so the draw count stays sane.
-    config.world.half = tier.fxScale >= 0.9 ? 480 : tier.fxScale >= 0.6 ? 384 : 248
+    config.world.half = tier.fxScale >= 0.9 ? 560 : tier.fxScale >= 0.6 ? 440 : 256
 
     this.cfg = {
       startInIntro: userConfig.startInIntro ?? true,
@@ -971,7 +971,7 @@ export class Game {
     const meshes = this.zone === 'earth' ? this.world.solidMeshes : this.zones.env(this.zone)?.solidMeshes ?? this.world.solidMeshes
     const hits = this.grappleRay.intersectObjects(meshes, false)
     for (const h of hits) {
-      if (h.distance < 6) continue // skip the ground right under you / your feet
+      if (h.distance < 3) continue // skip a hit right on top of you
       return h.point.clone()
     }
     return null

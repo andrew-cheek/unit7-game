@@ -645,13 +645,14 @@ export class World {
         const distNorm = Math.min(1, Math.hypot(i, j) / cells)
         const district = this.districtAt(cx, cz)
         // Density falls off with distance from the core (dense downtown thinning
-        // to sparse sprawl), then the district's own density biases it: the
-        // docks read sparse + industrial, the market a touch busier.
-        const keep = (1 - (0.08 + Math.pow(distNorm, 1.6) * 0.86)) * district.density
+        // to sparse sprawl), then the district's own density biases it. Tuned to
+        // stay denser further out so the city reads as a vast sprawl, not a small
+        // patch ringed by emptiness.
+        const keep = (1 - (0.06 + Math.pow(distNorm, 1.95) * 0.8)) * district.density
         if (hash01(seed) > keep) continue
         // Radial height falloff, shaped by the district: spires reach higher,
         // the market + docks stay low.
-        const maxH = (120 * (1 - distNorm) + 20) * district.heightMul
+        const maxH = (138 * (1 - distNorm) + 22) * district.heightMul
         const usable = config.world.block - config.world.sidewalk * 2
         // Twin-tower blocks only in the inner half; the outskirts are single, low.
         const n = distNorm < 0.5 && hash01(seed * 7) < 0.45 ? 2 : 1
@@ -1718,7 +1719,9 @@ export class World {
     // distance on desktop; mobile keeps thicker fog, which also spares it from
     // drawing the far sprawl.
     const fx = config.tier.fxScale
-    const earthFog = fx >= 0.9 ? 0.0072 : fx >= 0.6 ? 0.0095 : 0.012
+    // Thinner fog so the bigger city reads far into the distance (more expansive);
+    // mobile keeps thicker fog, which also spares it from drawing the far sprawl.
+    const earthFog = fx >= 0.9 ? 0.0056 : fx >= 0.6 ? 0.0078 : 0.012
     this.scene.fog = new THREE.FogExp2(fogColor.getHex(), zone === 'moon' ? 0.006 : earthFog)
     this.scene.background = fogColor.clone()
     this.groundMat.color.setHex(z.ground)
