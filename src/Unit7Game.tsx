@@ -458,9 +458,9 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
           onPointerCancel={onUp}
         />
       )}
-      <div style={introTitle}>
-        <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
-        <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>HIGH-ALTITUDE DROP</div>
+      <div style={dropTitle}>
+        <span style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</span>
+        <span style={{ fontSize: 9, letterSpacing: '0.3em', color: 'rgba(223,238,255,0.55)', marginLeft: 8 }}>HIGH-ALTITUDE DROP</span>
       </div>
 
       <div style={dropReadout}>
@@ -477,7 +477,7 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
       )}
 
       {drop.phase === 'dive' && (
-        <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>DEPLOY ◉</button>
+        <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CHUTE ◉</button>
       )}
       {drop.phase === 'canopy' && (
         <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CUT CHUTE ✂</button>
@@ -551,6 +551,19 @@ const introTitle: CSSProperties = {
   letterSpacing: '0.16em',
   pointerEvents: 'none',
 }
+// Small top-left label during the playable drop (the big bottom-left title used
+// to sit right under the FLIP button and overlap it).
+const dropTitle: CSSProperties = {
+  position: 'absolute',
+  left: 'max(14px, env(safe-area-inset-left))',
+  top: 'max(12px, env(safe-area-inset-top))',
+  zIndex: 15,
+  display: 'flex',
+  alignItems: 'baseline',
+  font: '800 18px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  pointerEvents: 'none',
+}
 const dropReadout: CSSProperties = {
   position: 'absolute',
   top: 18,
@@ -569,9 +582,9 @@ const deployBtn: CSSProperties = {
   zIndex: 16,
   pointerEvents: 'auto',
   cursor: 'pointer',
-  padding: '16px 40px',
-  font: '800 18px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.2em',
+  padding: '14px 30px',
+  font: '800 16px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
   background: 'rgba(8,12,24,0.7)',
   border: '2px solid #9dff5a',
   borderRadius: 999,
