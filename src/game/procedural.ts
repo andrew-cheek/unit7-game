@@ -25,6 +25,9 @@ export interface RobotModel extends CharacterModel {
   setPlanePose(amount: number): void
   /** Recolor the robot's accent + trim/wing glow (cosmetic). */
   setAccent(color: number): void
+  /** Skydiver steering pose: x/y in -1..1 sweep the arms (forward dive sweeps
+   *  them back overhead, flaring spreads them, left/right banks them). */
+  setSteer(x: number, y: number): void
 }
 
 export interface VehicleModel {
@@ -237,6 +240,8 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   let fly = 0
   let plane = 0
   let thrust = 0
+  let steerX = 0
+  let steerY = 0
   mats.push(flameMat)
 
   const update = (dt: number, speed01: number, _grounded: boolean) => {
@@ -254,6 +259,14 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     armR.rotation.x = swing * 0.8 * walk - pose * 1.2
     armL.rotation.z = 0.08 + pose * 0.4
     armR.rotation.z = -0.08 - pose * 0.4
+    // Skydiver steering: forward (sy>0) sweeps arms back/overhead, flaring (sy<0)
+    // brings them forward/down, and left/right banks them asymmetrically.
+    if (steerX !== 0 || steerY !== 0) {
+      armL.rotation.x += -steerY * 0.9 + steerX * 0.6
+      armR.rotation.x += -steerY * 0.9 - steerX * 0.6
+      armL.rotation.z += steerX * 0.35
+      armR.rotation.z += steerX * 0.35
+    }
 
     // Bob + sway while moving; gentle breathing while idle.
     const bob = Math.abs(Math.sin(phase)) * 0.045 * s
@@ -282,6 +295,10 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const setThrust = (amount: number) => {
     thrust = Math.min(1, Math.max(0, amount))
   }
+  const setSteer = (x: number, y: number) => {
+    steerX = Math.max(-1, Math.min(1, x))
+    steerY = Math.max(-1, Math.min(1, y))
+  }
 
   const setAccent = (color: number) => {
     accentMat.color.setHex(color)
@@ -297,7 +314,7 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     mats.forEach((m) => m.dispose())
   }
 
-  return { group, update, setFlyPose, setPlanePose, setThrust, setAccent, dispose }
+  return { group, update, setFlyPose, setPlanePose, setThrust, setAccent, setSteer, dispose }
 }
 
 /** Spindly big-headed alien with glowing eyes - distinct from the citizens. */

@@ -540,10 +540,10 @@ export class Game {
       this.morningSunrise = true
     }
     const fog = this.engine.scene.fog
-    if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
+    if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0007 }
     this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DIVE IN', body: 'Sky-surf down on your hoverboard. Steer with WASD (or drag) - push forward to nose-dive (hit terminal velocity for a SONIC BOOM), pull back to slow. Thread the glowing boost rings, punch through the clouds, and race the other divers down. Hold SPACE for the JETPACK to slow, hover, or climb. Fly through a portal pad to pick where you land (city, arcade, Mars, Moon). H or FLIP kicks the board away in a somersault. Press O or DEPLOY for the chute before you hit the ground.' }
+    this.hud.missionPopup = { title: 'DIVE IN', body: 'Skydive down. Steer with WASD (or drag) - push forward to nose-dive steeply (hit terminal velocity for a SONIC BOOM), pull back to flare and slow. Thread the glowing boost rings, punch through the clouds, and race the other divers down. Hold SPACE for the JETPACK to slow, hover, or climb. Fly through a portal pad to pick where you land (city, arcade, Mars, Moon). H or FLIP does a mid-air somersault. Press O or DEPLOY for the chute before you hit the ground.' }
     this.missionPopupTimer = 8
   }
 
