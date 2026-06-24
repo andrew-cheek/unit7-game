@@ -45,6 +45,7 @@ export function HUD({
   onBuy,
   onEquip,
   onWarp,
+  hideTopCenter,
 }: {
   hud: HudState
   touch: boolean
@@ -55,6 +56,9 @@ export function HUD({
   onBuy?: (id: string) => void
   onEquip?: (slot: 'trail' | 'accent', id: string) => void
   onWarp?: () => void
+  // While the one-time join/solo gate is up it occupies the top-centre on touch;
+  // suppress the top-centre HUD elements so they don't collide behind it.
+  hideTopCenter?: boolean
 }) {
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
@@ -194,7 +198,7 @@ export function HUD({
 
       {/* current objective (top-center, persistent + readable). On touch it drops
           below the corner control row so it never collides with the PAUSE button. */}
-      {hud.objective && !hud.minigame && (
+      {hud.objective && !hud.minigame && !hideTopCenter && (
         <div style={{ ...objectiveStyle, top: touch ? 'max(48px, calc(env(safe-area-inset-top) + 38px))' : objectiveStyle.top }}>
           <span style={{ color: NEON.dim, marginRight: 8 }}>OBJECTIVE</span>
           <span style={{ color: NEON.lime }}>{hud.objective}</span>
@@ -217,7 +221,7 @@ export function HUD({
       )}
 
       {/* intro / mission card */}
-      {hud.missionPopup && !hud.minigame && (
+      {hud.missionPopup && !hud.minigame && !hideTopCenter && (
         <div style={missionCard}>
           <div style={missionTitle}>{hud.missionPopup.title}</div>
           <div style={missionBody}>{hud.missionPopup.body}</div>

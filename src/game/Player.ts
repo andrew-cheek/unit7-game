@@ -126,25 +126,35 @@ export class Player {
   private buildBoard(): THREE.Group {
     const g = new THREE.Group()
     const deck = new THREE.Mesh(
-      new THREE.BoxGeometry(1.0, 0.12, 2.6),
-      new THREE.MeshStandardMaterial({ color: 0x12151f, metalness: 0.7, roughness: 0.4 }),
+      new THREE.BoxGeometry(1.1, 0.14, 2.9),
+      // Self-lit deck (emissive) so the board reads clearly even at the closer
+      // mobile camera and in shadow, not just a dark slab under the feet.
+      new THREE.MeshStandardMaterial({ color: 0x141826, emissive: config.palette.cyan, emissiveIntensity: 0.5, metalness: 0.7, roughness: 0.35 }),
     )
     deck.position.y = 0.14
     g.add(deck)
+    // Bright neon rim around the deck edge (slightly larger than the deck).
     const edge = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.06, 2.7),
+      new THREE.BoxGeometry(1.28, 0.1, 3.08),
       new THREE.MeshBasicMaterial({ color: config.palette.cyan }),
     )
-    edge.position.y = 0.08
+    edge.position.y = 0.1
     g.add(edge)
-    // Twin thruster glows under the deck.
-    for (const sz of [-0.8, 0.8]) {
+    // A soft underglow slab below the deck so it visibly hovers over the ground.
+    const glow = new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 0.04, 3.3),
+      new THREE.MeshBasicMaterial({ color: 0x6fdcff, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+    )
+    glow.position.y = -0.18
+    g.add(glow)
+    // Twin thruster glows under the deck (brighter + larger so the hover reads).
+    for (const sz of [-0.9, 0.9]) {
       const jet = new THREE.Mesh(
-        new THREE.ConeGeometry(0.22, 0.7, 10, 1, true),
-        new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }),
+        new THREE.ConeGeometry(0.3, 0.95, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
       )
       jet.rotation.x = Math.PI
-      jet.position.set(0, -0.1, sz)
+      jet.position.set(0, -0.16, sz)
       g.add(jet)
     }
     return g

@@ -59,7 +59,7 @@ export class CameraController {
   // low/medium tiers sit closer to compensate.
   // Pull the follow camera in closer on mobile (low/medium tiers) so the robot
   // reads larger on a small screen; desktop (high) keeps the full distance.
-  private tierDist = config.tier.name === 'low' ? 0.56 : config.tier.name === 'medium' ? 0.72 : 1
+  private tierDist = config.tier.name === 'low' ? 0.5 : config.tier.name === 'medium' ? 0.64 : 1
   // Player zoom (pinch on touch, scroll on desktop). 1 = the configured default;
   // clamped so you can pull in close or back off without losing the subject.
   private zoom = 1

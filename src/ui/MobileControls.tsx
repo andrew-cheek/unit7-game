@@ -26,6 +26,7 @@ const CUT: BtnDef = { label: 'CUT', action: 'chute', type: 'tap', color: '#ff8a1
 const GRAPPLE: BtnDef = { label: 'GRAPPLE', action: 'grapple', type: 'hold', color: '#27e7ff' }
 const FIRE: BtnDef = { label: 'FIRE', action: 'net', type: 'tap', color: '#ff8a1e' }
 const BOARD: BtnDef = { label: 'BOARD', action: 'board', type: 'tap', color: '#27e7ff' }
+const DANCE: BtnDef = { label: 'DANCE', action: 'dance', type: 'tap', color: '#ff6ad5' }
 const WARP: BtnDef = { label: 'WARP', action: 'warp', type: 'tap', color: '#b46bff' }
 
 /**
@@ -69,13 +70,14 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     primary = inMech ? JET : BOOST
     secondary = inMech ? [EXIT, FIRE, MORPH] : [EXIT]
   } else {
+    // Keep the cluster lean so it stays tidy: sprint + the core toys, plus a few
+    // contextual buttons only when they apply. CHUTE/CUT is its own button (below).
     secondary = [RUN]
-    if (nearVehicle) secondary.unshift(ENTER)
-    if (hud.warp.ready || hud.warp.active) secondary.unshift(WARP)
+    if (nearVehicle) secondary.push(ENTER)
     if (hud.canCapture) secondary.push(CAPTURE)
-    if (!airborne) secondary.push(MORPH, BOARD)
-    secondary.push(GRAPPLE) // hold to fire the grapple arm and zip around
-    // CHUTE / CUT is a dedicated left-side button (see below) -- not in this cluster
+    if (!airborne) secondary.push(BOARD, GRAPPLE, DANCE)
+    else secondary.push(GRAPPLE)
+    if (hud.warp.ready || hud.warp.active) secondary.push(WARP)
   }
 
   const helper = inMech
@@ -269,35 +271,38 @@ const helperPill: CSSProperties = {
 const secWrap: CSSProperties = {
   display: 'flex',
   flexDirection: 'row',
-  flexWrap: 'nowrap',
-  gap: 10,
+  flexWrap: 'wrap',
+  // Capped width = three 44px buttons + gaps, right-aligned, so the cluster wraps
+  // into a tidy grid (max ~2 rows) instead of one long row that runs off-screen.
+  width: 148,
+  gap: 8,
   justifyContent: 'flex-end',
-  alignItems: 'center',
+  alignContent: 'flex-end',
   pointerEvents: 'none',
 }
 const secBtn: CSSProperties = {
   pointerEvents: 'auto',
   touchAction: 'none',
-  width: 50, height: 50, borderRadius: '50%',
+  width: 44, height: 44, borderRadius: '50%',
   border: '2px solid',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  font: '700 9px/1 ui-monospace, Menlo, monospace',
+  font: '700 8px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.02em', textAlign: 'center', userSelect: 'none', WebkitUserSelect: 'none',
 }
 const primaryBtn: CSSProperties = {
   pointerEvents: 'auto',
   touchAction: 'none',
-  width: 84, height: 84, borderRadius: '50%',
+  width: 74, height: 74, borderRadius: '50%',
   border: '3px solid',
   background: 'rgba(8,12,24,0.66)',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  font: '800 14px/1 ui-monospace, Menlo, monospace',
+  font: '800 13px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.06em', textAlign: 'center', userSelect: 'none', WebkitUserSelect: 'none',
 }
 const chuteBtn: CSSProperties = {
   pointerEvents: 'auto',
   touchAction: 'none',
-  width: 68, height: 68, borderRadius: '50%',
+  width: 62, height: 62, borderRadius: '50%',
   border: '3px solid',
   background: 'rgba(8,12,24,0.66)',
   display: 'flex', alignItems: 'center', justifyContent: 'center',

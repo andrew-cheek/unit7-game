@@ -147,6 +147,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onBuy={(id) => controlsRef.current?.buyCosmetic(id)}
           onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
           onWarp={() => controlsRef.current?.toggleWarp()}
+          hideTopCenter={touch && joinPanelVisible}
         />
       )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
@@ -157,6 +158,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       )}
       {multiplayer && !mpJoined && hud && !hud.intro && (
         <JoinWorld
+          touch={touch}
           onJoin={(name) => {
             saveCallsign(name)
             gameRef.current?.connectMultiplayer(name, config?.multiplayerHost)
@@ -340,15 +342,19 @@ function ChallengePopup({ name, onAccept, onDecline }: { name: string; onAccept:
  * it (no backdrop), so you can already roam. Start with the two choices; picking
  * Multiplayer reveals the callsign entry.
  */
-function JoinWorld({ onJoin, onSolo }: { onJoin: (name: string) => void; onSolo: () => void }) {
+function JoinWorld({ onJoin, onSolo, touch }: { onJoin: (name: string) => void; onSolo: () => void; touch: boolean }) {
   const [mode, setMode] = useState<'choice' | 'name'>('choice')
   const [name, setName] = useState(() => loadCallsign())
   const submit = () => {
     const n = name.trim()
     if (n) onJoin(n)
   }
+  // On touch the left-docked panel sits on top of the floating joystick zone, so
+  // dock it top-centre there instead (out of both thumbs' way). Desktop keeps the
+  // original left dock.
+  const panelStyle = touch ? { ...welcomePanel, ...welcomePanelTouch } : welcomePanel
   return (
-    <div style={welcomePanel}>
+    <div style={panelStyle}>
       <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff', font: '800 19px/1.1 ui-monospace, Menlo, monospace', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
         Welcome, Unit 7.
       </div>
@@ -510,12 +516,14 @@ function OrientationPrompt() {
 function TouchCoach({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div style={coachBackdrop} onPointerDown={(e) => { e.stopPropagation(); onDismiss() }}>
-      <div style={{ ...coachTag, left: '8%', bottom: '24%' }}>◄ MOVE ►<div style={coachTagSub}>left thumb</div></div>
-      <div style={{ ...coachTag, right: '22%', top: '24%' }}>DRAG TO LOOK<div style={coachTagSub}>right side</div></div>
-      <div style={{ ...coachTag, right: '8%', bottom: '24%' }}>ACTIONS<div style={coachTagSub}>tap buttons</div></div>
       <div style={coachCenter}>
         <div style={coachTitle}>HOW TO PLAY</div>
-        <div style={coachBody}>Follow the green objective to find Portal Plaza. Reach the neon arcade cabinets to launch the mini-games.</div>
+        <div style={coachHints}>
+          <div style={coachHint}><span style={coachHintKey}>◄ ►</span> left thumb moves</div>
+          <div style={coachHint}><span style={coachHintKey}>DRAG</span> right side looks</div>
+          <div style={coachHint}><span style={coachHintKey}>TAP</span> buttons to act</div>
+        </div>
+        <div style={coachBody}>Follow the green objective to Portal Plaza, then reach the neon arcade to launch the mini-games.</div>
         <div style={coachCta}>TAP TO START ▸</div>
       </div>
     </div>
@@ -630,6 +638,14 @@ const welcomePanel: CSSProperties = {
   border: '1px solid rgba(39,231,255,0.4)',
   boxShadow: '0 0 30px rgba(39,231,255,0.16)',
   pointerEvents: 'auto', // the panel captures clicks; the rest of the screen plays
+}
+// Touch override: top-centre, clear of the left joystick zone and the right
+// button cluster, with a safe-area top inset so it never tucks under a notch.
+const welcomePanelTouch: CSSProperties = {
+  left: '50%',
+  top: 'max(12px, env(safe-area-inset-top))',
+  transform: 'translateX(-50%)',
+  width: 'min(86vw, 340px)',
 }
 const welcomeSub: CSSProperties = {
   fontSize: 11,
@@ -849,21 +865,6 @@ const coachBackdrop: CSSProperties = {
   pointerEvents: 'auto',
   cursor: 'pointer',
 }
-const coachTag: CSSProperties = {
-  position: 'absolute',
-  color: '#27e7ff',
-  font: '800 13px/1.2 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.12em',
-  textShadow: '0 0 10px #27e7ff',
-  textAlign: 'center',
-  pointerEvents: 'none',
-}
-const coachTagSub: CSSProperties = {
-  marginTop: 4,
-  color: 'rgba(223,238,255,0.75)',
-  font: '600 10px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.08em',
-}
 const coachCenter: CSSProperties = {
   position: 'absolute',
   left: '50%',
@@ -872,10 +873,41 @@ const coachCenter: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  maxWidth: 320,
-  padding: '0 16px',
+  width: 'min(86vw, 360px)',
+  padding: '22px 22px 20px',
+  borderRadius: 16,
+  background: 'rgba(8,12,24,0.9)',
+  border: '1px solid rgba(39,231,255,0.4)',
+  boxShadow: '0 0 34px rgba(39,231,255,0.18)',
   textAlign: 'center',
   pointerEvents: 'none',
+}
+const coachHints: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 7,
+  margin: '14px 0 4px',
+  width: '100%',
+}
+const coachHint: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  color: 'rgba(223,238,255,0.9)',
+  font: '600 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.06em',
+}
+const coachHintKey: CSSProperties = {
+  flex: '0 0 56px',
+  textAlign: 'center',
+  color: '#27e7ff',
+  font: '800 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.08em',
+  padding: '5px 0',
+  borderRadius: 7,
+  background: 'rgba(39,231,255,0.1)',
+  border: '1px solid rgba(39,231,255,0.35)',
+  textShadow: '0 0 8px rgba(39,231,255,0.6)',
 }
 const coachTitle: CSSProperties = {
   color: '#27e7ff',

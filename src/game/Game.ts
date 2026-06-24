@@ -2016,8 +2016,10 @@ export class Game {
       moveX: p.velocity.x * inv,
       moveZ: p.velocity.z * inv,
       speed01: clamp(sp / config.player.runSpeed, 0, 1),
-      // Trail the robot when it is moving and grounded; planes auto-follow too.
-      canAutoFollow: idle && sp > 1.2 && onFoot && (p.grounded || p.mode === 'plane'),
+      // Trail the robot whenever it's moving (even a slow turn) and the look stick
+      // is idle, so spinning around with the move stick swings the camera behind
+      // you. Grounded, boarding, or gliding all qualify.
+      canAutoFollow: idle && sp > 0.8 && onFoot && (p.grounded || p.boarding || p.mode === 'plane'),
     }
   }
 

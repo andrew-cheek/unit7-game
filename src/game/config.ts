@@ -145,7 +145,7 @@ export const config = {
 
   camera: {
     fov: 62,
-    distance: 7.2, // close enough that the robot reads big (Roblox-ish framing)
+    distance: 6.2, // close enough that the robot reads big (Roblox-ish framing)
     minDistance: 2.2,
     // Hard floor the wall-collision pull-in may reach (well below minDistance).
     // Kept just above the camera near plane so a tucked-in camera still renders
@@ -166,8 +166,10 @@ export const config = {
     // Modern action-cam feel: when the player moves and the look stick/mouse has
     // been idle for `autoFollowDelay`, the camera eases its yaw to trail behind
     // the subject's heading. Manual look instantly takes priority again.
-    autoFollowLambda: 3.0,
-    autoFollowDelay: 0.5,
+    // Snappier so turning the robot swings the camera around behind it quickly
+    // once the look stick is idle (was 3.0 / 0.5s, which felt sluggish on a turn).
+    autoFollowLambda: 5.5,
+    autoFollowDelay: 0.3,
     // Push the look target ahead along movement so you see more of where you go.
     lookAhead: 3.6,
     lookAheadLambda: 6,
