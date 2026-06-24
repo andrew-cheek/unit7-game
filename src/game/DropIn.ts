@@ -134,9 +134,10 @@ export class DropIn {
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
 
-  private static readonly STEER = 60 // strong horizontal control over the long fall
+  private static readonly STEER = 64 // lateral steer authority during the dive
+  private static readonly GLIDE = 70 // forward glide speed at a balanced (mid) tilt
   private static readonly H_DAMP = 1.4
-  private static readonly H_MAX = 68
+  private static readonly H_MAX = 88
 
   constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number) {
     this.scene = scene
@@ -520,24 +521,36 @@ export class DropIn {
 
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
-    const controlScale = this.phase === 'canopy' ? 0.6 + this.quality * 0.4 : 1
-    const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * controlScale
-    const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER * controlScale
-    this.hVel.x += ax * dt
-    this.hVel.z += az * dt
-
-    if (this.phase === 'canopy') {
-      // Gentle pull toward the beacon so a flailing drop still ends near the
-      // plaza - but light enough that you mostly land where you steer.
-      const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
-      const d = Math.hypot(dx, dz) || 1
-      const assist = 5
-      this.hVel.x += (dx / d) * assist * dt
-      this.hVel.z += (dz / d) * assist * dt
+    if (this.phase === 'dive') {
+      // moveX strafes; FORWARD travel is derived from attitude, not the stick:
+      // it peaks at a balanced mid tilt and falls to zero both flat (flaring) and
+      // straight-down. So "balance it down and forward" cruises forward fast while
+      // "all the way up" plummets straight down with no forward drift.
+      const glide = Math.sin(this.pitch * Math.PI) * DropIn.GLIDE
+      const lat = this.input.moveX * DropIn.STEER
+      const tvx = Math.sin(yaw) * glide - Math.cos(yaw) * lat
+      const tvz = Math.cos(yaw) * glide + Math.sin(yaw) * lat
+      const k = Math.min(1, dt * 2.6) // responsive approach = tight control
+      this.hVel.x += (tvx - this.hVel.x) * k
+      this.hVel.z += (tvz - this.hVel.z) * k
+    } else {
+      const controlScale = this.phase === 'canopy' ? 0.6 + this.quality * 0.4 : 1
+      const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * controlScale
+      const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER * controlScale
+      this.hVel.x += ax * dt
+      this.hVel.z += az * dt
+      if (this.phase === 'canopy') {
+        // Gentle pull toward the beacon so a flailing drop still ends near the plaza.
+        const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
+        const d = Math.hypot(dx, dz) || 1
+        const assist = 5
+        this.hVel.x += (dx / d) * assist * dt
+        this.hVel.z += (dz / d) * assist * dt
+      }
+      const damp = Math.exp(-DropIn.H_DAMP * dt)
+      this.hVel.x *= damp
+      this.hVel.z *= damp
     }
-    const damp = Math.exp(-DropIn.H_DAMP * dt)
-    this.hVel.x *= damp
-    this.hVel.z *= damp
     const hs = Math.hypot(this.hVel.x, this.hVel.z)
     const hMax = this.phase === 'canopy' ? 32 : DropIn.H_MAX
     if (hs > hMax) { this.hVel.x *= hMax / hs; this.hVel.z *= hMax / hs }
@@ -552,13 +565,19 @@ export class DropIn {
         this.vy = this.vy < cap ? Math.min(this.vy + rate, cap) : Math.max(this.vy - rate, cap)
         this.pitch += (0 - this.pitch) * Math.min(1, dt * 4) // upright jet pose
       } else {
-        // Continuous dive: the further you push forward, the steeper the robot
-        // faces down AND the faster it falls; pulling back flattens out and slows.
-        // moveY -1..1 maps straight to a 0..1 dive amount (0.5 = hands-off neutral).
+        // Continuous attitude: push forward to tip toward a straight-down dive,
+        // pull back to flatten/flare. moveY -1..1 -> 0..1 tilt (0.5 = hands-off).
+        // The faster you face down, the faster you fall.
         const diveAmt = clamp(0.5 + this.input.moveY * 0.5, 0, 1)
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
-        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * diveAmt
+        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * this.pitch
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
+        // Keep holding all the way up at a full straight-down dive and you tumble
+        // into a loop (re-triggers while held, so you keep flipping around).
+        if (this.pitch > 0.93 && this.input.moveY > 0.55 && this.flipT <= 0) {
+          this.flipT = DropIn.FLIP_DUR
+          this.tricks++
+        }
       }
 
       this.checkOrbs(dt)
@@ -596,9 +615,8 @@ export class DropIn {
     this.diver.position.copy(this.pos)
     if (hs > 0.5) this.camHeading = Math.atan2(this.hVel.x, this.hVel.z)
     const diving = this.phase === 'dive'
-    // Pressing forward tips the robot well past horizontal into a steep head-down
-    // dive; flaring brings it near upright. (0 = upright, ~1.6 = past face-down.)
-    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, 1.6, this.pitch) : 0
+    // Full forward tilt = exactly straight down (PI/2); flared = near belly-flat.
+    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, this.pitch) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     this.diver.rotation.set(bodyPitch + flip, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
     // Arms react to steering: sweep back when diving forward, spread when flaring,

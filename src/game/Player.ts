@@ -412,10 +412,16 @@ export class Player {
     this.speed = Math.hypot(this.velocity.x, this.velocity.z)
     if (dancing) {
       this.danceModel(dt)
+    } else if (this.boarding) {
+      // Riding the board: stand on the deck in a planted glide stance (slight
+      // crouch via the flight pose) instead of running on the spot.
+      this.model.group.position.y = Player.BOARD_LIFT
+      this.model.setFlyPose(0.22)
+      this.model.update(dt, 0, true)
     } else {
-      // Stand the robot on the deck while boarding so it visibly rides the board;
-      // otherwise feet rest on the ground.
-      this.model.group.position.y = this.boarding ? Player.BOARD_LIFT : 0
+      // Not boarding: leave the fly pose to the mode update (jetpack/parachute set
+      // it); just run the normal locomotion animation.
+      this.model.group.position.y = 0
       this.model.update(dt, this.speed / config.player.runSpeed, this.grounded)
     }
     this.updateCanopy(dt)
