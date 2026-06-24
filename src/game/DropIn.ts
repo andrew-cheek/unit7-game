@@ -103,6 +103,12 @@ export class DropIn {
   private static readonly FLIP_DUR = 0.7
   private chute!: THREE.Mesh
   private chuteRig!: THREE.Group // canopy + suspension cords, scaled together
+  // Sky-surf hoverboard the robot rides on the way down. Dropping it (a FLIP, or
+  // the canopy opening) detaches it and it tumbles away.
+  private board!: THREE.Group
+  private boardMats: THREE.Material[] = []
+  private boardOn = true
+  private droppedBoard: { mesh: THREE.Group; vy: number; spin: number; t: number } | null = null
   private streaks!: THREE.Points
   private streakVel!: Float32Array
   private mats: THREE.Material[] = []
@@ -139,6 +145,12 @@ export class DropIn {
     this.diver.add(this.rb.group)
     this.diver.position.copy(this.pos)
     this.group.add(this.diver)
+
+    // Hoverboard the robot rides on the way down (sits under the feet; the diver
+    // pitches into the dive so it reads as sky-surfing). Dropped on a FLIP.
+    this.board = this.buildDropBoard()
+    this.board.position.set(0, -1.4, 0.2)
+    this.diver.add(this.board)
 
     const chuteMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0x27e7ff, emissiveIntensity: 1.4, roughness: 0.5, side: THREE.DoubleSide, transparent: true, opacity: 0.82 }))
     // Canopy + suspension cords live in one rig that scales as a unit, so the
@@ -344,6 +356,54 @@ export class DropIn {
     }
   }
 
+  /** The sky-surf hoverboard: emissive deck, neon rim, underglow + thrusters.
+   *  Materials are tracked so they can be faded out when the board is dropped. */
+  private buildDropBoard(): THREE.Group {
+    const g = new THREE.Group()
+    const trackMat = <T extends THREE.Material>(m: T): T => { this.boardMats.push(m); this.mats.push(m); return m }
+    const deck = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.1, 0.16, 3.0)), trackMat(new THREE.MeshStandardMaterial({ color: 0x141826, emissive: 0x27e7ff, emissiveIntensity: 0.6, metalness: 0.7, roughness: 0.35, transparent: true })))
+    g.add(deck)
+    const rim = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.3, 0.1, 3.2)), trackMat(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true })))
+    rim.position.y = -0.04
+    g.add(rim)
+    const glow = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.5, 0.05, 3.4)), trackMat(new THREE.MeshBasicMaterial({ color: 0x6fdcff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    glow.position.y = -0.22
+    g.add(glow)
+    for (const sz of [-0.95, 0.95]) {
+      const jet = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(0.32, 1.1, 12, 1, true)), trackMat(new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      jet.rotation.x = Math.PI
+      jet.position.set(0, -0.32, sz)
+      g.add(jet)
+    }
+    return g
+  }
+
+  /** Detach the board and let it tumble away (called on a FLIP or canopy open). */
+  private dropBoard() {
+    if (!this.boardOn || this.droppedBoard) return
+    this.boardOn = false
+    // Reparent to the world group keeping the current world transform, then let
+    // it fall with spin + fade.
+    this.group.attach(this.board)
+    this.droppedBoard = { mesh: this.board, vy: -6, spin: 5 + Math.random() * 4, t: 0 }
+  }
+
+  private updateDroppedBoard(dt: number) {
+    const d = this.droppedBoard
+    if (!d) return
+    d.t += dt
+    d.vy -= 30 * dt
+    d.mesh.position.y += d.vy * dt
+    d.mesh.rotation.x += d.spin * dt
+    d.mesh.rotation.z += d.spin * 0.6 * dt
+    const o = Math.max(0, 1 - d.t / 1.4)
+    for (const m of this.boardMats) {
+      const mm = m as THREE.Material & { opacity: number }
+      mm.opacity = (m === this.boardMats[2] ? 0.45 : m === this.boardMats[0] ? 1 : 0.85) * o
+    }
+    if (d.t > 1.4) { this.group.remove(d.mesh); this.droppedBoard = null }
+  }
+
   /** A neon text billboard sprite for the platform labels. */
   private labelSprite(text: string, color: number): THREE.Sprite {
     const cv = document.createElement('canvas')
@@ -371,10 +431,11 @@ export class DropIn {
     else if (this.phase === 'canopy') this.wantCut = true
   }
 
-  /** TRICK button / key: a somersault (small style bonus during freefall). */
+  /** FLIP button / key: a somersault that also kicks the hoverboard away. */
   trick() {
     if (this.done || this.finishing || this.phase === 'crash' || this.phase === 'land') return
     if (this.flipT <= 0) this.flipT = DropIn.FLIP_DUR
+    this.dropBoard() // flipping kicks the board out from under you
     this.tricks++
     this.onSfx?.('ring')
   }
@@ -428,9 +489,10 @@ export class DropIn {
       else if (this.phase === 'canopy') this.wantCut = true // cut back to free-fall
     }
     if (this.wantCut && this.phase === 'canopy') this.cutCanopy()
-    // TRICK (H / button): a somersault.
+    // FLIP (H / button): a somersault that kicks the board away.
     if (this.input.consumeEdge('net')) this.trick()
     if (this.flipT > 0) this.flipT = Math.max(0, this.flipT - dt)
+    this.updateDroppedBoard(dt)
 
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
@@ -484,6 +546,7 @@ export class DropIn {
         this.phase = 'canopy'
         this.chuteRig.visible = true
         this.rb.setFlyPose(0.2)
+        this.dropBoard() // popping the canopy drops the board too
         this.onSfx?.('deploy')
         this.vy *= 0.5
       } else if (alt <= 2) {
@@ -509,7 +572,10 @@ export class DropIn {
     this.diver.position.copy(this.pos)
     if (hs > 0.5) this.camHeading = Math.atan2(this.hVel.x, this.hVel.z)
     const diving = this.phase === 'dive'
-    const bodyPitch = diving ? THREE.MathUtils.lerp(0.2, 1.25, this.pitch) : 0
+    // While riding the board, lean forward (surf) instead of a full head-down
+    // tuck, so it reads as sky-surfing. Once the board's gone, full dive tuck.
+    const maxPitch = this.boardOn ? 0.5 : 1.25
+    const bodyPitch = diving ? THREE.MathUtils.lerp(0.15, maxPitch, this.pitch) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     this.diver.rotation.set(bodyPitch + flip, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
     this.rb.setThrust(this.phase === 'dive' && this.input.held.jet ? 1 : 0) // jetpack flame
@@ -747,13 +813,13 @@ export class DropIn {
       // so the ground you're steering toward fills most of the frame while the
       // open chute + diver stay framed in the upper third. Pulled in close so the
       // robot reads big.
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -8.5).add(new THREE.Vector3(0, 4.6, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 8).add(new THREE.Vector3(0, -3, 0))
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -6.5).add(new THREE.Vector3(0, 3.6, 0))
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7).add(new THREE.Vector3(0, -2.6, 0))
     } else {
-      // Dive: chase close from above-behind, angled down so the city rushes up at
-      // you and the falling robot reads big in frame.
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -5).add(new THREE.Vector3(0, 3, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 6).add(new THREE.Vector3(0, -5, 0))
+      // Dive: chase tight from just above-behind so the robot (and its board) fill
+      // the frame and the city rushes up beneath.
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -3.6).add(new THREE.Vector3(0, 2.0, 0))
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 5).add(new THREE.Vector3(0, -4, 0))
     }
     if (snap) this.cam.position.copy(want)
     else this.cam.position.lerp(want, 0.09)

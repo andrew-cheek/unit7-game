@@ -482,7 +482,7 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
         <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onClick={onDeploy}>CUT CHUTE ✂</button>
       )}
       {drop.canTrick && drop.phase === 'dive' && (
-        <button style={trickBtn} onClick={onTrick}>FLIP ✦</button>
+        <button style={trickBtn} onClick={onTrick}>FLIP</button>
       )}
       {touch && drop.phase === 'dive' && (
         <button
@@ -578,7 +578,7 @@ const deployBtn: CSSProperties = {
 const trickBtn: CSSProperties = {
   position: 'absolute',
   left: 24,
-  top: 24,
+  bottom: 30,
   zIndex: 16,
   pointerEvents: 'auto',
   cursor: 'pointer',
