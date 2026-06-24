@@ -745,14 +745,15 @@ export class DropIn {
     if (this.phase === 'canopy') {
       // Under canopy: sit ABOVE and behind the diver and aim down the glide path,
       // so the ground you're steering toward fills most of the frame while the
-      // open chute + diver stay framed in the upper third (the old framing looked
-      // up at the chute and you couldn't see where you were going).
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -12.5).add(new THREE.Vector3(0, 6.5, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 9).add(new THREE.Vector3(0, -3.5, 0))
+      // open chute + diver stay framed in the upper third. Pulled in close so the
+      // robot reads big.
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -8.5).add(new THREE.Vector3(0, 4.6, 0))
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 8).add(new THREE.Vector3(0, -3, 0))
     } else {
-      // Dive: chase from above-behind, angled down so the city rushes up at you.
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -7.5).add(new THREE.Vector3(0, 4.6, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7).add(new THREE.Vector3(0, -6.5, 0))
+      // Dive: chase close from above-behind, angled down so the city rushes up at
+      // you and the falling robot reads big in frame.
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -5).add(new THREE.Vector3(0, 3, 0))
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 6).add(new THREE.Vector3(0, -5, 0))
     }
     if (snap) this.cam.position.copy(want)
     else this.cam.position.lerp(want, 0.09)
