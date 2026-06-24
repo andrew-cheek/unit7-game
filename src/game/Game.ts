@@ -543,7 +543,7 @@ export class Game {
     if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0016 }
     this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DIVE IN', body: 'You are falling. Steer with WASD (or drag). Push forward to nose-dive, pull back to slow. Hold SPACE for the JETPACK to slow, hover, or climb - fly through a glowing portal pad to pick where you land (city, arcade, Mars, Moon). H or TRICK does a flip + fireworks. Press O or DEPLOY for the chute. Land before you hit the ground or a repair drone rebuilds you.' }
+    this.hud.missionPopup = { title: 'DIVE IN', body: 'Sky-surf down on your hoverboard. Steer with WASD (or drag) - push forward to nose-dive (hit terminal velocity for a SONIC BOOM), pull back to slow. Thread the glowing boost rings, punch through the clouds, and race the other divers down. Hold SPACE for the JETPACK to slow, hover, or climb. Fly through a portal pad to pick where you land (city, arcade, Mars, Moon). H or FLIP kicks the board away in a somersault. Press O or DEPLOY for the chute before you hit the ground.' }
     this.missionPopupTimer = 8
   }
 
@@ -555,12 +555,14 @@ export class Game {
     const q = di?.chuteQuality ?? 0
     const orbBonus = (di?.bonusTargets ?? 0) * 30
     const trickBonus = Math.min(di?.tricks ?? 0, 8) * 15 // flips + fireworks flair
+    // Rival race: credit for every skydiver you finished ahead of.
+    const placeBonus = di ? Math.max(0, di.raceTotal - di.racePlace) * 25 : 0
     const dest = di?.chosenDest ?? null
     // Where you come down. Flying through a destination portal overrides it:
     // arcade -> the plaza; mars/moon -> a zone jump kicked off below.
     const land = dest === 'arcade' ? this.dropLand.clone() : di ? di.landingPos.clone() : this.dropLand.clone()
     const chuteBonus = crashed ? 0 : q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
-    const credits = (crashed ? 40 : 120) + chuteBonus + orbBonus + trickBonus
+    const credits = (crashed ? 40 : 120) + chuteBonus + orbBonus + trickBonus + placeBonus
     const xp = (crashed ? 20 : 50) + (q >= 0.78 ? 40 : 0)
     this.dropIn?.dispose()
     this.dropIn = null
@@ -1667,7 +1669,7 @@ export class Game {
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
       const d = this.dropIn.hud
-      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result }
+      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return

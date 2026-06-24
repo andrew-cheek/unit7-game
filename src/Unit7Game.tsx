@@ -466,6 +466,7 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
       <div style={dropReadout}>
         <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
         <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · {phase}</div>
+        {drop.place && <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.2em', color: '#ffd24a', textShadow: '0 0 12px #ffd24a', marginTop: 4 }}>PLACE {drop.place}</div>}
         {drop.hint && <div style={{ fontSize: 12, letterSpacing: '0.24em', color: 'rgba(223,238,255,0.75)', marginTop: 6 }}>{drop.hint}</div>}
       </div>
 

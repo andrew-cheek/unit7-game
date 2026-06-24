@@ -13,6 +13,7 @@ export interface DropHud {
   canDeploy: boolean // the chute can be popped now (drives the DEPLOY button)
   canTrick: boolean // flips + fireworks available (drives the TRICK button)
   result: string | null
+  place: string | null // live race placement vs the rival skydivers, e.g. "3/10"
 }
 
 // You start very high and fall the whole way down, steering the dive (tuck to
@@ -20,7 +21,7 @@ export interface DropHud {
 // clipping floating target orbs on the way. Pop the canopy in time and glide it
 // down; leave it too late and you smash into pieces - then a helper bot zips in
 // and reassembles you on the spot.
-const START_Y = 920 // begin far above the city
+const START_Y = 1320 // begin far above the city (a long, high opening drop)
 const TERM_DIVE = -88
 const TERM_FLARE = -30
 const TERM_NEUTRAL = -58
@@ -51,7 +52,7 @@ export class DropIn {
   chosenDest: 'arcade' | 'mars' | 'moon' | 'city' | null = null
   /** Where you ended up - the handoff places the player here. */
   readonly landingPos = new THREE.Vector3()
-  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null }
+  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null }
   /** Flips + fireworks pulled on the way down (small style bonus). */
   tricks = 0
 
@@ -115,6 +116,23 @@ export class DropIn {
   private streakVel!: Float32Array
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
+
+  // Cloud decks you punch through on the way down (a staged reveal of the city).
+  private clouds: { mesh: THREE.Object3D; y: number; punched: boolean }[] = []
+  private cloudTex?: THREE.Texture
+  private vapor!: THREE.Mesh // pooled punch-through burst
+  private vaporMat!: THREE.MeshBasicMaterial
+  private vaporT = 1 // >=1 = idle
+  // Sonic boom at terminal velocity.
+  private boomRing!: THREE.Mesh
+  private boomMat!: THREE.MeshBasicMaterial
+  private boomT = 1 // >=1 = idle
+  private boomCharge = 0
+  private boomed = false
+  // Rival race: live placement vs the other skydivers, paid out on landing.
+  racePlace = 1
+  raceTotal = 1
+  private camShake = 0
 
   private camPos = new THREE.Vector3()
   private camLook = new THREE.Vector3()
@@ -285,6 +303,61 @@ export class DropIn {
 
     this.buildTraffic()
     this.buildPlatforms()
+    this.buildClouds()
+
+    // Pooled punch-through vapor burst (cloud decks) - one reused sphere.
+    this.vaporMat = this.own(new THREE.MeshBasicMaterial({ color: 0xeaf4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.vapor = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(1, 16, 12)), this.vaporMat)
+    this.vapor.visible = false
+    this.vapor.frustumCulled = false
+    this.group.add(this.vapor)
+
+    // Pooled sonic-boom shockwave ring.
+    this.boomMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.boomRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1, 0.08, 8, 40)), this.boomMat)
+    this.boomRing.visible = false
+    this.boomRing.frustumCulled = false
+    this.group.add(this.boomRing)
+  }
+
+  /** A few soft cloud decks stacked down the descent. You punch through each one
+   *  (vapor burst + shudder) so the long fall is staged: clear sky, into the
+   *  cloud layers, then the city opens up below. */
+  private buildClouds() {
+    // Radial soft-white puff texture, reused across all puffs.
+    const cv = document.createElement('canvas')
+    cv.width = 128; cv.height = 128
+    const ctx = cv.getContext('2d')!
+    const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 64)
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)')
+    grad.addColorStop(0.5, 'rgba(225,238,255,0.5)')
+    grad.addColorStop(1, 'rgba(225,238,255,0)')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, 128, 128)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    this.cloudTex = tex
+    const puffMat = this.own(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.7, depthWrite: false, fog: false }))
+    // Three decks between the start and the city.
+    const bands = [0.74, 0.52, 0.3]
+    for (const b of bands) {
+      const y = THREE.MathUtils.lerp(this.target.y + 120, START_Y - 80, b)
+      const deck = new THREE.Group()
+      // Spread a clutch of big puffs across a wide horizontal disk.
+      const n = config.tier.name === 'low' ? 7 : 12
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + b * 3
+        const r = 60 + Math.random() * 320
+        const s = 180 + Math.random() * 220
+        const puff = new THREE.Sprite(puffMat)
+        puff.position.set(Math.cos(a) * r, (Math.random() - 0.5) * 30, Math.sin(a) * r)
+        puff.scale.set(s, s * 0.7, 1)
+        deck.add(puff)
+      }
+      deck.position.set(this.target.x, y, this.target.z)
+      this.group.add(deck)
+      this.clouds.push({ mesh: deck, y, punched: false })
+    }
   }
 
   /** Rockets + shuttles cruising the sky around the drop, so the air feels busy
@@ -473,7 +546,7 @@ export class DropIn {
     // Safety: the opening should finish in ~25s; if anything stalls it, force a
     // clean handoff so the player is never trapped in the drop-in forever.
     this.totalT += dt
-    if (this.totalT > 55) {
+    if (this.totalT > 72) {
       this.landingPos.set(this.pos.x, this.getGround(this.pos.x, this.pos.z), this.pos.z)
       this.fade = 1
       this.done = true
@@ -594,6 +667,7 @@ export class DropIn {
     this.updateTraffic(dt)
     if (this.phase === 'dive' || this.phase === 'canopy') this.checkPlatforms()
     this.updateStreaks(dt, diving)
+    this.updateSkyFx(dt)
     this.placeCamera(false)
 
     this.hud.alt = Math.max(0, alt)
@@ -811,6 +885,64 @@ export class DropIn {
     }
   }
 
+  private kick(a: number) { this.camShake = Math.min(3, this.camShake + a) }
+
+  /** The three opening set-pieces: punch through the cloud decks, a sonic boom at
+   *  terminal velocity, and the live rival-race placement. */
+  private updateSkyFx(dt: number) {
+    // Cloud punch-through: trigger as the diver crosses each deck.
+    for (const c of this.clouds) {
+      if (c.punched || this.pos.y >= c.y) continue
+      c.punched = true
+      this.vapor.position.copy(this.pos)
+      this.vapor.visible = true
+      this.vaporT = 0
+      this.kick(1.1)
+      this.onSfx?.('land')
+    }
+    if (this.vaporT < 1) {
+      this.vaporT = Math.min(1, this.vaporT + dt * 2.2)
+      this.vapor.position.copy(this.pos)
+      this.vapor.scale.setScalar(2 + this.vaporT * 46)
+      this.vaporMat.opacity = 0.7 * (1 - this.vaporT)
+      if (this.vaporT >= 1) this.vapor.visible = false
+    }
+
+    // Sonic boom: hold a full nose-dive to terminal velocity and you punch a
+    // shockwave. Re-arms once you slow back down.
+    if (this.phase === 'dive' && this.vy < -82) {
+      this.boomCharge += dt
+      if (this.boomCharge > 0.5 && !this.boomed) {
+        this.boomed = true
+        this.boomRing.position.copy(this.pos)
+        this.boomRing.rotation.x = Math.PI / 2
+        this.boomRing.visible = true
+        this.boomT = 0
+        this.kick(1.7)
+        this.onSfx?.('deploy')
+        if (!this.hud.result || this.hud.result.startsWith('BOOST')) { this.hud.result = 'SONIC BOOM'; this.resultT = 0 }
+      }
+    } else if (this.vy > -70) {
+      this.boomed = false
+      this.boomCharge = 0
+    }
+    if (this.boomT < 1) {
+      this.boomT = Math.min(1, this.boomT + dt * 1.5)
+      this.boomRing.position.copy(this.pos)
+      this.boomRing.scale.setScalar(2 + this.boomT * 95)
+      this.boomMat.opacity = 0.7 * (1 - this.boomT)
+      if (this.boomT >= 1) this.boomRing.visible = false
+    }
+
+    // Rival race: place = 1 + the rivals currently below you (closer to ground).
+    // You start above everyone (last) and climb the standings as you dive past them.
+    let below = 0
+    for (const a of this.ai) if (a.y < this.pos.y) below++
+    this.racePlace = 1 + below
+    this.raceTotal = this.ai.length + 1
+    this.hud.place = `${this.racePlace}/${this.raceTotal}`
+  }
+
   private updateStreaks(dt: number, fast: boolean) {
     const m = this.streaks.material as THREE.PointsMaterial
     m.opacity = THREE.MathUtils.damp(m.opacity, fast ? 0.85 : 0.3, 5, dt)
@@ -849,8 +981,19 @@ export class DropIn {
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -3.0).add(new THREE.Vector3(0, 1.7, 0))
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 5).add(new THREE.Vector3(0, -3.6, 0))
     }
+    // The dive falls FAST (up to ~88 m/s), so a slow lerp leaves the camera
+    // lagging tens of metres behind and the robot reads tiny. Follow tightly while
+    // diving; the slower canopy phase can ease more gently.
     if (snap) this.cam.position.copy(want)
-    else this.cam.position.lerp(want, 0.09)
+    else this.cam.position.lerp(want, this.phase === 'canopy' ? 0.12 : 0.34)
+    // Transient shake from cloud punch-throughs / the sonic boom.
+    if (this.camShake > 0.01) {
+      const j = this.camShake
+      this.cam.position.x += (Math.random() - 0.5) * j
+      this.cam.position.y += (Math.random() - 0.5) * j
+      this.cam.position.z += (Math.random() - 0.5) * j
+      this.camShake *= 0.86
+    }
     this.cam.lookAt(lookWant)
   }
 
@@ -861,5 +1004,6 @@ export class DropIn {
     for (const t of this.traffic) t.v.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
+    this.cloudTex?.dispose()
   }
 }
