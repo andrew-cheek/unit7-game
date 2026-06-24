@@ -39,7 +39,7 @@ import { RobotFactory } from './RobotFactory'
 import { RaceActivity, type RaceHud } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
-import { clamp, damp, vibrate } from './utils'
+import { clamp, damp, lerp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
 import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
 import {
@@ -60,6 +60,18 @@ const NET_SEGMENTS = 22
 // Mech unlock costs (credits). mechM is free so the "pilot a mech" objective is
 // always reachable; the bigger mechs are earned by capturing aliens.
 const MECH_COST: Record<string, number> = { mechM: 0, mechL: 400, mechXL: 1200 }
+
+// Hero fill-light color the night-blue eases toward at full day, so the follow
+// light reads as warm sun-bounce at noon instead of an unmotivated blue pool.
+const HERO_DAY_COLOR = new THREE.Color(0xffd0a0)
+
+// Per-zone final colour grade: [tint(rgb), tintAmt, highlight(rgb), vignette].
+// Earth keeps the neon-noir teal/magenta; Mars warms; the Moon goes near-neutral.
+const ZONE_GRADE: Record<Zone, { tint: [number, number, number]; tintAmt: number; hi: [number, number, number]; vignette: number }> = {
+  earth: { tint: [0.9, 1.0, 1.1], tintAmt: 0.45, hi: [0.04, 0.0, 0.05], vignette: 0.45 },
+  mars: { tint: [1.08, 0.98, 0.86], tintAmt: 0.4, hi: [0.05, 0.02, 0.0], vignette: 0.36 },
+  moon: { tint: [0.98, 1.0, 1.06], tintAmt: 0.3, hi: [0.0, 0.0, 0.03], vignette: 0.42 },
+}
 
 /**
  * Top-level orchestrator. Owns the Engine and every gameplay subsystem, drives
@@ -858,6 +870,10 @@ export class Game {
     this.systems.setZone(zone) // collectibles (+ future systems) react to the zone
     this.world.cityVisible(zone === 'earth')
     this.world.applyZone(zone)
+    // Retune the final colour grade for the zone: neon-noir on Earth, warm on
+    // Mars, near-neutral on the Moon.
+    const g = ZONE_GRADE[zone]
+    this.engine.setGrade(g.tint, g.tintAmt, g.hi, g.vignette)
     this.worldEvents.setZone(zone)
     this.exploration.setActive(zone)
     this.playground.setActive(zone)
@@ -1803,8 +1819,18 @@ export class Game {
       this.bannerTimer = 2.4
     }
 
-    // Hero fill light trails the subject so the robot/mech stays readable.
+    // Hero fill light trails the subject so the robot/mech stays readable. On
+    // Earth, dim it and warm it toward day so it doesn't fight the noon sun with
+    // an unmotivated blue pool; off-world it stays the bright cool fill.
     this.heroLight.position.set(this.focus.x + 2, this.focus.y + 6, this.focus.z + 2)
+    if (onEarth) {
+      const df = this.world.dayFactor
+      this.heroLight.intensity = lerp(22, 7, df)
+      this.heroLight.color.setHex(0x9fd8ff).lerp(HERO_DAY_COLOR, df)
+    } else if (this.heroLight.intensity !== 22) {
+      this.heroLight.intensity = 22
+      this.heroLight.color.setHex(0x9fd8ff)
+    }
     this.hud.objective = this.missions.update({
       zone: this.zone,
       playerPos: this.player.position,
@@ -1843,6 +1869,9 @@ export class Game {
     // Neon contrast by time of day: full bloom at night, eased down toward noon
     // so daylight reads warm/calm and night reads as the bright neon city.
     this.engine.setBloomScale((1 - this.world.dayFactor * 0.62) * this.neonBloomMul)
+    // Tone-mapping exposure ramp: a touch darker at noon so highlights don't
+    // clip, lifted at night so the neon reads. Earth only; off-world holds base.
+    this.engine.setExposure(onEarth ? lerp(1.05, 0.92, this.world.dayFactor) : config.render.exposure)
 
     // Registered systems: pooled FX, and multiplayer (advances remote avatars +
     // the shared swarm and broadcasts our transform). No-ops cleanly when solo.

@@ -1839,6 +1839,9 @@ export class World {
     const sunOffX = lerp(120, 60, dawn)
     const sunOffY = lerp(18, 92, dawn)
     this.sun.position.set(focus.x + sunOffX, focus.y + sunOffY, focus.z + 40)
+    // Fade the stars + ringed planet out as Earth's day comes up; off-world dawn
+    // is 0 so the starfield stays full on the Moon/Mars.
+    this.sky.setDayFactor(dawn)
     if (this.zone === 'earth') this.applyDawn(dawn)
     this.sunTarget.position.copy(focus)
     this.sunTarget.updateMatrixWorld()

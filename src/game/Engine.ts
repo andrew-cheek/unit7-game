@@ -14,27 +14,39 @@ import type { QualityTier } from './tiers'
 
 // Cinematic colour-grade + vignette applied as a final full-screen pass: a cool
 // cyberpunk tint, gentle S-curve contrast, and darkened corners. Cheap (one
-// texture read), runs on every tier.
+// texture read), runs on every tier. The tint / highlight / vignette are
+// uniforms so the grade can be set per zone (warm Mars, cool Moon, neon Earth).
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null as THREE.Texture | null } },
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    uTint: { value: new THREE.Vector3(0.9, 1.0, 1.1) }, // shadow/mid color push
+    uTintAmt: { value: 0.45 }, // how much of the tint to mix in
+    uHi: { value: new THREE.Vector3(0.04, 0.0, 0.05) }, // additive highlight cast
+    uVignette: { value: 0.45 }, // corner darkening strength
+  },
   vertexShader: `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
   `,
   fragmentShader: `
     uniform sampler2D tDiffuse;
+    uniform vec3 uTint;
+    uniform float uTintAmt;
+    uniform vec3 uHi;
+    uniform float uVignette;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
       // gentle contrast S-curve
       c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;
-      // cool teal shadows / faint magenta in the highlights (neon-noir grade)
+      // tinted shadows/mids + an additive highlight cast (neon-noir on Earth,
+      // warm on Mars, near-neutral on the Moon - all driven by uniforms)
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb = mix(c.rgb, c.rgb * vec3(0.90, 1.0, 1.10), 0.45);
-      c.rgb += vec3(0.04, 0.0, 0.05) * smoothstep(0.6, 1.0, l);
+      c.rgb = mix(c.rgb, c.rgb * uTint, uTintAmt);
+      c.rgb += uHi * smoothstep(0.6, 1.0, l);
       // vignette
       float d = distance(vUv, vec2(0.5));
-      c.rgb *= 1.0 - smoothstep(0.55, 0.95, d) * 0.45;
+      c.rgb *= 1.0 - smoothstep(0.55, 0.95, d) * uVignette;
       gl_FragColor = c;
     }
   `,
@@ -85,6 +97,7 @@ export class Engine {
   private saoPass: SAOPass | null = null
   private bokehPass: BokehPass | null = null
   private smaaPass: SMAAPass | null = null
+  private gradePass: ShaderPass | null = null
   // Adaptive resolution: scales the drawing-buffer pixel ratio up/down to hold
   // a smooth frame rate. 1 = full (capped) res; floor keeps it from getting too
   // soft. Re-evaluated on a timer so we don't reallocate buffers every frame.
@@ -195,9 +208,13 @@ export class Engine {
       new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
       this.baseBloom,
       config.render.bloom.radius,
-      // High tier blooms harder (full strength + HDR), so raise its threshold so
-      // only genuinely bright hero neon blooms, not every lit emitter/event beam.
-      tier.name === 'high' ? Math.min(1, config.render.bloom.threshold + 0.04) : config.render.bloom.threshold,
+      // High tier LOWERS the threshold so mid-bright neon signs actually halo:
+      // after ACES tonemapping most emitters (emissiveIntensity ~1.5-3) sit well
+      // below white, so the old ~1.0 threshold meant almost nothing bloomed. The
+      // half-res bloom buffer already low-passes the far-neon shimmer a low
+      // threshold would otherwise amplify, so it's safe to bring it down here.
+      // Low/medium keep the tuned default (their bloom is already closer to right).
+      tier.name === 'high' ? 0.62 : config.render.bloom.threshold,
     )
     if (tier.bloom) this.composer.addPass(this.bloomPass)
 
@@ -214,8 +231,10 @@ export class Engine {
 
     this.composer.addPass(new OutputPass())
 
-    // Cinematic colour-grade + vignette (final look pass).
-    this.composer.addPass(new ShaderPass(GradeShader))
+    // Cinematic colour-grade + vignette (final look pass). Kept as a field so the
+    // grade can be retuned per zone (warm Mars, cool Moon) from gameplay.
+    this.gradePass = new ShaderPass(GradeShader)
+    this.composer.addPass(this.gradePass)
 
     // Cheap edge AA on the path that has no MSAA (mobile).
     if (tier.smaa) {
@@ -245,6 +264,24 @@ export class Engine {
    */
   setBloomScale(s: number) {
     this.bloomPass.strength = this.baseBloom * s
+  }
+
+  /** Ramp tone-mapping exposure (e.g. by time of day): a touch darker at noon so
+   *  highlights don't clip, lifted at night so the neon city reads. Pure scalar,
+   *  no added cost, both tiers. */
+  setExposure(e: number) {
+    this.renderer.toneMappingExposure = e
+  }
+
+  /** Retune the final colour grade for the active zone. tint multiplies the
+   *  shadows/mids, hi is an additive highlight cast, vignette is corner darkening. */
+  setGrade(tint: readonly [number, number, number], tintAmt: number, hi: readonly [number, number, number], vignette: number) {
+    if (!this.gradePass) return
+    const u = this.gradePass.uniforms as Record<string, { value: THREE.Vector3 | number }>
+    ;(u.uTint.value as THREE.Vector3).set(tint[0], tint[1], tint[2])
+    u.uTintAmt.value = tintAmt
+    ;(u.uHi.value as THREE.Vector3).set(hi[0], hi[1], hi[2])
+    u.uVignette.value = vignette
   }
 
   /** Drive the DoF focus distance from gameplay (e.g. distance to the player). */

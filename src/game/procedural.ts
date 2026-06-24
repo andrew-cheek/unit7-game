@@ -415,6 +415,8 @@ export function createDrone(): VehicleModel {
 export interface SkyModel {
   group: THREE.Group
   setColors(top: number, horizon: number): void
+  /** 0 = full starfield (night / off-world), 1 = full day (stars + planet fade out). */
+  setDayFactor(f: number): void
   update(dt: number): void
   dispose(): void
 }
@@ -470,9 +472,10 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
   const stars = new THREE.Points(sg, starMat)
   group.add(stars)
 
-  // Distant ringed planet hanging in the sky (fog-immune).
+  // Distant ringed planet hanging in the sky (fog-immune). Transparent so it can
+  // fade out with the stars in daylight.
   const planetGeo = new THREE.SphereGeometry(70, 24, 18)
-  const planetMat = new THREE.MeshBasicMaterial({ color: 0x6a4bd0, fog: false })
+  const planetMat = new THREE.MeshBasicMaterial({ color: 0x6a4bd0, fog: false, transparent: true, opacity: 1 })
   const planet = new THREE.Mesh(planetGeo, planetMat)
   planet.position.set(-420, 320, -650)
   group.add(planet)
@@ -493,13 +496,24 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
   let nextStreak = 3 + Math.random() * 5
 
   let t = 0
+  let dayF = 0 // 0 night -> 1 day; fades the stars + planet + shooting streaks out by day
+  const ringBaseOpacity = 0.45
   return {
     group,
     setColors,
+    setDayFactor: (f: number) => {
+      dayF = THREE.MathUtils.clamp(f, 0, 1)
+      const vis = 1 - dayF
+      planetMat.opacity = vis
+      ringMat.opacity = ringBaseOpacity * vis
+    },
     update: (dt) => {
       t += dt
       group.rotation.y = t * 0.004
-      starMat.opacity = 0.75 + Math.sin(t * 0.6) * 0.25
+      // Twinkle, then fade the whole starfield out toward full day.
+      starMat.opacity = (0.75 + Math.sin(t * 0.6) * 0.25) * (1 - dayF)
+      // No shooting stars in daylight.
+      if (dayF > 0.85) { streak.visible = false; nextStreak = 4 + Math.random() * 7 }
       if (streak.visible) {
         streak.position.addScaledVector(streakDir, 620 * dt)
         streakMat.opacity = Math.max(0, streakMat.opacity - dt * 1.3)
