@@ -22,9 +22,8 @@ export interface DropHud {
 // down; leave it too late and you smash into pieces - then a helper bot zips in
 // and reassembles you on the spot.
 const START_Y = 1320 // begin far above the city (a long, high opening drop)
-const TERM_DIVE = -88
-const TERM_FLARE = -30
-const TERM_NEUTRAL = -58
+const TERM_DIVE = -88 // fall speed at a full nose-dive (forward all the way)
+const TERM_FLARE = -30 // fall speed flared right back; the dive lerps between these
 const DEPLOY_REF_ALT = 260 // reference height for canopy-quality scaling (not a cap - deploy anytime)
 
 /**
@@ -553,12 +552,13 @@ export class DropIn {
         this.vy = this.vy < cap ? Math.min(this.vy + rate, cap) : Math.max(this.vy - rate, cap)
         this.pitch += (0 - this.pitch) * Math.min(1, dt * 4) // upright jet pose
       } else {
-        let diveAmt = 0.5
-        if (this.input.moveY > 0.35) diveAmt = 1
-        else if (this.input.moveY < -0.35) diveAmt = 0.08
-        this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3)
-        const term = diveAmt >= 0.99 ? TERM_DIVE : diveAmt <= 0.1 ? TERM_FLARE : TERM_NEUTRAL
-        this.vy += (term - this.vy) * Math.min(1, dt * 1.5)
+        // Continuous dive: the further you push forward, the steeper the robot
+        // faces down AND the faster it falls; pulling back flattens out and slows.
+        // moveY -1..1 maps straight to a 0..1 dive amount (0.5 = hands-off neutral).
+        const diveAmt = clamp(0.5 + this.input.moveY * 0.5, 0, 1)
+        this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
+        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * diveAmt
+        this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
       }
 
       this.checkOrbs(dt)
