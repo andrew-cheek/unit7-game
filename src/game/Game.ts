@@ -66,11 +66,13 @@ const MECH_COST: Record<string, number> = { mechM: 0, mechL: 400, mechXL: 1200 }
 const HERO_DAY_COLOR = new THREE.Color(0xffd0a0)
 
 // Per-zone final colour grade: [tint(rgb), tintAmt, highlight(rgb), vignette].
-// Earth keeps the neon-noir teal/magenta; Mars warms; the Moon goes near-neutral.
+// Earth is byte-for-byte the original neon-noir grade (zero visual change there).
+// Mars warms and the Moon cools, but only gently — conservative deviations, since
+// the exact look needs a real device. Nudge these once they're seen on-screen.
 const ZONE_GRADE: Record<Zone, { tint: [number, number, number]; tintAmt: number; hi: [number, number, number]; vignette: number }> = {
   earth: { tint: [0.9, 1.0, 1.1], tintAmt: 0.45, hi: [0.04, 0.0, 0.05], vignette: 0.45 },
-  mars: { tint: [1.08, 0.98, 0.86], tintAmt: 0.4, hi: [0.05, 0.02, 0.0], vignette: 0.36 },
-  moon: { tint: [0.98, 1.0, 1.06], tintAmt: 0.3, hi: [0.0, 0.0, 0.03], vignette: 0.42 },
+  mars: { tint: [1.05, 0.99, 0.92], tintAmt: 0.32, hi: [0.03, 0.015, 0.0], vignette: 0.4 },
+  moon: { tint: [0.99, 1.0, 1.04], tintAmt: 0.24, hi: [0.0, 0.0, 0.02], vignette: 0.43 },
 }
 
 /**

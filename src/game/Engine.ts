@@ -208,13 +208,14 @@ export class Engine {
       new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
       this.baseBloom,
       config.render.bloom.radius,
-      // High tier LOWERS the threshold so mid-bright neon signs actually halo:
-      // after ACES tonemapping most emitters (emissiveIntensity ~1.5-3) sit well
-      // below white, so the old ~1.0 threshold meant almost nothing bloomed. The
-      // half-res bloom buffer already low-passes the far-neon shimmer a low
-      // threshold would otherwise amplify, so it's safe to bring it down here.
+      // High tier lowers the threshold a touch so mid-bright hero neon actually
+      // halos: after ACES tonemapping the bright signs/cores sit below white, so
+      // the old ~1.0 threshold meant almost nothing bloomed. 0.78 is deliberately
+      // conservative — it lets the hero emitters bloom while keeping the dimmer
+      // lit windows out of it, so the city doesn't haze up (the original intent).
+      // Tune down further toward 0.7 if the neon should read punchier on a device.
       // Low/medium keep the tuned default (their bloom is already closer to right).
-      tier.name === 'high' ? 0.62 : config.render.bloom.threshold,
+      tier.name === 'high' ? 0.78 : config.render.bloom.threshold,
     )
     if (tier.bloom) this.composer.addPass(this.bloomPass)
 
