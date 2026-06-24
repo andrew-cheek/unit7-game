@@ -94,7 +94,10 @@ export class DropIn {
   private repairBeam!: THREE.Mesh
   private impact = new THREE.Vector3()
 
-  private ai: { g: THREE.Group; canopy: THREE.Mesh; chute: boolean; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number }[] = []
+  // y/vy drive the (recycling) VISUAL diver; raceY/raceSpd/finishedAhead are a
+  // separate, non-recycling model used only for the race standings so passing a
+  // rival is permanent and the placement can't flap when a visual diver loops.
+  private ai: { g: THREE.Group; canopy: THREE.Mesh; chute: boolean; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number; raceY: number; raceSpd: number; finishedAhead: boolean }[] = []
   // Decorative air traffic (rockets + shuttles) cruising the sky as you fall.
   private traffic: { v: VehicleModel; cx: number; cz: number; r: number; ang: number; spd: number; y: number; vy: number; spin: number }[] = []
   // Floating destination portals you can steer into mid-dive.
@@ -283,7 +286,7 @@ export class DropIn {
       g.position.set(cx, y, cz)
       if (!chute) g.rotation.x = 1.2 // head-down tuck
       this.group.add(g)
-      this.ai.push({ g, canopy, chute, cx, cz, r: 5 + Math.random() * 16, ang: Math.random() * 6.28, spd: 0.15 + Math.random() * 0.35, y, vy: chute ? 10 + Math.random() * 8 : 42 + Math.random() * 30 })
+      this.ai.push({ g, canopy, chute, cx, cz, r: 5 + Math.random() * 16, ang: Math.random() * 6.28, spd: 0.15 + Math.random() * 0.35, y, vy: chute ? 10 + Math.random() * 8 : 42 + Math.random() * 30, raceY: START_Y - Math.random() * 120, raceSpd: 32 + Math.random() * 40, finishedAhead: false })
     }
 
     const NF = 130
@@ -834,6 +837,12 @@ export class DropIn {
     for (const a of this.ai) {
       a.ang += a.spd * dt
       a.y -= a.vy * dt
+      // Race model: descend once and lock at the ground (never recycles), so a
+      // rival that lands stays "ahead" and the standings can't flap.
+      if (!a.finishedAhead) {
+        a.raceY -= a.raceSpd * dt
+        if (a.raceY <= this.target.y) { a.raceY = this.target.y; a.finishedAhead = true }
+      }
       // Loop back to the top when they reach the deck so the sky stays populated.
       if (a.y < floor) { a.y = this.target.y + 560 + Math.random() * 160; a.vy = a.chute ? 10 + Math.random() * 8 : 42 + Math.random() * 30 }
       a.g.position.set(a.cx + Math.cos(a.ang) * a.r, a.y, a.cz + Math.sin(a.ang) * a.r)
@@ -890,9 +899,14 @@ export class DropIn {
   /** The three opening set-pieces: punch through the cloud decks, a sonic boom at
    *  terminal velocity, and the live rival-race placement. */
   private updateSkyFx(dt: number) {
-    // Cloud punch-through: trigger as the diver crosses each deck.
+    // Cloud punch-through: trigger as the diver crosses each deck downward, and
+    // re-arm if you jetpack back up above it so a second descent punches again.
     for (const c of this.clouds) {
-      if (c.punched || this.pos.y >= c.y) continue
+      if (c.punched) {
+        if (this.pos.y > c.y + 25) c.punched = false // climbed back above: re-arm
+        continue
+      }
+      if (this.pos.y >= c.y) continue
       c.punched = true
       this.vapor.position.copy(this.pos)
       this.vapor.visible = true
@@ -934,11 +948,13 @@ export class DropIn {
       if (this.boomT >= 1) this.boomRing.visible = false
     }
 
-    // Rival race: place = 1 + the rivals currently below you (closer to ground).
-    // You start above everyone (last) and climb the standings as you dive past them.
-    let below = 0
-    for (const a of this.ai) if (a.y < this.pos.y) below++
-    this.racePlace = 1 + below
+    // Rival race: a rival is "ahead" if it already reached the ground or its race
+    // altitude is still below you. You start near the top with everyone and climb
+    // the standings by diving past them; passing is permanent (uses raceY, not the
+    // recycling visual y).
+    let ahead = 0
+    for (const a of this.ai) if (a.finishedAhead || a.raceY < this.pos.y) ahead++
+    this.racePlace = 1 + ahead
     this.raceTotal = this.ai.length + 1
     this.hud.place = `${this.racePlace}/${this.raceTotal}`
   }
@@ -972,14 +988,14 @@ export class DropIn {
       // Under canopy: sit ABOVE and behind the diver and aim down the glide path,
       // so the ground you're steering toward fills most of the frame while the
       // open chute + diver stay framed in the upper third. Pulled in close so the
-      // robot reads big.
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -6.5).add(new THREE.Vector3(0, 3.6, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7).add(new THREE.Vector3(0, -2.6, 0))
+      // robot reads big. (Y offsets folded in to avoid per-frame Vector3 allocs.)
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -6.5); want.y += 3.6
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7); lookWant.y -= 2.6
     } else {
       // Dive: chase tight from just above-behind so the robot (and its board) fill
       // the frame and the city rushes up beneath.
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -3.0).add(new THREE.Vector3(0, 1.7, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 5).add(new THREE.Vector3(0, -3.6, 0))
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -3.0); want.y += 1.7
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 5); lookWant.y -= 3.6
     }
     // The dive falls FAST (up to ~88 m/s), so a slow lerp leaves the camera
     // lagging tens of metres behind and the robot reads tiny. Follow tightly while
