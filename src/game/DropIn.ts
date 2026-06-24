@@ -296,16 +296,17 @@ export class DropIn {
     // Two pads per destination, spread wide on a ring around the descent at big
     // staggered altitudes - so they're easy to spot, you commit to one (they're
     // not clustered), and there's always a backup of each. The jetpack lets you
-    // climb to the high ones. [dest, angle, ring radius, altitude]
+    // climb to the high ones. Pulled closer to the descent line + higher up so you
+    // pass right by them. [dest, angle, ring radius, altitude]
     const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number]> = [
-      ['moon', 0.5, 170, 240],
-      ['mars', 1.2, 260, 220],
-      ['city', 2.0, 200, 380],
-      ['arcade', 2.9, 290, 320],
-      ['moon', 3.7, 240, 560],
-      ['mars', 4.4, 180, 480],
-      ['city', 5.1, 290, 640],
-      ['arcade', 5.9, 210, 420],
+      ['moon', 0.4, 130, 320],
+      ['mars', 1.2, 200, 280],
+      ['city', 2.0, 150, 470],
+      ['arcade', 2.9, 230, 380],
+      ['moon', 3.7, 180, 660],
+      ['mars', 4.4, 140, 560],
+      ['city', 5.1, 240, 770],
+      ['arcade', 5.9, 160, 500],
     ]
     for (const [dest, ang, rad, alt] of defs) {
       const col = C[dest]
@@ -315,28 +316,28 @@ export class DropIn {
       const group = new THREE.Group()
       group.position.set(x, y, z)
       // Huge landing disk.
-      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(22, 23, 1.2, 40)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.6, roughness: 0.5, metalness: 0.4 })))
+      const disk = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(30, 31, 1.4, 44)), this.own(new THREE.MeshStandardMaterial({ color: 0x0a0d16, emissive: col, emissiveIntensity: 1.8, roughness: 0.5, metalness: 0.4 })))
       group.add(disk)
-      const rim = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(22, 0.9, 8, 48)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      const rim = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(30, 1.3, 8, 52)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
       rim.rotation.x = Math.PI / 2
       group.add(rim)
       // Big upright portal ring you fly through.
-      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(16, 1.6, 16, 48)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
-      ring.position.y = 15
+      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(24, 2.2, 16, 52)), this.own(new THREE.MeshBasicMaterial({ color: col, fog: false })))
+      ring.position.y = 20
       group.add(ring)
-      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(15, 40)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.3, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-      disc.position.y = 15
+      const disc = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(23, 44)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.32, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      disc.position.y = 20
       group.add(disc)
-      // A tall pillar of light spearing UP into the sky from the pad (and a bit
+      // A fat pillar of light spearing UP into the sky from the pad (and a bit
       // below it), so each platform reads as a beam coming down from the sky and
       // is unmistakable from anywhere in the dive.
-      const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(4.5, 4.5, 900, 14, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
-      beam.position.y = 420 // mostly above the pad, reaching into the sky
+      const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(7, 7, 1100, 16, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      beam.position.y = 520 // mostly above the pad, reaching into the sky
       group.add(beam)
       // Big floating label above the ring.
       const sprite = this.labelSprite(labels[dest], col)
-      sprite.position.set(0, 28, 0)
-      sprite.scale.set(30, 11, 1)
+      sprite.position.set(0, 40, 0)
+      sprite.scale.set(44, 16, 1)
       group.add(sprite)
       this.group.add(group)
       this.platforms.push({ group, ring, x, y, z, bx: x, by: y, bz: z, ph: ang * 1.7, dest })
@@ -686,14 +687,16 @@ export class DropIn {
       t.v.group.rotation.y = -t.ang + Math.PI / 2
       t.v.update(dt, 0.4)
     }
-    // Float the portal platforms: a slow drift orbit + vertical bob, each on its
-    // own phase. The live x/y/z (used by the fly-through test) track the motion.
+    // Float the portal platforms: a wide, clearly-visible drift orbit + vertical
+    // bob + slow spin, each on its own phase. The live x/y/z (used by the
+    // fly-through test) track the motion so the bigger pads stay catchable.
     const pt = this.totalT
     for (const p of this.platforms) {
       p.ring.rotation.z += dt * 0.8
-      p.x = p.bx + Math.cos(pt * 0.28 + p.ph) * 12
-      p.y = p.by + Math.sin(pt * 0.5 + p.ph) * 9
-      p.z = p.bz + Math.sin(pt * 0.23 + p.ph) * 12
+      p.group.rotation.y += dt * 0.25
+      p.x = p.bx + Math.cos(pt * 0.32 + p.ph) * 34
+      p.y = p.by + Math.sin(pt * 0.55 + p.ph) * 22
+      p.z = p.bz + Math.sin(pt * 0.27 + p.ph) * 34
       p.group.position.set(p.x, p.y, p.z)
     }
   }
@@ -701,8 +704,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 30) continue
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 22) {
+      if (Math.abs(this.pos.y - p.y) > 36) continue
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 28) {
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true
