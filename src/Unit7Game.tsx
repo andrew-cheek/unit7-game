@@ -458,11 +458,6 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
           onPointerCancel={onUp}
         />
       )}
-      <div style={dropTitle}>
-        <span style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</span>
-        <span style={{ fontSize: 9, letterSpacing: '0.3em', color: 'rgba(223,238,255,0.55)', marginLeft: 8 }}>HIGH-ALTITUDE DROP</span>
-      </div>
-
       <div style={dropReadout}>
         <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
         <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · {phase}</div>
@@ -476,24 +471,28 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
         </div>
       )}
 
-      {drop.phase === 'dive' && (
-        <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CHUTE ◉</button>
-      )}
-      {drop.phase === 'canopy' && (
-        <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CUT CHUTE ✂</button>
-      )}
-      {drop.canTrick && drop.phase === 'dive' && (
-        <button style={trickBtn} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onTrick() }}>FLIP</button>
-      )}
-      {touch && drop.phase === 'dive' && (
-        <button
-          style={jetBtn}
-          onPointerDown={(e) => { e.preventDefault(); onJet(true) }}
-          onPointerUp={() => onJet(false)}
-          onPointerCancel={() => onJet(false)}
-          onPointerLeave={() => onJet(false)}
-        >JET ▲</button>
-      )}
+      {/* One centered flex row so the action buttons can never overlap (they wrap
+          on tiny screens instead). Gaps between them fall through to the steer pad. */}
+      <div style={dropBtnBar}>
+        {drop.canTrick && drop.phase === 'dive' && (
+          <button style={{ ...dropActionBtn, color: '#ffd24a', borderColor: '#ff2bd0' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onTrick() }}>FLIP</button>
+        )}
+        {touch && drop.phase === 'dive' && (
+          <button
+            style={{ ...dropActionBtn, color: '#27e7ff', borderColor: '#27e7ff', touchAction: 'none' }}
+            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onJet(true) }}
+            onPointerUp={() => onJet(false)}
+            onPointerCancel={() => onJet(false)}
+            onPointerLeave={() => onJet(false)}
+          >JET ▲</button>
+        )}
+        {drop.phase === 'dive' && (
+          <button style={{ ...dropActionBtn, opacity: armed ? 1 : 0.5, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CHUTE ◉</button>
+        )}
+        {drop.phase === 'canopy' && (
+          <button style={{ ...dropActionBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CUT CHUTE ✂</button>
+        )}
+      </div>
     </>
   )
 }
@@ -551,19 +550,6 @@ const introTitle: CSSProperties = {
   letterSpacing: '0.16em',
   pointerEvents: 'none',
 }
-// Small top-left label during the playable drop (the big bottom-left title used
-// to sit right under the FLIP button and overlap it).
-const dropTitle: CSSProperties = {
-  position: 'absolute',
-  left: 'max(14px, env(safe-area-inset-left))',
-  top: 'max(12px, env(safe-area-inset-top))',
-  zIndex: 15,
-  display: 'flex',
-  alignItems: 'baseline',
-  font: '800 18px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.14em',
-  pointerEvents: 'none',
-}
 const dropReadout: CSSProperties = {
   position: 'absolute',
   top: 18,
@@ -574,50 +560,33 @@ const dropReadout: CSSProperties = {
   pointerEvents: 'none',
   fontFamily: 'ui-monospace, Menlo, monospace',
 }
-const deployBtn: CSSProperties = {
+// One centered bottom bar holding all drop actions. Flexbox lays them out with
+// gaps and wraps on narrow screens, so the buttons can never overlap each other
+// or anything else. The bar itself ignores pointers; the buttons capture them and
+// the gaps fall through to the steer pad behind.
+const dropBtnBar: CSSProperties = {
   position: 'absolute',
-  left: '50%',
-  bottom: 30,
-  transform: 'translateX(-50%)',
+  left: 0,
+  right: 0,
+  bottom: 'max(20px, env(safe-area-inset-bottom))',
   zIndex: 16,
-  pointerEvents: 'auto',
-  cursor: 'pointer',
-  padding: '14px 30px',
-  font: '800 16px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.16em',
-  background: 'rgba(8,12,24,0.7)',
-  border: '2px solid #9dff5a',
-  borderRadius: 999,
+  display: 'flex',
+  flexWrap: 'wrap',
+  justifyContent: 'center',
+  alignItems: 'center',
+  gap: 12,
+  padding: '0 14px',
+  pointerEvents: 'none',
 }
-const trickBtn: CSSProperties = {
-  position: 'absolute',
-  left: 24,
-  bottom: 30,
-  zIndex: 16,
+const dropActionBtn: CSSProperties = {
   pointerEvents: 'auto',
   cursor: 'pointer',
-  padding: '13px 22px',
-  font: '800 14px/1 ui-monospace, Menlo, monospace',
+  padding: '13px 26px',
+  font: '800 15px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.14em',
-  color: '#ffd24a',
-  background: 'rgba(8,12,24,0.7)',
-  border: '2px solid #ff2bd0',
-  borderRadius: 999,
-}
-const jetBtn: CSSProperties = {
-  position: 'absolute',
-  right: 24,
-  bottom: 30,
-  zIndex: 16,
-  pointerEvents: 'auto',
-  cursor: 'pointer',
-  touchAction: 'none',
-  padding: '16px 28px',
-  font: '800 16px/1 ui-monospace, Menlo, monospace',
-  letterSpacing: '0.16em',
-  color: '#27e7ff',
-  background: 'rgba(8,12,24,0.7)',
-  border: '2px solid #27e7ff',
+  whiteSpace: 'nowrap',
+  background: 'rgba(8,12,24,0.72)',
+  border: '2px solid',
   borderRadius: 999,
 }
 const skipBtn: CSSProperties = {
