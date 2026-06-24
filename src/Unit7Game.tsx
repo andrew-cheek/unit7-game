@@ -476,13 +476,13 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
       )}
 
       {drop.phase === 'dive' && (
-        <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onClick={onDeploy}>DEPLOY ◉</button>
+        <button style={{ ...deployBtn, opacity: armed ? 1 : 0.45, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>DEPLOY ◉</button>
       )}
       {drop.phase === 'canopy' && (
-        <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onClick={onDeploy}>CUT CHUTE ✂</button>
+        <button style={{ ...deployBtn, borderColor: '#ff8a1e', color: '#ff8a1e' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CUT CHUTE ✂</button>
       )}
       {drop.canTrick && drop.phase === 'dive' && (
-        <button style={trickBtn} onClick={onTrick}>FLIP</button>
+        <button style={trickBtn} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onTrick() }}>FLIP</button>
       )}
       {touch && drop.phase === 'dive' && (
         <button

@@ -81,7 +81,9 @@ export class DropIn {
   private totalT = 0 // total opening time, for a safety timeout (never soft-lock)
 
   // Destination beacon + optional target orbs.
-  private orbs: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; pos: THREE.Vector3; hit: boolean }[] = []
+  private orbs: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; pos: THREE.Vector3; hit: boolean; popT: number }[] = []
+  private orbCombo = 0 // consecutive boost-rings grabbed (resets if you miss a stretch)
+  private orbComboT = 0 // time since the last grab (resets the combo)
   // Crash + repair.
   private crashT = 0
   private fragGeo!: THREE.BoxGeometry
@@ -191,21 +193,28 @@ export class DropIn {
     ring.position.set(this.target.x, this.target.y + 0.6, this.target.z)
     this.group.add(ring)
 
-    // Optional target orbs spaced down the approach line at varying offsets +
-    // heights, so there are "things to aim for" without forcing a slalom.
-    const orbMatBase = { transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending as THREE.Blending, depthWrite: false, fog: false }
-    const orbGeo = this.ownG(new THREE.SphereGeometry(3.2, 16, 12))
-    const orbColors = [0x27e7ff, 0xff2bd0, 0xffd24a]
-    for (let i = 0; i < 3; i++) {
-      const f = (i + 1) / 4
-      const y = THREE.MathUtils.lerp(START_Y - 60, this.target.y + 120, f)
-      const x = THREE.MathUtils.lerp(this.start.x, this.target.x, f) + (i % 2 === 0 ? 26 : -26)
+    // Boost-ring ribbon: a long snaking line of glowing rings down the descent
+    // that you weave left/right to thread. Grabbing them chains a combo (paid out
+    // as a bonus on landing) and gives the long dive a constant "collect + steer"
+    // goal. They sit on the central approach so going for a side portal is the
+    // trade-off (rings vs a chosen destination).
+    const orbMatBase = { transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending as THREE.Blending, depthWrite: false, fog: false }
+    const orbGeo = this.ownG(new THREE.TorusGeometry(4.2, 0.7, 10, 28))
+    const orbColors = [0x27e7ff, 0xff2bd0, 0xffd24a, 0x9dff5a]
+    const N_ORB = 16
+    for (let i = 0; i < N_ORB; i++) {
+      const f = (i + 0.5) / N_ORB
+      const y = THREE.MathUtils.lerp(START_Y - 40, this.target.y + 90, f)
+      // Snake side-to-side so threading them is an active weave, not a straight line.
+      const sway = Math.sin(f * Math.PI * 3.5) * 34
+      const x = THREE.MathUtils.lerp(this.start.x, this.target.x, f) + sway
       const z = THREE.MathUtils.lerp(this.start.z, this.target.z, f)
-      const mat = this.own(new THREE.MeshBasicMaterial({ color: orbColors[i], ...orbMatBase }))
+      const mat = this.own(new THREE.MeshBasicMaterial({ color: orbColors[i % orbColors.length], ...orbMatBase }))
       const mesh = new THREE.Mesh(orbGeo, mat)
       mesh.position.set(x, y, z)
+      mesh.rotation.x = Math.PI / 2 // lie flat-ish so you drop through it
       this.group.add(mesh)
-      this.orbs.push({ mesh, mat, pos: new THREE.Vector3(x, y, z), hit: false })
+      this.orbs.push({ mesh, mat, pos: new THREE.Vector3(x, y, z), hit: false, popT: 0 })
     }
 
     // Crash fragments + repair beam (built once, used only on a crash).
@@ -536,7 +545,7 @@ export class DropIn {
         this.vy += (term - this.vy) * Math.min(1, dt * 1.5)
       }
 
-      this.checkOrbs()
+      this.checkOrbs(dt)
 
       if (this.pendingDeploy) {
         this.pendingDeploy = false // consume the arm so a later CUT isn't re-popped
@@ -605,17 +614,36 @@ export class DropIn {
   }
 
   /** Optional target orbs: clipping one pops it, plays a chime, banks a bonus. */
-  private checkOrbs() {
+  private checkOrbs(dt: number) {
+    // The combo decays if you go a while without grabbing a ring.
+    this.orbComboT += dt
+    if (this.orbComboT > 2.2) this.orbCombo = 0
     for (const o of this.orbs) {
-      if (o.hit) continue
-      o.mesh.rotation.y += 0.02
-      if (Math.abs(this.pos.y - o.pos.y) < 6) {
+      if (o.hit) {
+        // Collect pop: flash bigger + fade, then hide.
+        if (o.popT < 1) {
+          o.popT = Math.min(1, o.popT + dt * 4)
+          o.mesh.scale.setScalar(1 + o.popT * 1.8)
+          o.mat.opacity = 0.95 * (1 - o.popT)
+          if (o.popT >= 1) o.mesh.visible = false
+        }
+        continue
+      }
+      o.mesh.rotation.z += dt * 1.6
+      if (Math.abs(this.pos.y - o.pos.y) < 7) {
         const d = Math.hypot(this.pos.x - o.pos.x, this.pos.z - o.pos.z)
-        if (d < 6) {
+        if (d < 7) {
           o.hit = true
-          o.mesh.visible = false
           this.bonusTargets++
+          this.orbCombo++
+          this.orbComboT = 0
           this.onSfx?.('ring')
+          // Show the running boost-ring combo (transient) unless a more important
+          // result (canopy/portal) is already on screen.
+          if (!this.hud.result || this.hud.result.startsWith('BOOST')) {
+            this.hud.result = `BOOST x${this.orbCombo}`
+            this.resultT = 0
+          }
         }
       }
     }
@@ -818,8 +846,8 @@ export class DropIn {
     } else {
       // Dive: chase tight from just above-behind so the robot (and its board) fill
       // the frame and the city rushes up beneath.
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -3.6).add(new THREE.Vector3(0, 2.0, 0))
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 5).add(new THREE.Vector3(0, -4, 0))
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -3.0).add(new THREE.Vector3(0, 1.7, 0))
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 5).add(new THREE.Vector3(0, -3.6, 0))
     }
     if (snap) this.cam.position.copy(want)
     else this.cam.position.lerp(want, 0.09)
