@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { memo, useState, type CSSProperties } from 'react'
 import type { BlipKind, HudState, PlayerProfile } from '../game/types'
 import { ACHIEVEMENTS } from '../game/progression'
 
@@ -488,16 +488,21 @@ function CosmeticsStore({
   )
 }
 
-function Logo() {
+// The HUD parent re-runs ~20x/sec (a fresh hud snapshot each push). These leaves
+// take primitive props, so wrapping them in memo means an unchanged value (e.g.
+// SCORE between captures) skips its re-render entirely — shallow compare is exact
+// for primitives. Cuts the per-frame reconciliation of the always-mounted stat
+// readouts, which matters most on the mobile tier.
+const Logo = memo(function Logo() {
   return (
     <div style={{ font: '800 15px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.22em', marginBottom: 8 }}>
       <span style={{ color: NEON.cyan, textShadow: `0 0 12px ${NEON.cyan}` }}>UNIT</span>
       <span style={{ color: NEON.magenta, textShadow: `0 0 12px ${NEON.magenta}` }}> 7</span>
     </div>
   )
-}
+})
 
-function Bar({ label, value, color }: { label: string; value: number; color: string }) {
+const Bar = memo(function Bar({ label, value, color }: { label: string; value: number; color: string }) {
   const v = Math.max(0, Math.min(1, value))
   return (
     <div style={{ marginBottom: 6, width: 160 }}>
@@ -516,16 +521,16 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
       </div>
     </div>
   )
-}
+})
 
-function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+const Stat = memo(function Stat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div style={{ textAlign: 'right', minWidth: 54 }}>
       <div style={{ ...microLabel, color: NEON.dim }}>{label}</div>
       <div style={{ font: '700 14px/1.1 ui-monospace, Menlo, monospace', color }}>{value}</div>
     </div>
   )
-}
+})
 
 function Radar({ hud }: { hud: HudState }) {
   const R = 52

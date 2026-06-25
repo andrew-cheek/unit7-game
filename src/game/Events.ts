@@ -369,7 +369,6 @@ export class Events {
 
   private updateBuses(dt: number) {
     for (const b of this.buses) {
-      b.model.update(dt, 1)
       if (b.state === 'boarding') {
         b.timer -= dt
         if (b.timer <= 0) {
@@ -403,10 +402,17 @@ export class Events {
           b.yaw = dampAngle(b.yaw, Math.atan2(dx, dz), 5, dt)
         }
       }
+      // Distance-cull the per-frame ground raycast + wheel animation: the bus
+      // state machine (movement, commuter drop-off) keeps running so the city
+      // stays alive, but the expensive work is skipped when it's off-screen.
+      const far = this.farFromPlayer(b.pos.x, b.pos.z)
+      b.model.group.visible = !far
+      if (far) continue
       const gy = this.physics.sampleGround(b.pos.x, b.pos.z, b.pos.y + 6)?.y ?? 0
       b.pos.y = gy
       b.model.group.position.copy(b.pos)
       b.model.group.rotation.y = b.yaw
+      b.model.update(dt, 1)
     }
   }
 
@@ -456,7 +462,6 @@ export class Events {
 
   private updatePolice(dt: number) {
     for (const p of this.police) {
-      p.model.update(dt, 1) // strobes the light bar
       const tgt = p.waypoints[p.wp]
       const dx = tgt.x - p.pos.x
       const dz = tgt.z - p.pos.z
@@ -468,10 +473,15 @@ export class Events {
         p.pos.z += (dz / d) * p.speed * dt
         p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
       }
+      // Skip the per-frame ground raycast + light-bar strobe when off-screen.
+      const far = this.farFromPlayer(p.pos.x, p.pos.z)
+      p.model.group.visible = !far
+      if (far) continue
       const gy = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? 0
       p.pos.y = gy + 1.0
       p.model.group.position.copy(p.pos)
       p.model.group.rotation.y = p.yaw
+      p.model.update(dt, 1) // strobes the light bar
     }
   }
 
