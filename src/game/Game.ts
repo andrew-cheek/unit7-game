@@ -4,7 +4,7 @@ import { World } from './World'
 import { Input } from './Input'
 import { Player } from './Player'
 import { Physics } from './Physics'
-import { Vehicles, isMech, type Vehicle } from './Vehicles'
+import { Vehicles, isMech, isWalker, type Vehicle } from './Vehicles'
 import { type VehicleModel } from './procedural'
 import { WARP_FORMS, createWarpForm, isWarpForm, hoverOffset, type WarpFormModel } from './WarpForms'
 import { Missiles } from './Missiles'
@@ -1113,13 +1113,19 @@ export class Game {
    */
   private fireMissiles() {
     const v = this.vehicles.current
-    if (!v || !isMech(v.kind)) return
+    if (!v || !isWalker(v.kind)) return // mechs + the free-to-pilot titans
     if (this.missileCooldown > 0) return
     this.missileCooldown = 0.45
     const size = v.size
     this.scratchFwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
     const rx = Math.cos(v.yaw), rz = -Math.sin(v.yaw) // camera-right on the ground
     const muzzleY = v.position.y + 4.0 * size
+    // Lob the arc with where you're looking: tilt the camera up to throw missiles
+    // long onto a far cluster, level/down to fire flat at something close. Uses the
+    // camera's world-forward Y (same "aim" the grapple reads), so it's sign-correct
+    // without touching the pitch rig. fire() normalizes dir, so Y only sets angle.
+    this.engine.camera.getWorldDirection(this.grappleD)
+    const lobY = clamp(0.12 + this.grappleD.y * 0.9, -0.3, 1.0)
     // fire() copies origin + clones dir, so reusing these scratch vectors is safe.
     for (const sx of [-1.3, 1.3]) {
       this.grappleO.set(
@@ -1127,7 +1133,7 @@ export class Game {
         muzzleY,
         v.position.z + rz * sx * size + this.scratchFwd.z * 1.2 * size,
       )
-      this.grappleD.set(this.scratchFwd.x, 0.12, this.scratchFwd.z) // slight upward lob
+      this.grappleD.set(this.scratchFwd.x, lobY, this.scratchFwd.z)
       this.missiles.fire(this.grappleO, this.grappleD, 80, 2.8)
     }
     this.hud.banner = 'MISSILES AWAY'
@@ -1744,9 +1750,9 @@ export class Game {
           trackEvent('ability_used', { ability: 'morph' })
         }
       }
-      // In a mech, CAPTURE / FIRE launches missiles.
+      // In a mech or titan, CAPTURE / FIRE launches missiles.
       if (this.input.consumeEdge('net')) {
-        if (this.vehicles.current && isMech(this.vehicles.current.kind)) this.fireMissiles()
+        if (this.vehicles.current && isWalker(this.vehicles.current.kind)) this.fireMissiles()
       }
     }
 
@@ -2093,7 +2099,7 @@ export class Game {
       prompt = isMech(cur.kind)
         ? `${cur.name} - Space/J fly, H fire, T transform, G exit`
         : cur.kind === 'titan'
-        ? `${cur.name} - WASD walk, Space/J rise, G exit`
+        ? `${cur.name} - WASD walk, Space/J rise, H fire, G exit`
         : cur.kind === 'tram'
         ? 'RIDING TRAM - G to hop off'
         : `Press G - Exit ${this.vehicles.currentName}`

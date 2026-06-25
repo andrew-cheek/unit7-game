@@ -42,7 +42,7 @@ const OFFWORLD_MECH_OFFSET: Record<string, THREE.Vector3> = {
 export const isMech = (k: VehicleKind) => k === 'mechM' || k === 'mechL' || k === 'mechXL'
 // Walkers stand on the ground, board from a wide radius and drive like mechs.
 // Titans are walkers but free to pilot (no unlock) and roam on their own.
-const isWalker = (k: VehicleKind) => isMech(k) || k === 'titan'
+export const isWalker = (k: VehicleKind) => isMech(k) || k === 'titan'
 
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
 const UP = new THREE.Vector3(0, 1, 0)
