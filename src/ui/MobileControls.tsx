@@ -255,7 +255,9 @@ const cluster: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'flex-end',
-  gap: 10,
+  // Generous separation between the secondary cluster, CHUTE and the big JUMP so
+  // reaching for one can't clip another (the main fat-finger complaint).
+  gap: 16,
   pointerEvents: 'none',
 }
 const helperPill: CSSProperties = {
@@ -272,10 +274,11 @@ const secWrap: CSSProperties = {
   display: 'flex',
   flexDirection: 'row',
   flexWrap: 'wrap',
-  // Capped width = three 44px buttons + gaps, right-aligned, so the cluster wraps
-  // into a tidy grid (max ~2 rows) instead of one long row that runs off-screen.
-  width: 148,
-  gap: 8,
+  // Capped width = three 48px buttons + 12px gaps, right-aligned, so the cluster
+  // wraps into a tidy grid instead of one long row that runs off-screen. The wider
+  // gap keeps adjacent toys from being mis-hit.
+  width: 168,
+  gap: 12,
   justifyContent: 'flex-end',
   alignContent: 'flex-end',
   pointerEvents: 'none',
@@ -283,7 +286,7 @@ const secWrap: CSSProperties = {
 const secBtn: CSSProperties = {
   pointerEvents: 'auto',
   touchAction: 'none',
-  width: 44, height: 44, borderRadius: '50%',
+  width: 48, height: 48, borderRadius: '50%',
   border: '2px solid',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   font: '700 8px/1 ui-monospace, Menlo, monospace',
