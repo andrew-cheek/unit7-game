@@ -438,8 +438,10 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
     const d = dragRef.current
     if (!d || e.pointerId !== d.id) return
     // Normalize a small drag into a full steer vector; +y forward is up-drag.
-    const x = clampN((e.clientX - d.x) / 90)
-    const y = clampN((d.y - e.clientY) / 90)
+    // The vertical dive axis maxes out sooner than lateral steer so a normal thumb
+    // flick up reaches a FULL nose-dive (lateral stays a touch less twitchy).
+    const x = clampN((e.clientX - d.x) / 85)
+    const y = clampN((d.y - e.clientY) / 58)
     onSteer(x, y)
   }
   const onUp = () => { dragRef.current = null; onSteer(0, 0) }
@@ -580,22 +582,20 @@ const dropReadout: CSSProperties = {
   pointerEvents: 'none',
   fontFamily: 'ui-monospace, Menlo, monospace',
 }
-// One centered bottom bar holding all drop actions. Flexbox lays them out with
-// gaps and wraps on narrow screens, so the buttons can never overlap each other
-// or anything else. The bar itself ignores pointers; the buttons capture them and
-// the gaps fall through to the steer pad behind.
+// Drop actions live in a spaced vertical column pinned to the BOTTOM-RIGHT, clear
+// of the central up/down lane the dive is steered in - so dragging up to nose-dive
+// can't fat-finger JET/CHUTE (and hitting JET no longer cancels the dive). The
+// column itself ignores pointers; the buttons capture them, gaps fall through to
+// the steer pad behind.
 const dropBtnBar: CSSProperties = {
   position: 'absolute',
-  left: 0,
-  right: 0,
+  right: 'max(16px, env(safe-area-inset-right))',
   bottom: 'max(20px, env(safe-area-inset-bottom))',
   zIndex: 16,
   display: 'flex',
-  flexWrap: 'wrap',
-  justifyContent: 'center',
-  alignItems: 'center',
-  gap: 12,
-  padding: '0 14px',
+  flexDirection: 'column',
+  alignItems: 'flex-end',
+  gap: 18,
   pointerEvents: 'none',
 }
 const dropActionBtn: CSSProperties = {

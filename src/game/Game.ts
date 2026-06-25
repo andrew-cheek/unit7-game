@@ -1010,20 +1010,24 @@ export class Game {
   }
 
   /** Grapple arm: a press fires a tendril along your current aim (camera
-   *  forward); it extends until it hits a building, then reels you in. Pressing
-   *  again re-aims/re-fires; releasing lets go (Player keeps your momentum). */
+   *  forward); it extends until it hits a building, then reels you in. Holding the
+   *  button re-fires the instant the previous grapple ends, so you can chain
+   *  swings immediately; releasing lets go (Player keeps your momentum). */
   private updateGrapple() {
     const held = this.input.held.grapple
-    if (held && !this.grapplePrev) {
+    const edge = held && !this.grapplePrev
+    // Fire on the press edge AND re-fire the moment a previous grapple ends while
+    // still held, so a hold (or rapid taps) chains swings and you can grapple again
+    // immediately - independent of whatever movement/steering you're doing.
+    if (held && !this.player.grappling) {
       const cam = this.engine.camera
       cam.getWorldDirection(this.grappleD) // aim = where you're looking
       // Raycast the aim against buildings (with forward-cone auto-aim) so the
       // grapple grabs what you're looking at instead of firing into open air.
       const top = this.physics.grappleTarget(cam.position, this.grappleD, config.grapple.range, this.grappleO)
-      if (top !== null) this.player.fireGrapple(this.grappleO, top)
-      else this.player.fireGrappleMiss(this.grappleD)
-      this.audio.play('ui')
-      trackEvent('ability_used', { ability: 'grapple' })
+      if (top !== null) { this.player.fireGrapple(this.grappleO, top); this.audio.play('ui') }
+      else { this.player.fireGrappleMiss(this.grappleD); if (edge) this.audio.play('ui') } // don't spam the miss chime
+      if (edge) trackEvent('ability_used', { ability: 'grapple' })
     } else if (!held && this.player.grappling) {
       this.player.endGrapple()
     }
