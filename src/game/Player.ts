@@ -81,6 +81,9 @@ export class Player {
   private morphT = 0
   private chuteT = 0
   private airTime = 0
+  // Counts down after a hop is tapped a hair too early (airborne, past coyote);
+  // the hop fires on the next grounded step while it's still > 0.
+  private jumpBufferT = 0
   private canopy: THREE.Group
   private canopyMat: THREE.MeshStandardMaterial
 
@@ -710,7 +713,19 @@ export class Player {
     } else {
       // Held already released this frame, but a latched tap still owes one hop.
       if (jetEdge && canHop && this.velocity.y <= 0.1) this.velocity.y = config.player.jumpSpeed
+      // ...or the tap arrived a few frames too early (airborne, past coyote):
+      // buffer it so it fires on touchdown instead of being silently eaten.
+      else if (jetEdge && !canHop) this.jumpBufferT = config.player.jumpBuffer
       this.model.setThrust(0)
+    }
+    // Drain a buffered hop the instant we're back on the ground (on foot, not
+    // flying), so a slightly-early jump press still pops you off the landing.
+    if (this.jumpBufferT > 0) {
+      this.jumpBufferT = Math.max(0, this.jumpBufferT - dt)
+      if (!jetting && this.grounded && this.velocity.y <= 0.1) {
+        this.velocity.y = config.player.jumpSpeed
+        this.jumpBufferT = 0
+      }
     }
     this.fuel = config.jetpack.fuelMax
     this.prevJet = input.held.jet

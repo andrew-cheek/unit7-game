@@ -68,6 +68,8 @@ export const config = {
     fallGravityMult: 1.6,
     // Forgiveness window: can still hop just after leaving the ground.
     coyoteTime: 0.12,
+    // Forgiveness window: a hop tapped just BEFORE landing still fires on touchdown.
+    jumpBuffer: 0.12,
     // Snap onto ground when within this distance below the feet (steps/ramps).
     stepDown: 0.6,
     turnLerp: 16,

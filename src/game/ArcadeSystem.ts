@@ -82,6 +82,16 @@ export class ArcadeSystem {
 
   private advance(dt: number, ctx: ArcadeContext) {
     const e = this.pending!
+    // Step off the pad during the beat to abort (forgives a brushed-past trigger).
+    // A wider radius than the 2.0 start so jitter won't cancel, but walking away does.
+    const dx = ctx.playerPos.x - e.pos.x
+    const dz = ctx.playerPos.z - e.pos.z
+    if (dx * dx + dz * dz > 3.5 * 3.5) {
+      this.beam.visible = false
+      this.beamMat.opacity = 0
+      this.pending = null
+      return
+    }
     e.t += dt
     const k = Math.min(1, e.t / BEAT)
     this.beamMat.opacity = Math.sin(k * Math.PI) * 0.7 // fade in then out
