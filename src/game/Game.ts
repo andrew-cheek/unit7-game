@@ -178,6 +178,7 @@ export class Game {
   private credits = 0
   private unlocked = new Set<string>()
   private scratchFwd = new THREE.Vector3()
+  private camFwd = new THREE.Vector3() // scratch: camera world direction for behind-camera culling
   // Grapple-arm: previous held state (for the fire edge) + reusable scratch
   // vectors (also borrowed by fireMissiles; they never run in the same frame).
   private grapplePrev = false
@@ -1950,7 +1951,7 @@ export class Game {
       },
     })
 
-    if (onEarth) this.npcs.update(dt, this.player.position)
+    if (onEarth) this.npcs.update(dt, this.player.position, this.engine.camera.position, this.engine.camera.getWorldDirection(this.camFwd))
     if (onEarth) this.updateHeat(dt)
     if (onEarth) this.events.update(dt, this.player.position, this.heat)
     if (onEarth) this.patrols.update(dt)

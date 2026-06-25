@@ -246,7 +246,7 @@ export class NPCManager {
     a.model.update(dt, 0, true)
   }
 
-  update(dt: number, playerPos?: THREE.Vector3) {
+  update(dt: number, playerPos?: THREE.Vector3, camPos?: THREE.Vector3, camFwd?: THREE.Vector3) {
     if (!this.visible) return
     const speed = config.npc.walkSpeed
     const sepR = config.npc.separationRadius
@@ -365,8 +365,17 @@ export class NPCManager {
       }
       a.model.group.position.copy(a.pos)
       // Agents reaching here are within the cull radius (far ones took the cheap
-      // path above), so they are always visible + animated.
+      // path above), so they stay visible (Three.js frustum-culls the draw).
       a.model.group.visible = true
+      // Behind-camera animation cull: an agent clearly behind the camera isn't
+      // rendered, so skip its (costly) per-frame limb animation. The threshold is
+      // conservative (~>100 deg off the view axis) so nothing near the screen edge
+      // ever freezes; the pose resumes the instant it swings back into view.
+      if (camPos && camFwd) {
+        const vx = a.pos.x - camPos.x, vy = a.pos.y - camPos.y, vz = a.pos.z - camPos.z
+        const vd = Math.hypot(vx, vy, vz)
+        if (vd > 6 && (vx * camFwd.x + vy * camFwd.y + vz * camFwd.z) / vd < -0.2) continue
+      }
       a.model.update(dt, sp / maxSp, true)
     }
   }
