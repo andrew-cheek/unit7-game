@@ -553,7 +553,7 @@ export class Game {
     const di = this.dropIn
     const crashed = di?.crashed ?? false
     const q = di?.chuteQuality ?? 0
-    const orbBonus = (di?.bonusTargets ?? 0) * 30
+    const orbBonus = (di?.bonusTargets ?? 0) * 30 + (di?.perfects ?? 0) * 20 // dead-centre threads pay extra
     const trickBonus = Math.min(di?.tricks ?? 0, 8) * 15 // flips + fireworks flair
     // Rival race: credit for every skydiver you finished ahead of.
     const placeBonus = di ? Math.max(0, di.raceTotal - di.racePlace) * 25 : 0
@@ -1669,7 +1669,7 @@ export class Game {
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
       const d = this.dropIn.hud
-      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place }
+      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return

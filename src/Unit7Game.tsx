@@ -462,6 +462,26 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
         <div style={{ fontSize: 30, fontWeight: 800, color: '#9dff5a', textShadow: '0 0 16px #9dff5a' }}>{drop.alt}m</div>
         <div style={{ fontSize: 13, letterSpacing: '0.2em', color: '#27e7ff', marginTop: 4 }}>{drop.speed} m/s · {phase}</div>
         {drop.place && <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.2em', color: '#ffd24a', textShadow: '0 0 12px #ffd24a', marginTop: 4 }}>PLACE {drop.place}</div>}
+        {/* Sonic-boom charge: fills as you hold the deepest nose-dive toward
+            terminal velocity, snapping to a white "ready" when the boom pops. */}
+        {drop.phase === 'dive' && drop.boomCharge > 0.02 && (
+          <div style={{ width: 150, margin: '6px auto 0' }}>
+            <div style={{ fontSize: 10, letterSpacing: '0.24em', color: drop.boomCharge >= 1 ? '#eaf6ff' : '#27e7ff', marginBottom: 3 }}>{drop.boomCharge >= 1 ? 'SONIC BOOM' : 'SONIC CHARGE'}</div>
+            <div style={{ width: '100%', height: 5, borderRadius: 3, background: 'rgba(39,231,255,0.18)', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.round(drop.boomCharge * 100)}%`, height: '100%', borderRadius: 3, background: drop.boomCharge >= 1 ? '#eaf6ff' : '#27e7ff', boxShadow: `0 0 10px ${drop.boomCharge >= 1 ? '#eaf6ff' : '#27e7ff'}`, transition: 'width 0.05s linear' }} />
+            </div>
+          </div>
+        )}
+        {/* Running boost-ring chain + a decay bar that warns (amber -> red) as the
+            2.2s grab window runs out, so the chain is legible and chaseable. */}
+        {drop.phase === 'dive' && drop.combo >= 2 && (
+          <div style={{ width: 150, margin: '8px auto 0' }}>
+            <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '0.12em', color: '#ff2bd0', textShadow: '0 0 12px #ff2bd0' }}>CHAIN ×{drop.combo}</div>
+            <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.12)', overflow: 'hidden', marginTop: 3 }}>
+              <div style={{ width: `${Math.round(drop.comboFade * 100)}%`, height: '100%', borderRadius: 2, background: drop.comboFade > 0.4 ? '#ffd24a' : '#ff4d6d', transition: 'width 0.08s linear' }} />
+            </div>
+          </div>
+        )}
         {drop.hint && <div style={{ fontSize: 12, letterSpacing: '0.24em', color: 'rgba(223,238,255,0.75)', marginTop: 6 }}>{drop.hint}</div>}
       </div>
 
