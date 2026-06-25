@@ -14,6 +14,9 @@ export interface DropHud {
   canTrick: boolean // flips + fireworks available (drives the TRICK button)
   result: string | null
   place: string | null // live race placement vs the rival skydivers, e.g. "3/10"
+  boomCharge: number // 0..1 sonic-boom charge while held at terminal velocity (0 when not charging)
+  combo: number // running boost-ring chain count (0 = no active chain)
+  comboFade: number // 0..1 how much of the 2.2s chain window remains (drives a decay bar)
 }
 
 // You start very high and fall the whole way down, steering the dive (tuck to
@@ -43,6 +46,8 @@ export class DropIn {
   chuteQuality = 0
   /** Optional target orbs threaded on the way down (small bonus). */
   bonusTargets = 0
+  /** Boost-rings threaded dead-centre (a precision bonus on top of bonusTargets). */
+  perfects = 0
   /** True if you hit the ground without a chute (crash + repair). */
   crashed = false
   /** Set when you fly through one of the floating destination portals on the way
@@ -51,7 +56,7 @@ export class DropIn {
   chosenDest: 'arcade' | 'mars' | 'moon' | 'city' | null = null
   /** Where you ended up - the handoff places the player here. */
   readonly landingPos = new THREE.Vector3()
-  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null }
+  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null, boomCharge: 0, combo: 0, comboFade: 0 }
   /** Flips + fireworks pulled on the way down (small style bonus). */
   tricks = 0
 
@@ -114,7 +119,9 @@ export class DropIn {
   private geos: THREE.BufferGeometry[] = []
 
   // Cloud decks you punch through on the way down (a staged reveal of the city).
-  private clouds: { mesh: THREE.Object3D; y: number; punched: boolean }[] = []
+  // depth 0..1 = how far down the deck sits (1 = lowest, the city-reveal punch).
+  private clouds: { mesh: THREE.Object3D; y: number; punched: boolean; depth: number }[] = []
+  private streakBurst = 0 // seconds of forced speed-line intensity after a deep cloud punch
   private cloudTex?: THREE.Texture
   private vapor!: THREE.Mesh // pooled punch-through burst
   private vaporMat!: THREE.MeshBasicMaterial
@@ -128,6 +135,7 @@ export class DropIn {
   // Rival race: live placement vs the other skydivers, paid out on landing.
   racePlace = 1
   raceTotal = 1
+  private prevPlace = 0 // last frame's placement, to fire juice the moment you climb
   private camShake = 0
 
   private camPos = new THREE.Vector3()
@@ -332,7 +340,9 @@ export class DropIn {
     const puffMat = this.own(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.32, depthWrite: false, fog: false }))
     // Three thin decks between the start and the city.
     const bands = [0.74, 0.52, 0.3]
-    for (const b of bands) {
+    for (let bi = 0; bi < bands.length; bi++) {
+      const b = bands[bi]
+      const depth = bands.length > 1 ? bi / (bands.length - 1) : 0 // 0 highest -> 1 lowest
       const y = THREE.MathUtils.lerp(this.target.y + 120, START_Y - 80, b)
       const deck = new THREE.Group()
       // A ring of puffs around the descent corridor (leaving the centre clearer),
@@ -349,7 +359,7 @@ export class DropIn {
       }
       deck.position.set(this.target.x, y, this.target.z)
       this.group.add(deck)
-      this.clouds.push({ mesh: deck, y, punched: false })
+      this.clouds.push({ mesh: deck, y, punched: false, depth })
     }
   }
 
@@ -637,6 +647,12 @@ export class DropIn {
     this.hud.hint = this.phase === 'canopy' ? 'STEER TO A PORTAL OR THE BEACON'
       : this.phase === 'land' ? 'TOUCHDOWN'
       : 'STEER · SPACE = JETPACK · DEPLOY ANYTIME'
+    // Sonic-boom charge bar (only while diving toward terminal velocity); the
+    // running ring chain + how much of its 2.2s window remains. All derived from
+    // values the sim already tracks - no extra per-frame work.
+    this.hud.boomCharge = this.phase === 'dive' ? (this.boomed ? 1 : clamp(this.boomCharge / 0.5, 0, 1)) : 0
+    this.hud.combo = this.phase === 'dive' ? this.orbCombo : 0
+    this.hud.comboFade = clamp(1 - this.orbComboT / 2.2, 0, 1)
     if (this.hud.result) { this.resultT += dt; if (this.resultT > 2.2) this.hud.result = null }
 
     if (this.phase === 'land' && alt <= 0.6) {
@@ -671,11 +687,16 @@ export class DropIn {
           this.orbCombo++
           this.orbComboT = 0
           this.onSfx?.('ring')
-          // Show the running boost-ring combo (transient) unless a more important
-          // result (canopy/portal) is already on screen.
-          if (!this.hud.result || this.hud.result.startsWith('BOOST')) {
-            this.hud.result = `BOOST x${this.orbCombo}`
-            this.resultT = 0
+          // Dead-centre threading is a "perfect": banks an extra precision bonus
+          // (paid out in finishDrop) and flashes PERFECT. The running chain count
+          // itself lives in the persistent combo chip (hud.combo), so a normal
+          // grab no longer churns the shared result line.
+          if (d < 2.5) {
+            this.perfects++
+            if (!this.hud.result || this.hud.result.startsWith('PERFECT') || this.hud.result.startsWith('BOOST')) {
+              this.hud.result = `PERFECT x${this.orbCombo}`
+              this.resultT = 0
+            }
           }
         }
       }
@@ -867,7 +888,10 @@ export class DropIn {
       this.vapor.position.copy(this.pos)
       this.vapor.visible = true
       this.vaporT = 0
-      this.kick(1.1)
+      // Deeper decks hit harder: the lowest punch (depth 1) is the city reveal,
+      // so it kicks the camera more and fires a brief speed-line burst.
+      this.kick(1.1 + c.depth * 1.4)
+      this.streakBurst = Math.max(this.streakBurst, 0.3 + c.depth * 0.25)
       this.onSfx?.('land')
     }
     if (this.vaporT < 1) {
@@ -890,7 +914,9 @@ export class DropIn {
         this.boomT = 0
         this.kick(1.7)
         this.onSfx?.('deploy')
-        if (!this.hud.result || this.hud.result.startsWith('BOOST')) { this.hud.result = 'SONIC BOOM'; this.resultT = 0 }
+        // A sonic boom is a marquee beat: let it override the lesser transient
+        // labels (combo / overtake) but never a PORTAL lock-in.
+        if (!this.hud.result || !this.hud.result.startsWith('PORTAL')) { this.hud.result = 'SONIC BOOM'; this.resultT = 0 }
       }
     } else if (this.vy > -70) {
       this.boomed = false
@@ -913,14 +939,26 @@ export class DropIn {
     this.racePlace = 1 + ahead
     this.raceTotal = this.ai.length + 1
     this.hud.place = `${this.racePlace}/${this.raceTotal}`
+    // Climbing the standings is felt per-overtake: a camera kick + a transient
+    // label, gated so it never stomps a SONIC BOOM / PORTAL result on screen.
+    if (this.phase === 'dive' && this.prevPlace > 0 && this.racePlace < this.prevPlace) {
+      this.kick(0.5)
+      if (!this.hud.result || this.hud.result.startsWith('BOOST') || this.hud.result.startsWith('PERFECT')) {
+        this.hud.result = this.racePlace === 1 ? 'TOOK THE LEAD' : 'PASSED RIVAL'
+        this.resultT = 0
+      }
+    }
+    this.prevPlace = this.racePlace
   }
 
   private updateStreaks(dt: number, fast: boolean) {
+    if (this.streakBurst > 0) this.streakBurst = Math.max(0, this.streakBurst - dt)
+    const burst = this.streakBurst > 0
     const m = this.streaks.material as THREE.PointsMaterial
-    m.opacity = THREE.MathUtils.damp(m.opacity, fast ? 0.85 : 0.3, 5, dt)
+    m.opacity = THREE.MathUtils.damp(m.opacity, burst ? 1 : fast ? 0.85 : 0.3, burst ? 12 : 5, dt)
     this.streaks.position.copy(this.pos)
     const fp = (this.streaks.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array
-    const rise = fast ? 54 : 20
+    const rise = burst ? 86 : fast ? 54 : 20
     for (let i = 0; i < this.streakVel.length; i++) {
       const j = i * 3 + 1
       fp[j] += (this.streakVel[i] + rise) * dt
