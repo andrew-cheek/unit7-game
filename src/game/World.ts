@@ -220,6 +220,10 @@ export class World {
   private embers?: THREE.Points
   private emberGeo?: THREE.BufferGeometry
   private shafts: THREE.Mesh[] = []
+  // Soft additive light pools on the road under the neon hotspots — fakes the
+  // colored spill a real neon city throws onto wet asphalt (emissive materials
+  // don't light their surroundings in Three.js). Faded out by day in update().
+  private glowPools: THREE.Mesh[] = []
   private dishes: THREE.Group[] = []
   private adPanels: THREE.MeshStandardMaterial[] = []
   private zone: Zone = 'earth'
@@ -1669,6 +1673,42 @@ export class World {
         this.shafts.push(shaft)
       }
     }
+
+    // Neon light pools on the road (all tiers): a soft radial additive disc under
+    // each hotspot so the signs above read as casting colored light on the wet
+    // street. One shared radial texture + plane geo; per-pool tinted material.
+    const glowTex = this.makeRadialTexture()
+    this.ownedTex.push(glowTex)
+    const poolGeo = this.ownG(new THREE.PlaneGeometry(34, 34))
+    const pools: Array<[number, number, number]> = [
+      [0, 0, config.palette.cyan], [34, 8, config.palette.magenta],
+      [-34, -20, config.palette.purple], [44, -60, config.palette.orange],
+    ]
+    for (const [x, z, c] of pools) {
+      const mat = this.own(new THREE.MeshBasicMaterial({ map: glowTex, color: c, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }))
+      const pool = new THREE.Mesh(poolGeo, mat)
+      pool.rotation.x = -Math.PI / 2 // lie flat on the road
+      pool.position.set(x, 0.08, z) // just above the asphalt to avoid z-fighting
+      this.group.add(pool)
+      this.glowPools.push(pool)
+    }
+  }
+
+  /** A 128px soft radial gradient (white core -> transparent edge) for additive
+   *  glow sprites/pools. Owned/disposed via ownedTex by the caller. */
+  private makeRadialTexture(): THREE.CanvasTexture {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const g = c.getContext('2d')!
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64)
+    grad.addColorStop(0, 'rgba(255,255,255,1)')
+    grad.addColorStop(0.45, 'rgba(255,255,255,0.4)')
+    grad.addColorStop(1, 'rgba(255,255,255,0)')
+    g.fillStyle = grad
+    g.fillRect(0, 0, 128, 128)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   private buildLights() {
@@ -1901,6 +1941,11 @@ export class World {
     }
     for (let i = 0; i < this.shafts.length; i++) {
       ;(this.shafts[i].material as THREE.MeshBasicMaterial).opacity = 0.06 + Math.sin(this.time * 1.5 + i) * 0.03
+    }
+    // Neon ground pools: bright at night, faded out by day, with a gentle breathe.
+    const night = 1 - this.dayFactor
+    for (let i = 0; i < this.glowPools.length; i++) {
+      ;(this.glowPools[i].material as THREE.MeshBasicMaterial).opacity = 0.5 * night * (0.85 + Math.sin(this.time * 1.2 + i * 1.7) * 0.15)
     }
     for (const d of this.dishes) d.rotation.y += dt * 0.5
 
