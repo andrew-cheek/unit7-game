@@ -2122,6 +2122,18 @@ export class Game {
         } else {
           prompt = `Press G - ${near.name}`
         }
+      } else if (this.zone === 'earth' && !this.arcade.busy) {
+        // Walking up to a cabinet pad: name the game and say how to start, so you
+        // step on deliberately instead of being surprised by the transport beam.
+        let bestKind: MinigameKind | null = null
+        let bestD = 5 * 5 // prompt radius (the beam itself triggers at 2.0)
+        for (const p of this.arcadePortals) {
+          const dx = p.pos.x - this.player.position.x
+          const dz = p.pos.z - this.player.position.z
+          const d = dx * dx + dz * dz
+          if (d < bestD) { bestD = d; bestKind = p.kind }
+        }
+        if (bestKind) prompt = `STEP ON PAD - ${bestKind.toUpperCase()}`
       }
     }
 
