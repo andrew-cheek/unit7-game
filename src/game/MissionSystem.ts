@@ -82,18 +82,31 @@ export class MissionSystem {
     }
 
     let label: string | null
+    let rewardOf: (typeof list)[number] | undefined // the mission the label refers to
     if (done) {
       this.idx++
       ctx.onComplete(m.title, m.xp ?? 40, m.credits ?? 0)
       const nextM = list[this.idx]
       if (nextM?.type === 'capture') this.captureBase = ctx.captured
       label = nextM?.title ?? 'Free roam: explore the world!'
+      rewardOf = nextM
     } else if (m.type === 'capture') {
       // Live progress on the only objective with no beacon/distance feedback.
       const got = Math.min(m.count ?? 1, ctx.captured - this.captureBase)
       label = `${m.title} · ${got}/${m.count ?? 1}`
+      rewardOf = m
     } else {
       label = m.title
+      rewardOf = m
+    }
+
+    // Surface the payout you're working toward - config sets escalating XP/credits
+    // the HUD otherwise never shows, turning the objective line into a visible carrot.
+    if (label && rewardOf) {
+      const parts: string[] = []
+      if (rewardOf.xp) parts.push(`+${rewardOf.xp} XP`)
+      if (rewardOf.credits) parts.push(`+${rewardOf.credits} CR`)
+      if (parts.length) label = `${label} · ${parts.join(' ')}`
     }
 
     // Guided beacon: a glowing column on the current goal + a distance readout.

@@ -108,19 +108,20 @@ export class NPCManager {
       const arche = hash01(i * 4.2)
       if (arche < 0.16) {
         // Brute: big, slow, high value, does not flee (a lumbering target).
-        model = createAlien({ big: true, color: 0x6a3ba8, eye: accent })
+        // Fixed gold eye so the 200-pt target reads at a glance (not the random accent).
+        model = createAlien({ big: true, color: 0x6a3ba8, eye: 0xffd24a })
         value = 200
         speedMul = 0.55
         flee = false
       } else if (arche < 0.46) {
         // Skitterer: small, fast, erratic (darts to new targets often), worth more.
-        model = createAlien({ big: false, color: 0x3ba86a, eye: accent })
+        model = createAlien({ big: false, color: 0x3ba86a, eye: 0xff2bd0 }) // magenta eye = 130-pt
         value = 130
         speedMul = 1.85
         retargetR = 7
       } else {
         // Drone: common baseline.
-        model = createAlien({ big: false, color: 0xa83b6a, eye: accent })
+        model = createAlien({ big: false, color: 0xa83b6a, eye: 0x27e7ff }) // cyan eye = 90-pt common
         value = 90
       }
     } else if (roll < config.city.smallAlienRatio + config.city.robotRatio) {
