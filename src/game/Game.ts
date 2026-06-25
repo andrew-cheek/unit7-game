@@ -36,7 +36,7 @@ import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
 import { DawnShow } from './DawnShow'
 import { RobotFactory } from './RobotFactory'
-import { RaceActivity, type RaceHud } from './RaceActivity'
+import { RaceActivity, type RaceHud, type RaceCourse } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp, damp, lerp, vibrate } from './utils'
@@ -60,6 +60,32 @@ const NET_SEGMENTS = 22
 // Mech unlock costs (credits). mechM is free so the "pilot a mech" objective is
 // always reachable; the bigger mechs are earned by capturing aliens.
 const MECH_COST: Record<string, number> = { mechM: 0, mechL: 400, mechXL: 1200 }
+
+// Time-trial courses, one per zone. Earth reproduces the original city circuit
+// exactly (gate, ring path, cyan accent, 150/+150c, 120xp). The off-world courses
+// give the Moon/Mars zones a repeatable scored loop over their low-gravity
+// terrain — bigger hop/launch lines, a small travel premium on the reward, and
+// their own persisted best time. Ring coords are XZ; rings sit 5m above whatever
+// terrain is under them, so the same path works on any zone's displaced ground.
+const RACE_COURSES: RaceCourse[] = [
+  {
+    zone: 'earth', gate: [64, 8], accent: 0x27e7ff, storageKey: 'race',
+    circuit: [[64, -60], [10, -104], [-70, -84], [-104, -10], [-78, 70], [-8, 104], [78, 84], [104, 16]],
+    baseCredits: 150, bestBonus: 150, xp: 120,
+  },
+  {
+    // Moon: long low-gravity hops on foot / jetpack. Cyan gates pop on the gray dust.
+    zone: 'moon', gate: [0, 12], accent: 0x27e7ff, storageKey: 'race-moon',
+    circuit: [[60, -50], [20, -110], [-60, -90], [-110, -20], [-80, 70], [0, 110], [80, 80], [100, 10]],
+    baseCredits: 180, bestBonus: 180, xp: 150,
+  },
+  {
+    // Mars: a rover circuit that banks the dune launches; lime gates pop on the rust.
+    zone: 'mars', gate: [0, 14], accent: 0x9bff4d, storageKey: 'race-mars',
+    circuit: [[70, -40], [30, -100], [-50, -100], [-100, -40], [-90, 50], [-10, 100], [70, 90], [110, 20]],
+    baseCredits: 180, bestBonus: 180, xp: 150,
+  },
+]
 
 // Hero fill-light color the night-blue eases toward at full day, so the follow
 // light reads as warm sun-bounce at noon instead of an unmotivated blue pool.
@@ -200,7 +226,7 @@ export class Game {
   private playground!: Playground
   private dawnShow!: DawnShow
   private robotFactory!: RobotFactory
-  private race!: RaceActivity
+  private races: RaceActivity[] = []
   private raceHud: RaceHud = { state: 'idle', cp: 0, total: 0, time: 0, best: 0, countdown: 0, result: 0, near: false }
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private currentDistrict = '' // last district name shown (toasts on crossing)
@@ -354,15 +380,23 @@ export class Game {
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
     this.dawnShow = new DawnShow(this.engine.scene, this.physics)
     this.robotFactory = new RobotFactory(this.engine.scene, this.physics)
-    this.race = new RaceActivity(this.engine.scene, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
-    this.race.onSfx = (k) => this.audio.play(k === 'cp' ? 'ui' : 'objective')
-    this.race.onFinish = (credits, xp, isBest) => {
-      this.addCredits(credits)
-      this.awardXp(xp)
-      this.hud.banner = `RACE ${this.raceHud.result.toFixed(1)}s${isBest ? '  NEW BEST!' : ''}  +${credits}c`
-      this.bannerTimer = 3.2
-      vibrate(50)
+    const raceGround = (x: number, z: number) => this.physics.sampleGround(x, z, 80)?.y ?? 0
+    for (const course of RACE_COURSES) {
+      const race = new RaceActivity(this.engine.scene, raceGround, course)
+      race.onSfx = (k) => this.audio.play(k === 'cp' ? 'ui' : 'objective')
+      race.onFinish = (credits, xp, isBest) => {
+        this.addCredits(credits)
+        this.awardXp(xp)
+        this.hud.banner = `RACE ${this.raceHud.result.toFixed(1)}s${isBest ? '  NEW BEST!' : ''}  +${credits}c`
+        this.bannerTimer = 3.2
+        vibrate(50)
+      }
+      this.races.push(race)
     }
+    // Earth surfaces are the live physics surface during construction (any
+    // off-world initialZone travels later), so build the Earth course now; the
+    // off-world courses build on first travel, when their terrain is live.
+    this.races.forEach((r) => r.setActive('earth'))
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind), () => this.onBusted())
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
@@ -891,7 +925,6 @@ export class Game {
     this.playground.setActive(zone)
     this.dawnShow.setActive(zone)
     this.robotFactory.setActive(zone === 'earth')
-    this.race.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -901,6 +934,9 @@ export class Game {
     const solids = zone === 'earth' ? this.world.solidMeshes : env!.solidMeshes
     this.physics.setSurfaces(ground, colliders)
     this.camera.setSolids(solids)
+    // Activate the matching course only after the zone's terrain is the live
+    // physics surface, so its rings build/sample on the right ground.
+    this.races.forEach((r) => r.setActive(zone))
     // Mechs follow you off-world (pilot your giant robot on Mars/Moon); the cars
     // stay parked on Earth. Missiles can fire in any zone.
     this.vehicles.setZone(zone, spawn)
@@ -1942,7 +1978,10 @@ export class Game {
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
     if (onEarth) this.robotFactory.update(dt)
-    if (onEarth) this.raceHud = this.race.update(dt, this.player.position.x, this.player.position.z)
+    // Run the time-trial for whatever zone the player is in (Earth city circuit or
+    // the off-world courses). Only the active-zone course is visible/built.
+    const activeRace = this.races.find((r) => r.zone === this.zone)
+    if (activeRace) this.raceHud = activeRace.update(dt, this.player.position.x, this.player.position.z)
     this.updateBubbleShots(dt)
 
     // District crossing toast: a brief label as you pass between themed sectors,
@@ -2269,7 +2308,7 @@ export class Game {
     this.playground.dispose()
     this.dawnShow.dispose()
     this.robotFactory.dispose()
-    this.race.dispose()
+    this.races.forEach((r) => r.dispose())
     for (const s of this.bubbleShots) this.engine.scene.remove(s.mesh)
     this.bubbleShots = []
     this.bubbleShotGeo.dispose()
