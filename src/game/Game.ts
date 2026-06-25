@@ -138,6 +138,13 @@ export class Game {
   private netLine: THREE.Line
   private netTimer = 0
   private missileCooldown = 0
+  // Police-heat / wanted state (Earth only). `heat` is a continuous 0..max star
+  // value; `heatCalm` counts seconds since the last crime (drives cool-down);
+  // `bustImmunity` is a grace window after a bust so you can't be re-busted in
+  // the same breath.
+  private heat = 0
+  private heatCalm = 0
+  private bustImmunity = 0
   private invasionTriggered = false
   private playClock = 0 // seconds of active gameplay (lets the peaceful morning play before the invasion)
   private profile: Profile = loadProfile()
@@ -356,7 +363,7 @@ export class Game {
       this.bannerTimer = 3.2
       vibrate(50)
     }
-    this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
+    this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind), () => this.onBusted())
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
@@ -474,6 +481,7 @@ export class Game {
       progress: this.buildProgressHud(),
       warp: { charge01: 0, ready: false, active: null, menu: false },
       race: { ...this.raceHud },
+      heat: { stars: 0, max: config.heat.max, wanted: false },
       drop: null,
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
@@ -903,6 +911,9 @@ export class Game {
     this.sky.setVisible(zone !== 'moon') // ships fly over Earth and Mars
 
     this.zone = zone
+    // Leaving the city clears any wanted level (no police off-world).
+    this.heat = 0
+    this.heatCalm = 0
     this.player.exitVehicle(new THREE.Vector3(spawn.x, spawn.y, spawn.z))
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
@@ -1133,6 +1144,50 @@ export class Game {
     this.hud.banner = 'MISSILES AWAY'
     this.bannerTimer = 0.8
     this.audio.play('fire')
+    this.addHeat(config.heat.perMissile) // discharging ordnance in the city draws the law
+  }
+
+  /** Per-frame wanted-level bookkeeping (Earth only): tick the bust-immunity
+   *  window, accrue heat for reckless high-speed driving, then bleed heat off once
+   *  the player has laid low for `decayDelay`. The pursuit AI + bust detection
+   *  itself lives in Events.updatePolice, reading the level passed to events.update. */
+  private updateHeat(dt: number) {
+    if (this.bustImmunity > 0) this.bustImmunity = Math.max(0, this.bustImmunity - dt)
+    const v = this.vehicles.current
+    const reckless = !!v && (v.kind === 'hovercar' || v.kind === 'speeder') && this.vehicles.currentSpeed > config.heat.recklessSpeed
+    if (reckless) this.addHeat(config.heat.recklessPerSec * dt)
+    this.heatCalm += dt
+    if (this.heatCalm > config.heat.decayDelay && this.heat > 0) {
+      this.heat = Math.max(0, this.heat - config.heat.decayPerSec * dt)
+    }
+  }
+
+  /** Raise the wanted level and reset the cool-down clock. Earth-only crimes call
+   *  this; it's clamped to the star cap. */
+  private addHeat(n: number) {
+    if (this.zone !== 'earth') return
+    this.heat = Math.min(config.heat.max, this.heat + n)
+    this.heatCalm = 0
+  }
+
+  /** Police caught you: a credit fine + a jolt of feedback, then the heat clears.
+   *  Deliberately not a game-over — stakes without a hard fail (matches the
+   *  sandbox's no-death ethos). A short immunity window prevents instant re-bust. */
+  private onBusted() {
+    if (this.bustImmunity > 0) return
+    const fine = Math.min(this.credits, config.heat.bustCredits)
+    if (fine > 0) this.addCredits(-fine)
+    this.heat = 0
+    this.heatCalm = 0
+    this.bustImmunity = config.heat.bustImmunity
+    this.scoreMul = 1 // a bust breaks any running score multiplier
+    this.hud.banner = fine > 0 ? `BUSTED · -${fine}c` : 'BUSTED'
+    this.bannerTimer = 1.6
+    this.engine.triggerHitstop(0.12)
+    this.camera.shake(0.6)
+    this.audio.play('soak')
+    vibrate(120)
+    trackEvent('player_busted', { fine })
   }
 
   private addCredits(n: number) {
@@ -1860,7 +1915,8 @@ export class Game {
     })
 
     if (onEarth) this.npcs.update(dt, this.player.position)
-    if (onEarth) this.events.update(dt, this.player.position)
+    if (onEarth) this.updateHeat(dt)
+    if (onEarth) this.events.update(dt, this.player.position, this.heat)
     if (onEarth) this.patrols.update(dt)
     this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
@@ -2161,6 +2217,11 @@ export class Game {
     this.hud.shards = this.collectibles.counts()
     this.hud.combo = this.traversal.combo()
     this.hud.captureChain = this.captureCombo.hud()
+    // Wanted level: ceil so the first crime lights a star immediately. Off-world
+    // there are no police, so it always reads clear.
+    const heatOn = this.zone === 'earth'
+    this.hud.heat.stars = heatOn ? Math.min(config.heat.max, Math.ceil(this.heat)) : 0
+    this.hud.heat.wanted = heatOn && this.heat >= config.heat.pursueAt
     // Debug-only perf overlay: live draw calls + GPU memory (spot leaks on switch).
     if (this.debug) {
       const m = this.engine.memoryInfo()

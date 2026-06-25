@@ -97,6 +97,7 @@ export function HUD({
           </div>
         )}
         {hud.shield && <div style={{ ...chip, color: NEON.purple, borderColor: NEON.purple }}>SHIELD</div>}
+        <WantedChip stars={hud.heat.stars} max={hud.heat.max} wanted={hud.heat.wanted} />
         <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />
         {statsOpen && (
           <>
@@ -386,6 +387,31 @@ const DAILY_LABEL: Record<string, (t: number) => string> = {
   play: (t) => `Play ${t} arcade games`,
   duelWins: (t) => `Win ${t} duels`,
 }
+
+// Wanted-level chip: filled stars for the current heat, pulsing magenta while
+// police are actively chasing, steady orange while heat is just building. Hidden
+// at zero. Primitive props -> memo skips it except when the level actually moves.
+const WantedChip = memo(function WantedChip({ stars, max, wanted }: { stars: number; max: number; wanted: boolean }) {
+  if (stars <= 0) return null
+  const color = wanted ? NEON.magenta : NEON.orange
+  return (
+    <div
+      style={{
+        ...chip,
+        marginTop: 4,
+        color,
+        borderColor: color,
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        animation: wanted ? 'unit7pulse 0.7s ease-in-out infinite' : undefined,
+      }}
+    >
+      <span>{wanted ? 'WANTED' : 'HEAT'}</span>
+      <span style={{ letterSpacing: 1 }}>{'★'.repeat(Math.min(max, stars))}</span>
+    </div>
+  )
+})
 
 function WarpChip({ w, touch, onTap }: { w: HudState['warp']; touch: boolean; onTap?: () => void }) {
   const pct = Math.round(w.charge01 * 100)

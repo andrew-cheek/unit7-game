@@ -143,6 +143,26 @@ export const config = {
     cooldown: 0.8,
   },
 
+  // Police "heat" / wanted system (Earth only). Reckless acts raise heat; at
+  // `pursueAt` stars the nearest cruisers break patrol and chase. Sustained
+  // contact busts you (a credit fine + a shake, never a game-over), then heat
+  // clears. Heat cools on its own once you stop committing crimes. All values
+  // are first-pass and want playtest tuning on a real device.
+  heat: {
+    max: 5, // star cap
+    decayPerSec: 0.4, // stars bled off per second once you've laid low
+    decayDelay: 4, // seconds of no crime before heat starts cooling
+    perMissile: 0.5, // heat per mech missile fired in the city
+    recklessSpeed: 30, // ground-vehicle speed (m/s) that reads as reckless
+    recklessPerSec: 0.7, // heat gained per second while speeding
+    pursueAt: 1, // stars at which police start chasing
+    pursuitSpeedMul: 1.7, // cruiser speed multiplier while chasing
+    catchRange: 6.5, // metres; a chasing cruiser this close is "on" you
+    catchTime: 2.2, // seconds of sustained contact before a bust
+    bustCredits: 120, // credits lost on a bust
+    bustImmunity: 5, // seconds after a bust before you can be busted again
+  },
+
   camera: {
     fov: 62,
     distance: 7.2, // close enough that the robot reads big (Roblox-ish framing)
