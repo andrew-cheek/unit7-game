@@ -572,12 +572,9 @@ export class DropIn {
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
         const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * this.pitch
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
-        // Keep holding all the way up at a full straight-down dive and you tumble
-        // into a loop (re-triggers while held, so you keep flipping around).
-        if (this.pitch > 0.93 && this.input.moveY > 0.55 && this.flipT <= 0) {
-          this.flipT = DropIn.FLIP_DUR
-          this.tricks++
-        }
+        // A full straight-down nose-dive holds steady - flips are deliberate only
+        // (FLIP button / H), so pushing all the way forward plunges cleanly at
+        // terminal velocity instead of tumbling into an involuntary loop.
       }
 
       this.checkOrbs(dt)
