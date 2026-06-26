@@ -78,6 +78,7 @@ export class DropIn {
   private pitch = 0.5
 
   private phase: DropHud['phase'] = 'dive'
+  private lastAlt = START_Y // height above ground, cached so the camera clamp can skip its raycast up high
   private quality = 0
   private pendingDeploy = false
   private wantCut = false // cut the canopy back to free-fall
@@ -530,6 +531,7 @@ export class DropIn {
 
     const ground = this.getGround(this.pos.x, this.pos.z)
     const alt = this.pos.y - ground
+    this.lastAlt = alt
 
     const chute = this.input.consumeEdge('chute')
     if (chute) {
@@ -655,6 +657,7 @@ export class DropIn {
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
     this.rb.setSteer?.(this.input.moveX, this.input.moveY)
+    this.rb.setWings(diving ? 1 : 0) // wingsuit: wings spread through the freefall, fold under canopy
     this.rb.setThrust(this.phase === 'dive' && this.input.held.jet ? 1 : 0) // jetpack flame
     this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
@@ -1038,10 +1041,13 @@ export class DropIn {
     }
     // Ground/roof clearance: the drop camera has no other collision, so on the
     // steep look-down near touchdown its above-behind spot can sink into terrain,
-    // decks or rooftops. getGround samples the solids below, so keep the camera a
-    // little above whatever is under it - stops it punching through walls/ground.
-    const camFloor = this.getGround(want.x, want.z) + 2.5
-    if (want.y < camFloor) want.y = camFloor
+    // decks or rooftops. Only sample the ground when actually low - up high the
+    // camera is nowhere near the ground, and a raycast every sim step (it allocates)
+    // is what made the long descent hiccup on desktop.
+    if (this.lastAlt < 140) {
+      const camFloor = this.getGround(want.x, want.z) + 2.5
+      if (want.y < camFloor) want.y = camFloor
+    }
     // The dive falls FAST (up to ~88 m/s), so a slow lerp leaves the camera
     // lagging tens of metres behind and the robot reads tiny. Follow tightly while
     // diving; the slower canopy phase can ease more gently.
