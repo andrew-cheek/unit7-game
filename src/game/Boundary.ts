@@ -46,12 +46,15 @@ export class Boundary {
 
     // Shared assets across all blobs (one material/geometry set, scaled per blob).
     const bodyMat = own(new THREE.MeshStandardMaterial({
-      color: 0x0a2113, emissive: 0x57ff9c, emissiveIntensity: 0.9,
-      roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.9,
+      color: 0x0a2113, emissive: 0x57ff9c, emissiveIntensity: 1.7,
+      roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.92,
     }))
+    // Additive halo so the rim of blobs reads as a glowing wall from across the map.
+    const glowMat = own(new THREE.MeshBasicMaterial({ color: 0x6effae, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     const eyeMat = own(new THREE.MeshBasicMaterial({ color: 0xeafff2, fog: false }))
     const pupilMat = own(new THREE.MeshBasicMaterial({ color: 0x05140b, fog: false }))
     const bodyGeo = ownG(new THREE.IcosahedronGeometry(1, 2)) // blobby unit sphere
+    const glowGeo = ownG(new THREE.IcosahedronGeometry(1, 1))
     const eyeGeo = ownG(new THREE.SphereGeometry(1, 10, 8))
     const pupilGeo = ownG(new THREE.SphereGeometry(1, 8, 6))
 
@@ -59,7 +62,7 @@ export class Boundary {
       const a = (i / opts.count) * Math.PI * 2
       const x = Math.cos(a) * opts.radius
       const z = Math.sin(a) * opts.radius
-      const size = 9 + (i % 3) * 2.5 // a little variety along the ring
+      const size = 14 + (i % 3) * 4 // bigger so they read as a barrier, with variety
 
       const g = new THREE.Group()
       g.rotation.y = Math.atan2(-x, -z) // face the city centre (local +z points inward)
@@ -67,6 +70,9 @@ export class Boundary {
       const body = new THREE.Mesh(bodyGeo, bodyMat)
       body.scale.setScalar(size)
       g.add(body)
+      const glow = new THREE.Mesh(glowGeo, glowMat)
+      glow.scale.setScalar(size * 1.5)
+      g.add(glow)
 
       if (opts.eyes) {
         for (const sx of [-1, 1]) {

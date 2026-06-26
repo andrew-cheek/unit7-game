@@ -101,7 +101,10 @@ export class GuideBot {
     this.t += dt
 
     const dToBot = Math.hypot(playerX - this.px, playerZ - this.pz)
-    if (this.phase === 'idle' && dToBot < 7) this.phase = 'leading'
+    // Only start leading once the player actually walks UP to the greeter (you land
+    // ~7m away, so a smaller radius keeps it waving/greeting first instead of
+    // marching off the instant you touch down).
+    if (this.phase === 'idle' && dToBot < 4.5) this.phase = 'leading'
 
     let walking = false
     if (this.phase === 'leading') {
@@ -136,9 +139,12 @@ export class GuideBot {
     this.arrow.rotation.y = Math.atan2(this.px - this.arrowAt.x, this.pz - this.arrowAt.y)
     this.label.position.set(this.arrowAt.x, agy + 3.4, this.arrowAt.y)
 
-    const nearArcade = Math.hypot(playerX - this.dest.x, playerZ - this.dest.y) < 16
-    const pulse = 0.55 + Math.sin(this.t * 4) * 0.25
-    const target = nearArcade ? 0 : pulse
+    // Fade the arrow only once the player is actually INSIDE the arcade hall (its
+    // front door is at z~28), not merely near the lead target - otherwise it
+    // vanishes the instant you land in the plaza (you touch down close to it).
+    const insideArcade = playerZ > 32
+    const pulse = 0.6 + Math.sin(this.t * 4) * 0.25
+    const target = insideArcade ? 0 : pulse
     this.arrowMat.opacity = THREE.MathUtils.damp(this.arrowMat.opacity, target, 5, dt)
     ;(this.label.material as THREE.SpriteMaterial).opacity = Math.min(1, this.arrowMat.opacity * 1.6)
   }

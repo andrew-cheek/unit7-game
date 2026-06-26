@@ -402,10 +402,14 @@ export class Game {
 
     // Spawn greeter: a waving robot + a "FOLLOW ME" ground arrow that walks new
     // players to the arcade entrance (the arcade hall sits at z 46, front at z 28).
+    // You drop in at the plaza (~z=20, just south of the arcade whose hall is at
+    // z=46, front door z=28). So the greeter waits at the door facing you, the
+    // FOLLOW ME arrow sits at the landing pointing north to it, and it leads you
+    // INTO the hall when you walk up.
     this.guide = new GuideBot(
       this.engine.scene,
       (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
-      { start: new THREE.Vector2(3, 14), arcade: new THREE.Vector2(0, 26), arrowAt: new THREE.Vector2(0, 6) },
+      { start: new THREE.Vector2(0, 27), arcade: new THREE.Vector2(0, 40), arrowAt: new THREE.Vector2(0, 19) },
     )
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).

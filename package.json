@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
+    "shots": "node scripts/shoot.mjs",
     "party:dev": "partykit dev",
     "party:deploy": "partykit deploy"
   },
@@ -24,6 +25,7 @@
     "@types/three": "0.160.0",
     "@vitejs/plugin-react": "4.2.1",
     "partykit": "0.0.111",
+    "playwright-core": "^1.61.1",
     "typescript": "5.4.5",
     "vite": "5.2.11"
   }
