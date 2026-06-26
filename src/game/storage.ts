@@ -41,6 +41,39 @@ export function saveProfile(p: Profile) {
   }
 }
 
+// --- objective chain progress -----------------------------------------------
+//
+// How far through the guided objective chain (config.missions) the player has
+// gotten, so the onboarding doesn't restart at "reach Portal Plaza" on every
+// reload. Only the chain index and the minigame latch are stored; the capture
+// objective's running base is deliberately NOT persisted (hud.captured resets
+// each session) - see MissionSystem.restore.
+export interface MissionProgress {
+  idx: number
+  minigamePlayed: boolean
+}
+
+const MISSION_KEY = 'unit7.missions.v1'
+
+export function loadMissionProgress(): MissionProgress {
+  try {
+    const raw = localStorage.getItem(MISSION_KEY)
+    if (!raw) return { idx: 0, minigamePlayed: false }
+    const p = JSON.parse(raw) as Partial<MissionProgress>
+    return { idx: Number(p.idx) || 0, minigamePlayed: !!p.minigamePlayed }
+  } catch {
+    return { idx: 0, minigamePlayed: false }
+  }
+}
+
+export function saveMissionProgress(p: MissionProgress) {
+  try {
+    localStorage.setItem(MISSION_KEY, JSON.stringify(p))
+  } catch {
+    /* storage unavailable - keep going in-memory */
+  }
+}
+
 // --- player stats + identity ------------------------------------------------
 //
 // A persistent win/loss record per competitive minigame, plus the callsign you

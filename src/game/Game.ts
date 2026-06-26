@@ -41,7 +41,7 @@ import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp, damp, lerp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, loadMissionProgress, saveMissionProgress, type Profile } from './storage'
 import {
   loadProgression, addXp, noteLogin, noteDaily, levelForXp, levelInfo, tierForRating, cosmeticById,
   ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
@@ -277,6 +277,9 @@ export class Game {
     this.unlocked = new Set(this.profile.unlocks)
     // Objective chain + guided beacon (a tall glowing column at the current goal).
     this.missions = new MissionSystem()
+    // Resume the guided chain where it left off. Session captures are 0 here, so
+    // a resumed 'capture' objective rebases cleanly (see MissionSystem.restore).
+    this.missions.restore(loadMissionProgress(), 0)
     this.engine.scene.add(this.missions.objBeacon)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
     this.missiles = new Missiles(this.engine.scene)
@@ -772,6 +775,9 @@ export class Game {
     // daily "play" objective. Bouncing straight out earns nothing.
     if (playedLongEnough) {
       this.missions.markMinigamePlayed()
+      // Persist the latch so the arcade objective stays satisfied across reloads,
+      // even if the player hasn't reached that step of the chain yet.
+      saveMissionProgress(this.missions.serialize())
       this.awardXp(15)
       const d = noteDaily('play', 1)
       if (d.completed && d.reward) this.grantDailyReward(d.reward)
@@ -1866,6 +1872,7 @@ export class Game {
         this.audio.play('objective')
         trackEvent('objective_complete', { objective: title })
         this.world.pushHeadline(`UNIT 7 PILOT COMPLETES "${title}"`)
+        saveMissionProgress(this.missions.serialize())
       },
     })
 
