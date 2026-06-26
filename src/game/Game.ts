@@ -21,6 +21,7 @@ import { CameraController } from './Camera'
 import { buildLandmarks } from './Landmarks'
 import { MissionSystem } from './MissionSystem'
 import { ArcadeSystem } from './ArcadeSystem'
+import { Boundary } from './Boundary'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -159,6 +160,7 @@ export class Game {
   // Arcade cabinet proximity + transport beam, owned by ArcadeSystem. enter/exit
   // minigame stays in Game (engine pause, player, rewards).
   private arcade!: ArcadeSystem
+  private boundary!: Boundary // bouncy alien-blob world edge (Earth)
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -381,6 +383,18 @@ export class Game {
     // Arcade proximity + transport beam (beam is a pooled mesh ArcadeSystem owns
     // and frees in its own dispose(); the arcade arrays hold only landmark resources).
     this.arcade = new ArcadeSystem(this.engine.scene)
+
+    // Soft world edge: a ring of jiggly alien blobs just inside the city rim that
+    // bounce you back toward the arcade instead of an abrupt invisible wall. Earth
+    // only; count + eyes scale down on the mobile tier.
+    {
+      const lowTier = tier.name === 'low'
+      this.boundary = new Boundary(
+        this.engine.scene,
+        (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
+        { radius: 210, count: lowTier ? 16 : tier.name === 'medium' ? 22 : 30, arcade: new THREE.Vector3(0, 0, 46), eyes: !lowTier },
+      )
+    }
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -894,6 +908,9 @@ export class Game {
     const solids = zone === 'earth' ? this.world.solidMeshes : env!.solidMeshes
     this.physics.setSurfaces(ground, colliders)
     this.camera.setSolids(solids)
+    // The blob edge belongs to the Earth city; hide it off-world (its group lives
+    // on the scene, not the swappable world group).
+    if (this.boundary) this.boundary.group.visible = zone === 'earth'
     // Mechs follow you off-world (pilot your giant robot on Mars/Moon); the cars
     // stay parked on Earth. Missiles can fire in any zone.
     this.vehicles.setZone(zone, spawn)
@@ -1769,6 +1786,12 @@ export class Game {
     this.vehicles.update(dt, this.input, gravity)
 
     if (this.vehicles.current) {
+      // Keep vehicles inside the same blob ring (no launch - a fling makes no sense
+      // when piloting) and keep the blobs jiggling while you drive near the rim.
+      if (this.zone === 'earth') {
+        const b = this.boundary.update(dt, this.vehicles.current.position.x, this.vehicles.current.position.z, false)
+        if (b) { this.vehicles.current.position.x = b.x; this.vehicles.current.position.z = b.z }
+      }
       this.player.object.position.copy(this.vehicles.current.position)
       this.focus.copy(this.vehicles.current.position)
       // Frame the mech around its torso rather than its feet.
@@ -1781,9 +1804,26 @@ export class Game {
       // Low-G bubbles scale the player's gravity down locally (floaty triple-hops).
       const pg = gravity * this.playground.lowGFactor(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
       this.player.update(dt, this.input, this.physics, pg)
-      const lim = config.world.half - 1
-      this.player.position.x = clamp(this.player.position.x, -lim, lim)
-      this.player.position.z = clamp(this.player.position.z, -lim, lim)
+      if (this.zone === 'earth') {
+        // Bouncy alien-blob edge (replaces the old hard square clamp on Earth): it
+        // shoves you back inside the ring and, on foot/flying, flings you up and
+        // back toward the arcade. Height-independent, so you can't jetpack over it.
+        const canLaunch = this.player.mode === 'robot' || this.player.mode === 'plane'
+        const b = this.boundary.update(dt, this.player.position.x, this.player.position.z, canLaunch)
+        if (b) {
+          this.player.position.x = b.x
+          this.player.position.z = b.z
+          if (b.launch) {
+            this.player.launchVec(b.vx, b.vy, b.vz)
+            this.audio.play('portal'); this.camera.shake(0.6)
+            this.hud.banner = 'BOING!'; this.bannerTimer = 0.9; vibrate(30)
+          }
+        }
+      } else {
+        const lim = config.world.half - 1
+        this.player.position.x = clamp(this.player.position.x, -lim, lim)
+        this.player.position.z = clamp(this.player.position.z, -lim, lim)
+      }
       this.focus.copy(this.player.position)
       this.checkRecovery(dt)
       // Robot dance: first B press starts move 0; each additional press cycles combos.
@@ -2227,6 +2267,7 @@ export class Game {
     this.clearWarpModel()
     // Tears down registered systems (multiplayer net + renderers, pooled FX).
     this.systems.dispose()
+    this.boundary.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()

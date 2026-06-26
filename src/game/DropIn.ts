@@ -128,9 +128,11 @@ export class DropIn {
   private vapor!: THREE.Mesh // pooled punch-through burst
   private vaporMat!: THREE.MeshBasicMaterial
   private vaporT = 1 // >=1 = idle
-  // Sonic boom at terminal velocity.
+  // Sonic boom at terminal velocity: a bright shock ring + a flaring vapor cone.
   private boomRing!: THREE.Mesh
   private boomMat!: THREE.MeshBasicMaterial
+  private boomCone!: THREE.Mesh
+  private boomConeMat!: THREE.MeshBasicMaterial
   private boomT = 1 // >=1 = idle
   private boomCharge = 0
   private boomed = false
@@ -312,12 +314,19 @@ export class DropIn {
     this.vapor.frustumCulled = false
     this.group.add(this.vapor)
 
-    // Pooled sonic-boom shockwave ring.
-    this.boomMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    this.boomRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1, 0.08, 8, 40)), this.boomMat)
+    // Pooled sonic-boom shockwave: a bright fat ring + a flaring vapor cone that
+    // blooms around the diver, so the boom reads as a punch instead of a thin hoop.
+    this.boomMat = this.own(new THREE.MeshBasicMaterial({ color: 0xdff1ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.boomRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1, 0.16, 10, 56)), this.boomMat)
     this.boomRing.visible = false
     this.boomRing.frustumCulled = false
     this.group.add(this.boomRing)
+    this.boomConeMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    // Open cone (apex up) that flares downward like a pressure cone behind the dive.
+    this.boomCone = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1, 1.6, 28, 1, true)), this.boomConeMat)
+    this.boomCone.visible = false
+    this.boomCone.frustumCulled = false
+    this.group.add(this.boomCone)
   }
 
   /** A few soft cloud decks stacked down the descent. You punch through each one
@@ -914,8 +923,11 @@ export class DropIn {
         this.boomRing.position.copy(this.pos)
         this.boomRing.rotation.x = Math.PI / 2
         this.boomRing.visible = true
+        this.boomCone.position.copy(this.pos)
+        this.boomCone.visible = true
         this.boomT = 0
-        this.kick(1.7)
+        this.kick(2.6) // harder camera punch
+        this.streakBurst = Math.max(this.streakBurst, 0.5) // speed-line crack
         this.onSfx?.('deploy')
         // A sonic boom is a marquee beat: let it override the lesser transient
         // labels (combo / overtake) but never a PORTAL lock-in.
@@ -926,11 +938,17 @@ export class DropIn {
       this.boomCharge = 0
     }
     if (this.boomT < 1) {
+      // Ring expands fast + fades; the cone blooms wide and flat behind the diver.
       this.boomT = Math.min(1, this.boomT + dt * 1.5)
+      const e = this.boomT
       this.boomRing.position.copy(this.pos)
-      this.boomRing.scale.setScalar(2 + this.boomT * 95)
-      this.boomMat.opacity = 0.7 * (1 - this.boomT)
-      if (this.boomT >= 1) this.boomRing.visible = false
+      this.boomRing.scale.setScalar(2 + e * 120)
+      this.boomMat.opacity = 0.9 * (1 - e)
+      this.boomCone.position.set(this.pos.x, this.pos.y + 3 - e * 8, this.pos.z) // trails up the dive line
+      const cr = 2 + e * 80
+      this.boomCone.scale.set(cr, 6 + e * 40, cr)
+      this.boomConeMat.opacity = 0.55 * (1 - e) * (1 - e)
+      if (this.boomT >= 1) { this.boomRing.visible = false; this.boomCone.visible = false }
     }
 
     // Rival race: a rival is "ahead" if it already reached the ground or its race
