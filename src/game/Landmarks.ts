@@ -278,6 +278,15 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     lintel.position.set(CX, gy + 6 + (H - 6) / 2, frontZ)
     lintel.castShadow = true
     scene.add(lintel)
+    // Invisible ceiling slab over the hall, added to the camera solids only: the
+    // roof is an open beam frame, so without this the follow camera punches up
+    // through it (out the top) whenever you look up indoors. Not a physics
+    // collider - the tower mass above already blocks the player.
+    const ceilCollider = new THREE.Mesh(ownG(new THREE.BoxGeometry(W, t, D)), wallMat)
+    ceilCollider.position.set(CX, gy + H, CZ)
+    ceilCollider.visible = false
+    scene.add(ceilCollider)
+    solids.push(ceilCollider)
 
     // floor + a glowing centre medallion so the hall reads as a polished lobby
     const floor = new THREE.Mesh(ownG(new THREE.BoxGeometry(W - t, 0.1, D - t)), floorMat)

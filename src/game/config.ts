@@ -164,7 +164,7 @@ export const config = {
     pitchMax: 1.05, // look further up so tall rockets / portals / towers are visible
     mouseSensitivity: 0.0022,
     touchSensitivity: 0.006,
-    collisionPadding: 0.4,
+    collisionPadding: 0.6, // a touch wider than the near plane so a grazed wall edge can't leave the camera corner inside it
     // Modern action-cam feel: when the player moves and the look stick/mouse has
     // been idle for `autoFollowDelay`, the camera eases its yaw to trail behind
     // the subject's heading. Manual look instantly takes priority again.

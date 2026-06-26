@@ -122,6 +122,8 @@ export class DropIn {
   // depth 0..1 = how far down the deck sits (1 = lowest, the city-reveal punch).
   private clouds: { mesh: THREE.Object3D; y: number; punched: boolean; depth: number }[] = []
   private streakBurst = 0 // seconds of forced speed-line intensity after a deep cloud punch
+  private streakTick = 0 // half-rate toggle for the streak buffer upload on mobile
+  private streakDt = 0 // accumulated dt between streak buffer uploads (keeps motion speed right)
   private cloudTex?: THREE.Texture
   private vapor!: THREE.Mesh // pooled punch-through burst
   private vaporMat!: THREE.MeshBasicMaterial
@@ -958,11 +960,19 @@ export class DropIn {
     const m = this.streaks.material as THREE.PointsMaterial
     m.opacity = THREE.MathUtils.damp(m.opacity, burst ? 1 : fast ? 0.85 : 0.3, burst ? 12 : 5, dt)
     this.streaks.position.copy(this.pos)
+    // Rewriting the 130-point buffer + re-uploading it (needsUpdate) every frame is
+    // a real GPU stall on mobile, and this runs through the whole opening drop-in.
+    // On the low tier do it every other frame (accumulating dt so the lines still
+    // rise at the right speed); the cheap opacity/position above stay per-frame.
+    this.streakDt += dt
+    if (config.tier.name === 'low') { this.streakTick ^= 1; if (this.streakTick === 0) return }
+    const sdt = this.streakDt
+    this.streakDt = 0
     const fp = (this.streaks.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array
     const rise = burst ? 86 : fast ? 54 : 20
     for (let i = 0; i < this.streakVel.length; i++) {
       const j = i * 3 + 1
-      fp[j] += (this.streakVel[i] + rise) * dt
+      fp[j] += (this.streakVel[i] + rise) * sdt
       if (fp[j] > 14) fp[j] = -14
     }
     ;(this.streaks.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
@@ -993,6 +1003,12 @@ export class DropIn {
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -4.2); want.y += 2.6
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 4.5); lookWant.y -= 6.5
     }
+    // Ground/roof clearance: the drop camera has no other collision, so on the
+    // steep look-down near touchdown its above-behind spot can sink into terrain,
+    // decks or rooftops. getGround samples the solids below, so keep the camera a
+    // little above whatever is under it - stops it punching through walls/ground.
+    const camFloor = this.getGround(want.x, want.z) + 2.5
+    if (want.y < camFloor) want.y = camFloor
     // The dive falls FAST (up to ~88 m/s), so a slow lerp leaves the camera
     // lagging tens of metres behind and the robot reads tiny. Follow tightly while
     // diving; the slower canopy phase can ease more gently.

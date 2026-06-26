@@ -54,6 +54,7 @@ export class CameraController {
   private up = new THREE.Vector3()
   private initialized = false
   private shakeAmt = 0
+  private ceilingF = 0 // eased 0..1 "enclosed space" factor, so the view angle doesn't pop
   // Pull the camera in on mobile so the robot reads big. Portrait widens the
   // vertical FOV (to keep the horizontal view), which shrinks the subject, so the
   // low/medium tiers sit closer to compensate.
@@ -152,7 +153,7 @@ export class CameraController {
     // on mobile. The two extra rays are cheap next to a visible wall break.
     const probes = config.tier.name === 'high'
       ? [[0, 0], [pad, 0], [-pad, 0], [0, pad], [0, -pad]]
-      : [[0, 0], [pad, 0], [-pad, 0]]
+      : [[0, 0], [pad, 0], [-pad, 0], [0, pad]] // mobile gains the up-probe so it stops clipping roofs/overheads
     for (const [s, u] of probes) {
       this.probeOrigin.copy(this.currentTarget).addScaledVector(this.side, s).addScaledVector(this.up, u)
       this.raycaster.set(this.probeOrigin, this.offsetDir)
@@ -218,18 +219,20 @@ export class CameraController {
     this.raycaster.set(this.currentTarget, this.up.set(0, 1, 0))
     this.raycaster.far = 9
     const lowCeiling = this.raycaster.intersectObjects(this.solids, false).length > 0
+    // Ease the "enclosed" factor instead of using the raw boolean: the up-ray
+    // flickers on/off as it crosses beams/gaps, and snapping the view angle
+    // between flattened and lifted reads as a jarring camera pop.
+    this.ceilingF = dt > 0 ? damp(this.ceilingF, lowCeiling ? 1 : 0, 12, dt) : (lowCeiling ? 1 : 0)
 
-    if (lowCeiling) {
-      // Look roughly level forward; don't tilt up into the ceiling.
-      const flat = Math.min(pitch, 0.04)
-      const cosF = Math.cos(flat)
-      this.offsetDir.set(-Math.sin(yaw) * cosF, Math.sin(flat), -Math.cos(yaw) * cosF)
-    } else if (closeFrac > 0.01) {
-      // Relief tilt outdoors: when jammed close, raise the view angle so the
-      // camera rises above the subject instead of staring at its back.
+    if (this.ceilingF > 0.001 || closeFrac > 0.01) {
+      // Outdoors, relief-tilt lifts the view when jammed close so the camera
+      // rises above the subject; indoors (ceilingF) flatten toward level so it
+      // doesn't tilt up into the ceiling. Blend smoothly between the two.
       const liftPitch = Math.min(config.camera.pitchMax, pitch + closeFrac * config.camera.collisionPitchLift)
-      const cosL = Math.cos(liftPitch)
-      this.offsetDir.set(-Math.sin(yaw) * cosL, Math.sin(liftPitch), -Math.cos(yaw) * cosL)
+      const flatPitch = Math.min(pitch, 0.04)
+      const effPitch = THREE.MathUtils.lerp(liftPitch, flatPitch, this.ceilingF)
+      const cosE = Math.cos(effPitch)
+      this.offsetDir.set(-Math.sin(yaw) * cosE, Math.sin(effPitch), -Math.cos(yaw) * cosE)
     }
 
     this.camPos.copy(this.currentTarget).addScaledVector(this.offsetDir, this.dist)

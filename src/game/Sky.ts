@@ -35,6 +35,8 @@ export class Sky {
   // Elevated winding "cyber highway" + the cars racing along it.
   private hwSamples: { p: THREE.Vector3; tan: THREE.Vector3 }[] = []
   private hwCars: { mesh: THREE.Object3D; t: number; speed: number }[] = []
+  private hwRight = new THREE.Vector3() // per-frame scratch, hoisted out of updateHighway
+  private readonly hwUp = new THREE.Vector3(0, 1, 0)
   private extraMats: THREE.Material[] = []
   private extraGeos: THREE.BufferGeometry[] = []
 
@@ -186,13 +188,12 @@ export class Sky {
   private updateHighway(dt: number) {
     const S = this.hwSamples.length
     if (S === 0) return
-    const right = new THREE.Vector3()
-    const up = new THREE.Vector3(0, 1, 0)
+    const right = this.hwRight
     for (const c of this.hwCars) {
       c.t = (c.t + c.speed * dt) % 1
       const s = this.hwSamples[Math.floor(c.t * S) % S]
       const lane = (c.mesh.userData.lane as number) || 0
-      right.crossVectors(s.tan, up).normalize()
+      right.crossVectors(s.tan, this.hwUp).normalize()
       c.mesh.position.copy(s.p).addScaledVector(right, lane)
       c.mesh.position.y += 0.55 // ride on top of the deck
       c.mesh.lookAt(c.mesh.position.x + s.tan.x, c.mesh.position.y + s.tan.y, c.mesh.position.z + s.tan.z)

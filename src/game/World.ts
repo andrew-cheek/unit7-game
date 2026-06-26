@@ -354,6 +354,12 @@ export class World {
     const pitch = config.world.block + config.world.roadWidth
     const cells = Math.floor(half / pitch)
     const lineMat = this.glow(config.palette.cyan, 2.2)
+    // These avenue stripes sit a hair above the ground plane and z-fight it at
+    // distance/grazing angles (shimmer). polygonOffset biases them forward in the
+    // depth buffer so they render cleanly on top without flicker.
+    lineMat.polygonOffset = true
+    lineMat.polygonOffsetFactor = -1
+    lineMat.polygonOffsetUnits = -1
     // All the avenue stripes share one material + the unit box, so draw the whole
     // grid as a single InstancedMesh instead of dozens of meshes.
     const lines: Array<[number, number, number, number]> = [] // x, z, sx, sz
@@ -366,7 +372,7 @@ export class World {
     const inst = new THREE.InstancedMesh(this.boxGeo, lineMat, lines.length)
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
     lines.forEach(([x, z, sx, sz], k) => {
-      m.compose(pos.set(x, 0.03, z), q, scl.set(sx, 0.05, sz))
+      m.compose(pos.set(x, 0.06, z), q, scl.set(sx, 0.05, sz)) // lifted clear of the ground plane (+ polygonOffset) to kill z-fight
       inst.setMatrixAt(k, m)
     })
     inst.instanceMatrix.needsUpdate = true
@@ -805,7 +811,9 @@ export class World {
     //  pillars below are solid, added with the pillars further down.)
 
     // Centre lane line (glowing) + edge rails.
-    const lane = new THREE.Mesh(this.boxGeo, this.glow(config.palette.orange, 2.0))
+    const laneMat = this.glow(config.palette.orange, 2.0)
+    laneMat.polygonOffset = true; laneMat.polygonOffsetFactor = -1; laneMat.polygonOffsetUnits = -1 // sits on the deck; bias it forward so it doesn't z-fight
+    const lane = new THREE.Mesh(this.boxGeo, laneMat)
     lane.scale.set(half * 2, 0.06, 0.5)
     lane.position.set(0, top + 0.56, z)
     this.group.add(lane)
@@ -1690,7 +1698,7 @@ export class World {
     this.sun.shadow.camera.near = 1
     this.sun.shadow.camera.far = 400
     this.sun.shadow.bias = -0.0004
-    this.sun.shadow.normalBias = 0.02
+    this.sun.shadow.normalBias = 0.04 // a touch higher to suppress shadow-acne shimmer on the wide follow frustum
     this.scene.add(this.sun, this.sunTarget)
     this.sun.target = this.sunTarget
     this.buildSun()
