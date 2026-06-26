@@ -1721,7 +1721,7 @@ export class Game {
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
       const d = this.dropIn.hud
-      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade }
+      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade, showJetTip: d.showJetTip }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return

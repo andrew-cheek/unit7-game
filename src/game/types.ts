@@ -78,7 +78,7 @@ export interface HudState {
   race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
   // non-null during the playable drop-in opening: altimeter, speed, phase + a
   // contextual hint, and whether the chute can be deployed yet.
-  drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land' | 'crash'; hint: string | null; canDeploy: boolean; canTrick: boolean; result: string | null; place: string | null; boomCharge: number; combo: number; comboFade: number } | null
+  drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land' | 'crash'; hint: string | null; canDeploy: boolean; canTrick: boolean; result: string | null; place: string | null; boomCharge: number; combo: number; comboFade: number; showJetTip: boolean } | null
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */

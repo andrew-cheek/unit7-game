@@ -17,6 +17,7 @@ export interface DropHud {
   boomCharge: number // 0..1 sonic-boom charge while held at terminal velocity (0 when not charging)
   combo: number // running boost-ring chain count (0 = no active chain)
   comboFade: number // 0..1 how much of the 2.2s chain window remains (drives a decay bar)
+  showJetTip: boolean // early-dive prompt: hold the jetpack to fly/hover the sky
 }
 
 // You start very high and fall the whole way down, steering the dive (tuck to
@@ -54,7 +55,7 @@ export class DropIn {
   chosenDest: 'arcade' | 'mars' | 'moon' | 'city' | null = null
   /** Where you ended up - the handoff places the player here. */
   readonly landingPos = new THREE.Vector3()
-  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null, boomCharge: 0, combo: 0, comboFade: 0 }
+  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null, boomCharge: 0, combo: 0, comboFade: 0, showJetTip: true }
   /** Flips + fireworks pulled on the way down (small style bonus). */
   tricks = 0
 
@@ -79,6 +80,7 @@ export class DropIn {
 
   private phase: DropHud['phase'] = 'dive'
   private lastAlt = START_Y // height above ground, cached so the camera clamp can skip its raycast up high
+  private hasJetted = false // dismiss the jetpack tip once the player first uses it
   private quality = 0
   private pendingDeploy = false
   private wantCut = false // cut the canopy back to free-fall
@@ -147,7 +149,7 @@ export class DropIn {
   private fwd = new THREE.Vector3()
 
   private static readonly STEER = 64 // canopy steer authority
-  private static readonly TURN_RATE = 2.6 // dive heading turn speed (rad/s) at full moveX
+  private static readonly TURN_RATE = 3.2 // dive heading turn speed (rad/s) at full moveX
   private static readonly THETA_MIN = 0.42 // shallowest dive angle (~24deg) when fully flared
   private static readonly V_FLARE = 36 // travel speed flared right back
   private static readonly V_DIVE = 92 // travel speed at a full straight-down plunge
@@ -589,6 +591,7 @@ export class DropIn {
     // --- phase machine ---
     if (this.phase === 'dive') {
       if (this.input.held.jet) {
+        this.hasJetted = true // learned the jetpack -> stop nagging the tip
         // Jetpack while falling: thrust upward toward the cruise cap so you can
         // arrest the fall, hover, or even climb to line up a high portal pad.
         const cap = config.jetpack.maxAscend
@@ -685,6 +688,9 @@ export class DropIn {
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
     this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
+    // Coach the jetpack early on (it's the key to flying/hovering around the sky):
+    // show until they first use it, then it stays gone.
+    this.hud.showJetTip = this.phase === 'dive' && !this.hasJetted && this.totalT < 18
     this.hud.hint = this.phase === 'canopy'
       ? (alt < 70 ? (-this.vy < 7 ? 'FLARED - SOFT LANDING' : 'PULL BACK TO FLARE') : 'STEER TO A PORTAL OR THE BEACON')
       : this.phase === 'land' ? 'TOUCHDOWN'

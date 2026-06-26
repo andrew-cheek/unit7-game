@@ -488,6 +488,18 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
         {drop.hint && <div style={{ fontSize: 12, letterSpacing: '0.24em', color: 'rgba(223,238,255,0.75)', marginTop: 6 }}>{drop.hint}</div>}
       </div>
 
+      {/* Early-dive coaching: the jetpack is how you fly/hover around the sky. */}
+      {drop.showJetTip && (
+        <div style={{ position: 'absolute', left: '50%', top: '23%', transform: 'translateX(-50%)', zIndex: 17, pointerEvents: 'none', textAlign: 'center' }}>
+          <div style={{ display: 'inline-block', padding: '9px 18px', borderRadius: 12, border: '2px solid #27e7ff', background: 'rgba(5,12,22,0.55)', color: '#eaf6ff', fontSize: 18, fontWeight: 800, letterSpacing: '0.06em', textShadow: '0 0 14px #27e7ff', boxShadow: '0 0 22px rgba(39,231,255,0.5)', whiteSpace: 'nowrap' }}>
+            {touch ? 'HOLD  JET  TO FLY & HOVER' : 'HOLD  SPACE  — JETPACK TO FLY & HOVER'}
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.16em', color: 'rgba(223,238,255,0.85)', marginTop: 5 }}>
+              {touch ? 'DRAG TO STEER · DRAG UP TO DIVE' : 'A / D STEER · W DIVE · S FLARE'}
+            </div>
+          </div>
+        </div>
+      )}
+
       {drop.result && (
         <div style={{ position: 'absolute', left: '50%', top: '40%', transform: 'translateX(-50%)' }}>
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.12em', textAlign: 'center', color: drop.result.startsWith('CLEAN') ? '#9dff5a' : drop.result.startsWith('CANOPY') ? '#27e7ff' : '#ff8a1e', textShadow: '0 0 18px currentColor' }}>{drop.result}</div>
