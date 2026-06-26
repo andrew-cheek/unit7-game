@@ -179,6 +179,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onDeploy={() => controlsRef.current?.dropDeploy()}
           onTrick={() => controlsRef.current?.dropTrick()}
           onJet={(down) => controlsRef.current?.pressAction('jet', down)}
+          onBoost={(down) => controlsRef.current?.pressAction('boost', down)}
           onSteer={(x, y) => controlsRef.current?.setVirtualMove(x, y)}
         />
       )}
@@ -429,7 +430,7 @@ type DropState = NonNullable<HudState['drop']>
  * full-screen drag-to-steer layer behind the buttons (drag forward to nose-dive,
  * back to flatten and slow).
  */
-function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onTrick: () => void; onJet: (down: boolean) => void; onSteer: (x: number, y: number) => void }) {
+function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onBoost, onSteer }: { drop: DropState; touch: boolean; onDeploy: () => void; onTrick: () => void; onJet: (down: boolean) => void; onBoost: (down: boolean) => void; onSteer: (x: number, y: number) => void }) {
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null)
   const onDown = (e: ReactPointerEvent) => {
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
@@ -494,7 +495,7 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
           <div style={{ display: 'inline-block', padding: '9px 18px', borderRadius: 12, border: '2px solid #27e7ff', background: 'rgba(5,12,22,0.55)', color: '#eaf6ff', fontSize: 18, fontWeight: 800, letterSpacing: '0.06em', textShadow: '0 0 14px #27e7ff', boxShadow: '0 0 22px rgba(39,231,255,0.5)', whiteSpace: 'nowrap' }}>
             {touch ? 'HOLD  JET  TO FLY & HOVER' : 'HOLD  SPACE  — JETPACK TO FLY & HOVER'}
             <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.16em', color: 'rgba(223,238,255,0.85)', marginTop: 5 }}>
-              {touch ? 'DRAG TO STEER · DRAG UP TO DIVE' : 'A / D STEER · W DIVE · S FLARE'}
+              {touch ? 'DRAG TO TURN · FLARE TO GLIDE · BOOST + JET BUTTONS' : 'A/D TURN · S FLARE TO GLIDE · F BOOST · W DIVE'}
             </div>
           </div>
         </div>
@@ -514,12 +515,21 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
         )}
         {touch && drop.phase === 'dive' && (
           <button
+            style={{ ...dropActionBtn, color: '#ff8a1e', borderColor: '#ff8a1e', touchAction: 'none' }}
+            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onBoost(true) }}
+            onPointerUp={() => onBoost(false)}
+            onPointerCancel={() => onBoost(false)}
+            onPointerLeave={() => onBoost(false)}
+          >BOOST »</button>
+        )}
+        {touch && (drop.phase === 'dive' || drop.phase === 'canopy') && (
+          <button
             style={{ ...dropActionBtn, color: '#27e7ff', borderColor: '#27e7ff', touchAction: 'none' }}
             onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onJet(true) }}
             onPointerUp={() => onJet(false)}
             onPointerCancel={() => onJet(false)}
             onPointerLeave={() => onJet(false)}
-          >JET ▲</button>
+          >JETPACK ▲</button>
         )}
         {drop.phase === 'dive' && (
           <button style={{ ...dropActionBtn, opacity: armed ? 1 : 0.5, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CHUTE ◉</button>

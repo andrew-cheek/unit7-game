@@ -177,6 +177,9 @@ export class DropIn {
 
   private build() {
     this.rb.setFlyPose(1)
+    // Yaw-first Euler so turning a pitched-down diver reads as a clean banked turn
+    // instead of tumbling the body upside down (default XYZ gimbal-locks at a dive).
+    this.diver.rotation.order = 'YXZ'
     this.diver.add(this.rb.group)
     this.diver.position.copy(this.pos)
     this.group.add(this.diver)
@@ -553,10 +556,13 @@ export class DropIn {
       // (full push), so pushing all the way gives a CLEAN straight-down plunge with
       // no drift, and a neutral stick cruises forward at an angle. The approach lerp
       // keeps real momentum so it still feels like falling, not a cursor.
-      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * dt
+      // Turn freely when flat/flared, but barely while plunging near-vertical - so
+      // holding a turn in a steep dive no longer spirals you around your own axis
+      // (you turn by flaring out, then dive again). Boost = thrust the way you point.
+      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * (1 - this.pitch * 0.8) * dt
       const tp = Math.min(1, this.pitch * 1.05) // saturate so a near-full hold is dead vertical
       const theta = THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp)
-      const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch)
+      const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * (this.input.held.boost ? 1.5 : 1)
       const hSpeed = Math.cos(theta) * speed
       const tvx = Math.sin(this.diveHeading) * hSpeed
       const tvz = Math.cos(this.diveHeading) * hSpeed
@@ -607,7 +613,7 @@ export class DropIn {
         const diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
         const tp = Math.min(1, this.pitch * 1.05)
-        const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch)
+        const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * (this.input.held.boost ? 1.5 : 1)
         const term = -speed * Math.sin(THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp))
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
         // A full straight-down nose-dive holds steady - flips are deliberate only
