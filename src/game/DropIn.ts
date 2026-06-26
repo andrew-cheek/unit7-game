@@ -149,9 +149,9 @@ export class DropIn {
   private fwd = new THREE.Vector3()
 
   private static readonly STEER = 64 // canopy steer authority
-  private static readonly TURN_RATE = 3.2 // dive heading turn speed (rad/s) at full moveX
-  private static readonly THETA_MIN = 0.42 // shallowest dive angle (~24deg) when fully flared
-  private static readonly V_FLARE = 36 // travel speed flared right back
+  private static readonly TURN_RATE = 4.0 // dive heading turn speed (rad/s) at full moveX - snappy aiming
+  private static readonly THETA_MIN = 0.32 // shallowest dive angle (~18deg from horizontal) when flared - a flat, far glide
+  private static readonly V_FLARE = 48 // travel speed flared right back (fast glide so you can fly to a pad)
   private static readonly V_DIVE = 92 // travel speed at a full straight-down plunge
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
@@ -412,10 +412,10 @@ export class DropIn {
     // you want as you fall past it. (The old wide ring of pads sat far off the dive
     // line and was nearly impossible to reach.) [dest, altitude, lateral offset]
     const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number]> = [
-      ['moon', 900, -64],
-      ['arcade', 690, 64],
-      ['mars', 470, -64],
-      ['city', 280, 48],
+      ['moon', 900, -46],
+      ['arcade', 690, 46],
+      ['mars', 470, -46],
+      ['city', 280, 34],
     ]
     const span = this.start.y - this.target.y
     for (const [dest, alt, off] of defs) {
@@ -560,7 +560,7 @@ export class DropIn {
       const hSpeed = Math.cos(theta) * speed
       const tvx = Math.sin(this.diveHeading) * hSpeed
       const tvz = Math.cos(this.diveHeading) * hSpeed
-      const k = Math.min(1, dt * 3.4) // momentum, but turns stay responsive
+      const k = Math.min(1, dt * 4.5) // snappier so the velocity follows your turns quickly
       this.hVel.x += (tvx - this.hVel.x) * k
       this.hVel.z += (tvz - this.hVel.z) * k
     } else if (this.phase === 'canopy') {
@@ -907,8 +907,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 46) continue // taller vertical catch window
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 40) { // wider catch radius
+      if (Math.abs(this.pos.y - p.y) > 60) continue // generous vertical catch window
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 56) { // generous catch radius - easy to land on
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true
