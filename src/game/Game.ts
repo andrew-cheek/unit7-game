@@ -148,6 +148,7 @@ export class Game {
   // Grapple-arm: previous held state (for the fire edge) + reusable scratch
   // vectors (also borrowed by fireMissiles; they never run in the same frame).
   private grapplePrev = false
+  private grappleHit = false // last grapple latched a target (gates auto chain re-fire)
   private grappleO = new THREE.Vector3()
   private grappleD = new THREE.Vector3()
 
@@ -1016,17 +1017,18 @@ export class Game {
   private updateGrapple() {
     const held = this.input.held.grapple
     const edge = held && !this.grapplePrev
-    // Fire on the press edge AND re-fire the moment a previous grapple ends while
-    // still held, so a hold (or rapid taps) chains swings and you can grapple again
-    // immediately - independent of whatever movement/steering you're doing.
-    if (held && !this.player.grappling) {
+    // Fire on a fresh press; AND auto-re-fire to CHAIN swings the instant a grapple
+    // that HIT a target ends while still held. A miss does NOT auto-re-fire - that
+    // machine-guns the tendril into open air every frame (a flickery glitch) - so
+    // retrying after a miss needs a fresh press.
+    if (held && !this.player.grappling && (edge || this.grappleHit)) {
       const cam = this.engine.camera
       cam.getWorldDirection(this.grappleD) // aim = where you're looking
       // Raycast the aim against buildings (with forward-cone auto-aim) so the
       // grapple grabs what you're looking at instead of firing into open air.
       const top = this.physics.grappleTarget(cam.position, this.grappleD, config.grapple.range, this.grappleO)
-      if (top !== null) { this.player.fireGrapple(this.grappleO, top); this.audio.play('ui') }
-      else { this.player.fireGrappleMiss(this.grappleD); if (edge) this.audio.play('ui') } // don't spam the miss chime
+      if (top !== null) { this.player.fireGrapple(this.grappleO, top); this.grappleHit = true; this.audio.play('ui') }
+      else { this.player.fireGrappleMiss(this.grappleD); this.grappleHit = false; if (edge) this.audio.play('ui') } // don't spam the miss chime
       if (edge) trackEvent('ability_used', { ability: 'grapple' })
     } else if (!held && this.player.grappling) {
       this.player.endGrapple()

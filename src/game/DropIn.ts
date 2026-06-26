@@ -142,8 +142,7 @@ export class DropIn {
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
 
-  private static readonly STEER = 64 // lateral steer authority during the dive
-  private static readonly GLIDE = 70 // forward glide speed at a balanced (mid) tilt
+  private static readonly STEER = 64 // steer authority (forward + lateral) during the dive
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
 
@@ -532,17 +531,19 @@ export class DropIn {
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
     if (this.phase === 'dive') {
-      // moveX strafes; FORWARD travel is derived from attitude, not the stick:
-      // it peaks at a balanced mid tilt and falls to zero both flat (flaring) and
-      // straight-down. So "balance it down and forward" cruises forward fast while
-      // "all the way up" plummets straight down with no forward drift.
-      const glide = Math.sin(this.pitch * Math.PI) * DropIn.GLIDE
-      const lat = this.input.moveX * DropIn.STEER
-      const tvx = Math.sin(yaw) * glide - Math.cos(yaw) * lat
-      const tvz = Math.cos(yaw) * glide + Math.sin(yaw) * lat
-      const k = Math.min(1, dt * 2.6) // responsive approach = tight control
-      this.hVel.x += (tvx - this.hVel.x) * k
-      this.hVel.z += (tvz - this.hVel.z) * k
+      // Direct, camera-relative flight: push forward to accelerate forward AND tip
+      // into a steeper, faster dive; pull back to flare and slow; moveX strafes.
+      // Travel follows the STICK, not attitude - so pushing forward actually moves
+      // you forward (a nose-dive keeps carrying your momentum) and the chase camera,
+      // which tracks the velocity heading, stays steady instead of swinging when an
+      // attitude-derived glide collapses to zero at a full dive.
+      const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER
+      const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER
+      this.hVel.x += ax * dt
+      this.hVel.z += az * dt
+      const damp = Math.exp(-DropIn.H_DAMP * dt)
+      this.hVel.x *= damp
+      this.hVel.z *= damp
     } else {
       const controlScale = this.phase === 'canopy' ? 0.6 + this.quality * 0.4 : 1
       const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * controlScale
