@@ -195,11 +195,11 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const makeWing = (sx: number) => {
     const pivot = new THREE.Group()
     pivot.position.set(sx * 0.28, 1.34, -0.05)
-    const wing = box(1.5, 0.07, 0.62, wingMat)
-    wing.position.set(sx * 0.85, 0, -0.05)
+    const wing = box(2.0, 0.08, 0.74, wingMat)
+    wing.position.set(sx * 1.0, 0, -0.05)
     wing.rotation.y = sx * 0.18
-    const edge = box(1.5, 0.04, 0.1, wingEdgeMat)
-    edge.position.set(sx * 0.85, 0, 0.25)
+    const edge = box(2.0, 0.05, 0.12, wingEdgeMat)
+    edge.position.set(sx * 1.0, 0, 0.3)
     edge.rotation.y = sx * 0.18
     pivot.add(wing, edge)
     pivot.scale.x = 0.001 // folded away

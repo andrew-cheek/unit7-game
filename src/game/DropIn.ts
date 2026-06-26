@@ -629,11 +629,21 @@ export class DropIn {
         return
       }
     } else if (this.phase === 'canopy') {
-      const want = -THREE.MathUtils.lerp(16, 9, this.quality)
+      // Flare control: pull back (moveY < 0) to brake your descent for a soft
+      // touchdown, push forward to sink faster. Base rate scales with how cleanly
+      // you popped the canopy (quality).
+      const base = THREE.MathUtils.lerp(16, 9, this.quality)
+      const want = -base * (1 + this.input.moveY * 0.55) // ~0.45x flared .. ~1.55x pushed
       this.vy += (want - this.vy) * Math.min(1, dt * 2.5)
       this.chuteRig.scale.setScalar(THREE.MathUtils.damp(this.chuteRig.scale.x, 1, 6, dt))
       this.pitch += (0 - this.pitch) * Math.min(1, dt * 3)
-      if (alt <= 1.5) { this.phase = 'land'; this.landingPos.set(this.pos.x, ground, this.pos.z) }
+      if (alt <= 1.5) {
+        this.phase = 'land'
+        this.landingPos.set(this.pos.x, ground, this.pos.z)
+        // A well-timed flare (gentle descent at touchdown) is a feather landing -
+        // a little style bonus, paid out with the perfects in finishDrop.
+        if (-this.vy < 7) { this.perfects++; this.hud.result = 'FEATHER LANDING'; this.resultT = 0 }
+      }
     } else {
       // land: settle straight down where you are - no relocation.
       this.vy += (-2 - this.vy) * Math.min(1, dt * 4)
@@ -675,7 +685,8 @@ export class DropIn {
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
     this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
-    this.hud.hint = this.phase === 'canopy' ? 'STEER TO A PORTAL OR THE BEACON'
+    this.hud.hint = this.phase === 'canopy'
+      ? (alt < 70 ? (-this.vy < 7 ? 'FLARED - SOFT LANDING' : 'PULL BACK TO FLARE') : 'STEER TO A PORTAL OR THE BEACON')
       : this.phase === 'land' ? 'TOUCHDOWN'
       : 'STEER · SPACE = JETPACK · DEPLOY ANYTIME'
     // Sonic-boom charge bar (only while diving toward terminal velocity); the
