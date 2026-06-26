@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { clamp } from './utils'
+import { clamp, dampAngle } from './utils'
 import { config } from './config'
 import { createRobot, createRocket, createSpaceship, type RobotModel, type VehicleModel } from './procedural'
 import type { Input } from './Input'
@@ -190,7 +190,7 @@ export class DropIn {
     const d = new THREE.Vector3()
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2
-      const rx = Math.cos(a) * 2.5, rz = Math.sin(a) * 2.5, ry = 5.1 // canopy rim
+      const rx = Math.cos(a) * 2.8, rz = Math.sin(a) * 2.8, ry = 6.85 // canopy rim (dome sits at y 6.5, r 2.9)
       const bx = Math.cos(a) * 0.4, bz = Math.sin(a) * 0.4, by = 2.3 // shoulders
       const cord = new THREE.Mesh(cordGeo, cordMat)
       cord.position.set((rx + bx) / 2, (ry + by) / 2, (rz + bz) / 2)
@@ -632,7 +632,9 @@ export class DropIn {
     this.pos.y += this.vy * dt
 
     this.diver.position.copy(this.pos)
-    if (hs > 0.5) this.camHeading = Math.atan2(this.hVel.x, this.hVel.z)
+    // Ease the heading toward the travel direction instead of snapping to it, so
+    // strafing left/right swings the chase camera smoothly rather than whipping.
+    if (hs > 0.5) this.camHeading = dampAngle(this.camHeading, Math.atan2(this.hVel.x, this.hVel.z), 7, dt)
     const diving = this.phase === 'dive'
     // Full forward tilt = exactly straight down (PI/2); flared = near belly-flat.
     const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, this.pitch) : 0

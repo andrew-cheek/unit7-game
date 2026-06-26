@@ -168,9 +168,10 @@ export const config = {
     // Modern action-cam feel: when the player moves and the look stick/mouse has
     // been idle for `autoFollowDelay`, the camera eases its yaw to trail behind
     // the subject's heading. Manual look instantly takes priority again.
-    // Snappier so turning the robot swings the camera around behind it quickly
-    // once the look stick is idle (was 3.0 / 0.5s, which felt sluggish on a turn).
-    autoFollowLambda: 5.5,
+    // Eases the camera to trail behind the robot once the look stick is idle. 5.5
+    // whipped around too fast on a left/right tap; 3.5 trails smoothly without the
+    // old 3.0 sluggishness.
+    autoFollowLambda: 3.5,
     autoFollowDelay: 0.3,
     // Push the look target ahead along movement so you see more of where you go.
     lookAhead: 3.6,

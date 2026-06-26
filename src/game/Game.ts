@@ -22,6 +22,7 @@ import { buildLandmarks } from './Landmarks'
 import { MissionSystem } from './MissionSystem'
 import { ArcadeSystem } from './ArcadeSystem'
 import { Boundary } from './Boundary'
+import { GuideBot } from './GuideBot'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -161,6 +162,7 @@ export class Game {
   // minigame stays in Game (engine pause, player, rewards).
   private arcade!: ArcadeSystem
   private boundary!: Boundary // bouncy alien-blob world edge (Earth)
+  private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -395,6 +397,14 @@ export class Game {
         { radius: 210, count: lowTier ? 16 : tier.name === 'medium' ? 22 : 30, arcade: new THREE.Vector3(0, 0, 46), eyes: !lowTier },
       )
     }
+
+    // Spawn greeter: a waving robot + a "FOLLOW ME" ground arrow that walks new
+    // players to the arcade entrance (the arcade hall sits at z 46, front at z 28).
+    this.guide = new GuideBot(
+      this.engine.scene,
+      (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
+      { start: new THREE.Vector2(3, 14), arcade: new THREE.Vector2(0, 26), arrowAt: new THREE.Vector2(0, 6) },
+    )
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -908,9 +918,10 @@ export class Game {
     const solids = zone === 'earth' ? this.world.solidMeshes : env!.solidMeshes
     this.physics.setSurfaces(ground, colliders)
     this.camera.setSolids(solids)
-    // The blob edge belongs to the Earth city; hide it off-world (its group lives
-    // on the scene, not the swappable world group).
+    // The blob edge + guide bot belong to the Earth city; hide them off-world
+    // (their groups live on the scene, not the swappable world group).
     if (this.boundary) this.boundary.group.visible = zone === 'earth'
+    if (this.guide) this.guide.group.visible = zone === 'earth'
     // Mechs follow you off-world (pilot your giant robot on Mars/Moon); the cars
     // stay parked on Earth. Missiles can fire in any zone.
     this.vehicles.setZone(zone, spawn)
@@ -1914,6 +1925,7 @@ export class Game {
     if (onEarth) this.npcs.update(dt, this.player.position)
     if (onEarth) this.events.update(dt, this.player.position)
     if (onEarth) this.patrols.update(dt)
+    if (onEarth) this.guide.update(dt, this.player.position.x, this.player.position.z)
     this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
@@ -2268,6 +2280,7 @@ export class Game {
     // Tears down registered systems (multiplayer net + renderers, pooled FX).
     this.systems.dispose()
     this.boundary.dispose()
+    this.guide.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()

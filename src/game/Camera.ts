@@ -217,7 +217,7 @@ export class CameraController {
     // elevated road)? If so, raising the view would jam it into the ceiling, so
     // instead flatten to look level + forward, which is far easier to orient by.
     this.raycaster.set(this.currentTarget, this.up.set(0, 1, 0))
-    this.raycaster.far = 9
+    this.raycaster.far = 13 // reach taller overpasses / the arcade ceiling, not just low tunnels
     const lowCeiling = this.raycaster.intersectObjects(this.solids, false).length > 0
     // Ease the "enclosed" factor instead of using the raw boolean: the up-ray
     // flickers on/off as it crosses beams/gaps, and snapping the view angle
@@ -235,7 +235,11 @@ export class CameraController {
       this.offsetDir.set(-Math.sin(yaw) * cosE, Math.sin(effPitch), -Math.cos(yaw) * cosE)
     }
 
-    this.camPos.copy(this.currentTarget).addScaledVector(this.offsetDir, this.dist)
+    // Under a ceiling (overpass / arcade), tuck the camera in closer behind the
+    // subject so the deck above doesn't sit between camera and player - which read
+    // as the view going dark/hidden. Local distance only (this.dist stays stable).
+    const camDist = this.dist * (1 - 0.45 * this.ceilingF)
+    this.camPos.copy(this.currentTarget).addScaledVector(this.offsetDir, camDist)
 
     // Ground-clearance clamp: never let the camera dip under the terrain below it.
     this.raycaster.set(this.probeOrigin.set(this.camPos.x, this.camPos.y + 50, this.camPos.z), this.up.set(0, -1, 0))
