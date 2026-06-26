@@ -58,10 +58,15 @@ export class Boundary {
     const eyeGeo = ownG(new THREE.SphereGeometry(1, 10, 8))
     const pupilGeo = ownG(new THREE.SphereGeometry(1, 8, 6))
 
+    const R = opts.radius
     for (let i = 0; i < opts.count; i++) {
-      const a = (i / opts.count) * Math.PI * 2
-      const x = Math.cos(a) * opts.radius
-      const z = Math.sin(a) * opts.radius
+      // Distribute evenly around the SQUARE rim (matching the square play area) so
+      // no corner content gets walled off, rather than an inscribed circle.
+      const seg = (i / opts.count) * 4
+      const e = Math.floor(seg) % 4
+      const u = (seg - Math.floor(seg)) * 2 - 1 // -1..1 along this edge
+      const x = e === 1 ? R : e === 3 ? -R : u * R
+      const z = e === 0 ? -R : e === 2 ? R : u * R
       const size = 14 + (i % 3) * 4 // bigger so they read as a barrier, with variety
 
       const g = new THREE.Group()
@@ -90,7 +95,7 @@ export class Boundary {
       const baseY = getGround(x, z) + size * 0.5
       g.position.set(x, baseY, z)
       this.group.add(g)
-      this.blobs.push({ g, baseY, ph: a * 2.3, react: 0 })
+      this.blobs.push({ g, baseY, ph: i * 1.7, react: 0 })
     }
 
     scene.add(this.group)
@@ -115,13 +120,14 @@ export class Boundary {
       b.g.position.y = b.baseY + Math.sin(this.t * 1.5 + b.ph) * 1.4 + b.react * 4
     }
 
-    const d = Math.hypot(px, pz)
-    if (d <= this.radius) return null
+    // Square containment (matches the playable square): out if either axis is past
+    // the rim. Height-independent so you can't jetpack over it.
+    if (Math.abs(px) <= this.radius && Math.abs(pz) <= this.radius) return null
 
-    // Past the edge: always shove back just inside so nothing escapes.
-    const back = this.radius - 2
-    const x = (px / d) * back
-    const z = (pz / d) * back
+    // Shove back just inside the rim on whichever axis (or both) went past it.
+    const lim = this.radius - 2
+    const x = Math.max(-lim, Math.min(lim, px))
+    const z = Math.max(-lim, Math.min(lim, pz))
     if (!canLaunch || this.cooldown > 0) return { x, z, launch: false, vx: 0, vy: 0, vz: 0 }
 
     // A real bounce: kick the nearest blob so it reads as the one that flung you,

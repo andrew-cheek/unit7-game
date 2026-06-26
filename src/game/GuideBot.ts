@@ -19,10 +19,12 @@ export class GuideBot {
 
   private t = 0
   private phase: 'idle' | 'leading' | 'greeting' = 'idle'
+  private done = false // latched once you reach the arcade, so the arrow stays gone
   private px: number; private pz: number // current bot ground position
   private readonly start: THREE.Vector2
   private readonly dest: THREE.Vector2 // arcade entrance
   private readonly arrowAt: THREE.Vector2
+  private arrowGroundY = 0 // arrowAt's ground height, sampled once (it never moves)
   private getGround: (x: number, z: number) => number
 
   constructor(
@@ -34,6 +36,7 @@ export class GuideBot {
     this.start = opts.start.clone()
     this.dest = opts.arcade.clone()
     this.arrowAt = opts.arrowAt.clone()
+    this.arrowGroundY = getGround(this.arrowAt.x, this.arrowAt.y) // static; sample once
     this.px = this.start.x
     this.pz = this.start.y
 
@@ -134,17 +137,16 @@ export class GuideBot {
 
     // Arrow sits near spawn and always points at the bot; pulse it, and fade it
     // out once the player has reached the arcade so it doesn't linger.
-    const agy = this.getGround(this.arrowAt.x, this.arrowAt.y)
+    const agy = this.arrowGroundY // cached: arrowAt never moves
     this.arrow.position.set(this.arrowAt.x, agy + 0.07, this.arrowAt.y)
     this.arrow.rotation.y = Math.atan2(this.px - this.arrowAt.x, this.pz - this.arrowAt.y)
     this.label.position.set(this.arrowAt.x, agy + 3.4, this.arrowAt.y)
 
-    // Fade the arrow only once the player is actually INSIDE the arcade hall (its
-    // front door is at z~28), not merely near the lead target - otherwise it
-    // vanishes the instant you land in the plaza (you touch down close to it).
-    const insideArcade = playerZ > 32
+    // Latch the arrow off once you reach the arcade (front door z~28), and keep it
+    // off - otherwise it glows back every time you walk back out into the plaza.
+    if (playerZ > 32) this.done = true
     const pulse = 0.6 + Math.sin(this.t * 4) * 0.25
-    const target = insideArcade ? 0 : pulse
+    const target = this.done ? 0 : pulse
     this.arrowMat.opacity = THREE.MathUtils.damp(this.arrowMat.opacity, target, 5, dt)
     ;(this.label.material as THREE.SpriteMaterial).opacity = Math.min(1, this.arrowMat.opacity * 1.6)
   }

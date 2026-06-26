@@ -242,12 +242,19 @@ export class CameraController {
     this.camPos.copy(this.currentTarget).addScaledVector(this.offsetDir, camDist)
 
     // Ground-clearance clamp: never let the camera dip under the terrain below it.
+    // Use the highest surface that's actually BELOW the camera, not down[0]: an
+    // overhead solid (e.g. the arcade's invisible ceiling collider) is hit first
+    // and would otherwise shove the camera UP through the roof. Hits come sorted
+    // top-down, so the first one under the camera is the floor/deck beneath it.
     this.raycaster.set(this.probeOrigin.set(this.camPos.x, this.camPos.y + 50, this.camPos.z), this.up.set(0, -1, 0))
     this.raycaster.far = 200
     const down = this.raycaster.intersectObjects(this.solids, false)
-    if (down.length > 0) {
-      const minY = down[0].point.y + config.camera.minGroundClearance
-      if (this.camPos.y < minY) this.camPos.y = minY
+    for (let i = 0; i < down.length; i++) {
+      if (down[i].point.y < this.camPos.y) {
+        const minY = down[i].point.y + config.camera.minGroundClearance
+        if (this.camPos.y < minY) this.camPos.y = minY
+        break
+      }
     }
 
     // Transient shake: decaying random jitter on the final camera position.

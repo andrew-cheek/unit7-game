@@ -1813,7 +1813,12 @@ export class Game {
       // when piloting) and keep the blobs jiggling while you drive near the rim.
       if (this.zone === 'earth') {
         const b = this.boundary.update(dt, this.vehicles.current.position.x, this.vehicles.current.position.z, false)
-        if (b) { this.vehicles.current.position.x = b.x; this.vehicles.current.position.z = b.z }
+        if (b) {
+          this.vehicles.current.position.x = b.x; this.vehicles.current.position.z = b.z
+          // Re-sync the visible mesh too (Vehicles.update already copied the
+          // pre-clamp position to it) so the mech doesn't poke past the rim a frame.
+          this.vehicles.current.model.group.position.copy(this.vehicles.current.position)
+        }
       }
       this.player.object.position.copy(this.vehicles.current.position)
       this.focus.copy(this.vehicles.current.position)
@@ -1836,6 +1841,11 @@ export class Game {
         if (b) {
           this.player.position.x = b.x
           this.player.position.z = b.z
+          // Re-anchor render interp to the clamped spot, else the next sim step
+          // restores object.position from the pre-clamp rTrue and the player walks
+          // straight through the edge (the old square clamp leaned on the y<120
+          // physics walls; this must hold at any height to stop the jetpack fly-off).
+          this.player.resetInterp()
           if (b.launch) {
             this.player.launchVec(b.vx, b.vy, b.vz)
             this.audio.play('portal'); this.camera.shake(0.6)
