@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { config } from './config'
 
 /** A bounce returned when the player crosses the edge: a launch velocity plus the
  *  position clamped back just inside the ring (so they can never escape). */
@@ -130,16 +131,21 @@ export class Boundary {
 
     let dx = this.arcadeX - px
     let dz = this.arcadeZ - pz
-    const dl = Math.hypot(dx, dz) || 1
-    dx /= dl; dz /= dl
+    const L = Math.hypot(dx, dz) || 1
+    dx /= L; dz /= L
     // "Roughly" toward the arcade: a small random spread so it's playful.
     const j = (Math.random() - 0.5) * 0.5
     const c = Math.cos(j), s = Math.sin(j)
     const rx = dx * c - dz * s
     const rz = dx * s + dz * c
 
-    const SPEED = 62, UP = 38
-    return { x, z, launch: true, vx: rx * SPEED, vy: UP, vz: rz * SPEED }
+    // Bounce HIGH and aim the arc to land near the arcade: derive the horizontal
+    // speed from the ballistic range for this launch (time of flight 2*UP/g),
+    // boosted a little to counter air drag and clamped so it never flings absurdly.
+    const UP = 50
+    const g = Math.abs(config.zones.earth.gravity)
+    const vh = Math.min(120, Math.max(26, (L / ((2 * UP) / g)) * 1.3))
+    return { x, z, launch: true, vx: rx * vh, vy: UP, vz: rz * vh }
   }
 
   dispose() {

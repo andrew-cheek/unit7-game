@@ -394,7 +394,9 @@ export class Game {
       this.boundary = new Boundary(
         this.engine.scene,
         (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
-        { radius: 210, count: lowTier ? 16 : tier.name === 'medium' ? 22 : 30, arcade: new THREE.Vector3(0, 0, 46), eyes: !lowTier },
+        // Ring the OUTER rim of the grid (not scattered in the city), so it reads
+        // as the edge of the world. More blobs so the rim stays covered.
+        { radius: config.world.half - 2, count: lowTier ? 22 : tier.name === 'medium' ? 28 : 34, arcade: new THREE.Vector3(0, 0, 46), eyes: !lowTier },
       )
     }
 

@@ -146,7 +146,8 @@ export class DropIn {
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
 
-  private static readonly STEER = 64 // steer authority (forward + lateral) during the dive
+  private static readonly STEER = 64 // lateral steer authority during the dive
+  private static readonly GLIDE = 80 // forward glide speed at a mid (angled) tilt
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
 
@@ -400,26 +401,24 @@ export class DropIn {
   private buildPlatforms() {
     const C = { city: 0x27e7ff, arcade: 0xff2bd0, mars: 0xff8a1e, moon: 0xbfe6ff }
     const labels: Record<string, string> = { city: 'CITY', arcade: 'ARCADE', mars: 'MARS', moon: 'MOON' }
-    // Two pads per destination, spread wide on a ring around the descent at big
-    // staggered altitudes - so they're easy to spot, you commit to one (they're
-    // not clustered), and there's always a backup of each. The jetpack lets you
-    // climb to the high ones. Pulled closer to the descent line + higher up so you
-    // pass right by them. [dest, angle, ring radius, altitude]
-    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number]> = [
-      ['moon', 0.4, 130, 320],
-      ['mars', 1.2, 200, 280],
-      ['city', 2.0, 150, 470],
-      ['arcade', 2.9, 230, 380],
-      ['moon', 3.7, 180, 660],
-      ['mars', 4.4, 140, 560],
-      ['city', 5.1, 240, 770],
-      ['arcade', 5.9, 160, 500],
+    // One pad per destination, placed right IN the descent corridor at staggered
+    // altitudes with a small left/right offset - so you just drift toward the one
+    // you want as you fall past it. (The old wide ring of pads sat far off the dive
+    // line and was nearly impossible to reach.) [dest, altitude, lateral offset]
+    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number]> = [
+      ['moon', 900, -64],
+      ['arcade', 690, 64],
+      ['mars', 470, -64],
+      ['city', 280, 48],
     ]
-    for (const [dest, ang, rad, alt] of defs) {
+    const span = this.start.y - this.target.y
+    for (const [dest, alt, off] of defs) {
       const col = C[dest]
-      const x = this.target.x + Math.cos(ang) * rad
-      const z = this.target.z + Math.sin(ang) * rad
-      const y = this.getGround(x, z) + alt
+      const y = this.target.y + alt
+      // Position on the start->target descent line at this altitude, nudged aside.
+      const f = THREE.MathUtils.clamp((this.start.y - y) / span, 0, 1)
+      const x = THREE.MathUtils.lerp(this.start.x, this.target.x, f) + off
+      const z = THREE.MathUtils.lerp(this.start.z, this.target.z, f)
       const group = new THREE.Group()
       group.position.set(x, y, z)
       // Huge landing disk.
@@ -447,7 +446,7 @@ export class DropIn {
       sprite.scale.set(44, 16, 1)
       group.add(sprite)
       this.group.add(group)
-      this.platforms.push({ group, ring, x, y, z, bx: x, by: y, bz: z, ph: ang * 1.7, dest })
+      this.platforms.push({ group, ring, x, y, z, bx: x, by: y, bz: z, ph: alt * 0.013, dest })
     }
   }
 
@@ -542,19 +541,19 @@ export class DropIn {
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
     if (this.phase === 'dive') {
-      // Direct, camera-relative flight: push forward to accelerate forward AND tip
-      // into a steeper, faster dive; pull back to flare and slow; moveX strafes.
-      // Travel follows the STICK, not attitude - so pushing forward actually moves
-      // you forward (a nose-dive keeps carrying your momentum) and the chase camera,
-      // which tracks the velocity heading, stays steady instead of swinging when an
-      // attitude-derived glide collapses to zero at a full dive.
-      const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER
-      const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER
-      this.hVel.x += ax * dt
-      this.hVel.z += az * dt
-      const damp = Math.exp(-DropIn.H_DAMP * dt)
-      this.hVel.x *= damp
-      this.hVel.z *= damp
+      // Forward travel is derived from ATTITUDE, not the stick: it peaks at a mid
+      // (angled) tilt and falls to zero at a full straight-down plunge. So holding
+      // forward all the way plunges STRAIGHT DOWN (fast, no drift), while tapping /
+      // letting go keeps a shallower tilt that falls slower AND glides you forward
+      // at an angle. moveX strafes to pick your line / thread a portal. The chase
+      // camera heading is damped (see below) so this no longer swings the view.
+      const glide = Math.sin(this.pitch * Math.PI) * DropIn.GLIDE
+      const lat = this.input.moveX * DropIn.STEER
+      const tvx = Math.sin(yaw) * glide - Math.cos(yaw) * lat
+      const tvz = Math.cos(yaw) * glide + Math.sin(yaw) * lat
+      const k = Math.min(1, dt * 2.6) // responsive approach = tight control
+      this.hVel.x += (tvx - this.hVel.x) * k
+      this.hVel.z += (tvz - this.hVel.z) * k
     } else {
       const controlScale = this.phase === 'canopy' ? 0.6 + this.quality * 0.4 : 1
       const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * controlScale
@@ -590,9 +589,14 @@ export class DropIn {
         // Continuous attitude: push forward to tip toward a straight-down dive,
         // pull back to flatten/flare. moveY -1..1 -> 0..1 tilt (0.5 = hands-off).
         // The faster you face down, the faster you fall.
-        const diveAmt = clamp(0.5 + this.input.moveY * 0.5, 0, 1)
+        // Neutral sits below mid so letting go settles into a shallow forward
+        // glide (not a hover); holding all the way reaches a full straight-down
+        // plunge. moveY -1..1 -> ~0..1 tilt, biased low.
+        const diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
-        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * this.pitch
+        // Speed curves up steeply with tilt, so a full straight-down hold falls
+        // ~2x as fast as a tapped, angled glide.
+        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * Math.pow(this.pitch, 1.6)
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
         // A full straight-down nose-dive holds steady - flips are deliberate only
         // (FLIP button / H), so pushing all the way forward plunges cleanly at
@@ -862,9 +866,10 @@ export class DropIn {
     for (const p of this.platforms) {
       p.ring.rotation.z += dt * 0.8
       p.group.rotation.y += dt * 0.25
-      p.x = p.bx + Math.cos(pt * 0.32 + p.ph) * 34
-      p.y = p.by + Math.sin(pt * 0.55 + p.ph) * 22
-      p.z = p.bz + Math.sin(pt * 0.27 + p.ph) * 34
+      // Gentle bob only - the old wide drift made the pads dodge away as you fell.
+      p.x = p.bx + Math.cos(pt * 0.3 + p.ph) * 8
+      p.y = p.by + Math.sin(pt * 0.5 + p.ph) * 7
+      p.z = p.bz + Math.sin(pt * 0.27 + p.ph) * 8
       p.group.position.set(p.x, p.y, p.z)
     }
   }
@@ -872,8 +877,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 36) continue
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 28) {
+      if (Math.abs(this.pos.y - p.y) > 46) continue // taller vertical catch window
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 40) { // wider catch radius
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true
