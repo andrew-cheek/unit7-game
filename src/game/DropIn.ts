@@ -1090,6 +1090,19 @@ export class DropIn {
       this.cam.position.y += (Math.random() - 0.5) * j
       this.cam.position.z += (Math.random() - 0.5) * j
       this.camShake *= 0.86
+      // The shake can jitter the close-trailing dive camera toward the diver and
+      // shove its near plane inside the body/wings - which flashes the dark mesh
+      // interior (the "black flicker" while diving). Clamp it back out so the
+      // camera never gets nearer than the wingspan + near plane. No allocation.
+      const dx = this.cam.position.x - this.pos.x
+      const dy = this.cam.position.y - this.pos.y
+      const dz = this.cam.position.z - this.pos.z
+      const d = Math.hypot(dx, dy, dz)
+      const minD = 3.5
+      if (d > 0.001 && d < minD) {
+        const s = minD / d
+        this.cam.position.set(this.pos.x + dx * s, this.pos.y + dy * s, this.pos.z + dz * s)
+      }
     }
     this.cam.lookAt(lookWant)
   }
