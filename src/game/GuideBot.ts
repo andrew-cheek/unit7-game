@@ -15,7 +15,9 @@ export class GuideBot {
   private armPivot = new THREE.Group()
   private arrow = new THREE.Group()
   private arrowMat!: THREE.MeshBasicMaterial
-  private label!: THREE.Sprite
+  private label!: THREE.Sprite // speech bubble floating over the bot's head
+  private beacon = new THREE.Group() // glowing ground ring + light beam so the bot reads from afar
+  private beaconMats: THREE.Material[] = []
 
   private t = 0
   private phase: 'idle' | 'leading' | 'greeting' = 'idle'
@@ -45,8 +47,8 @@ export class GuideBot {
 
     // --- the robot (built a bit bigger than a normal NPC so it stands out) ---
     const accent = 0x57ff9c
-    const bodyMat = own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.5, roughness: 0.45 }))
-    const headMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: accent, emissiveIntensity: 1.6, roughness: 0.4 }))
+    const bodyMat = own(new THREE.MeshStandardMaterial({ color: 0x24304a, emissive: accent, emissiveIntensity: 0.35, metalness: 0.5, roughness: 0.4 }))
+    const headMat = own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: accent, emissiveIntensity: 2.6, roughness: 0.4 }))
 
     const torso = new THREE.Mesh(ownG(new THREE.CapsuleGeometry(0.55, 1.1, 6, 12)), bodyMat)
     torso.position.y = 1.6
@@ -68,14 +70,34 @@ export class GuideBot {
     leftArm.position.set(-0.78, 1.6, 0)
     this.bot.add(leftArm)
     this.armPivot.position.set(0.78, 2.1, 0) // right shoulder
+    this.armPivot.rotation.order = 'YXZ' // aim the point: X tilts the arm up to horizontal, Y swings it onto the arcade bearing
     const rightArm = new THREE.Mesh(armGeo, bodyMat)
     rightArm.position.set(0, -0.5, 0) // hang down from the pivot
     this.armPivot.add(rightArm)
-    const hand = new THREE.Mesh(ownG(new THREE.SphereGeometry(0.2, 10, 8)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: accent, emissiveIntensity: 1.2, roughness: 0.4 })))
+    const hand = new THREE.Mesh(ownG(new THREE.SphereGeometry(0.22, 10, 8)), own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: accent, emissiveIntensity: 2.0, roughness: 0.4 })))
     hand.position.set(0, -1.0, 0)
     this.armPivot.add(hand)
     this.bot.add(this.armPivot)
+    this.bot.scale.setScalar(1.35) // oversized so the greeter clearly stands apart from NPC crowds
     this.group.add(this.bot)
+
+    // --- beacon: a glowing ground ring + a soft light column, so the bot is an
+    // unmistakable landmark from anywhere in the plaza (follows the bot if it walks) ---
+    const beaconMat = (m: THREE.Material) => { this.beaconMats.push(m); return m }
+    const ring = new THREE.Mesh(
+      ownG(new THREE.RingGeometry(2.6, 3.2, 40)),
+      beaconMat(new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })),
+    )
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.06
+    this.beacon.add(ring)
+    const beam = new THREE.Mesh(
+      ownG(new THREE.CylinderGeometry(0.9, 1.9, 26, 18, 1, true)),
+      beaconMat(new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })),
+    )
+    beam.position.y = 13
+    this.beacon.add(beam)
+    this.group.add(this.beacon)
 
     // --- ground arrow + FOLLOW ME label (additive, so it reads as lit neon) ---
     this.arrowMat = own(new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
@@ -91,8 +113,9 @@ export class GuideBot {
     this.arrow.add(headTri)
     this.group.add(this.arrow)
 
-    this.label = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: neonText('FOLLOW ME', accent), transparent: true, opacity: 0, depthWrite: false, fog: false })) as THREE.SpriteMaterial)
-    this.label.scale.set(8, 3, 1)
+    // Speech bubble over the bot's head - it greets you and nudges you to the arcade.
+    this.label = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: speechBubble('Want to play an', 'old-school game?', accent), transparent: true, opacity: 0, depthWrite: false, fog: false })) as THREE.SpriteMaterial)
+    this.label.scale.set(9, 4.5, 1)
     this.group.add(this.label)
 
     scene.add(this.group)
@@ -127,49 +150,87 @@ export class GuideBot {
     const gy = this.getGround(this.px, this.pz)
     if (walking) {
       this.bot.position.set(this.px, gy + Math.abs(Math.sin(this.t * 9)) * 0.14, this.pz)
-      this.armPivot.rotation.z = Math.sin(this.t * 9) * 0.5 // arm swings with the stride
+      this.armPivot.rotation.set(0, 0, Math.sin(this.t * 9) * 0.5) // arm swings with the stride
     } else {
-      // idle / greeting: face the player and wave the raised arm
+      // idle / greeting: face the player but POINT the right arm at the arcade so
+      // the gesture, the speech bubble, and the ground arrow all say "go play".
       this.bot.position.set(this.px, gy + Math.abs(Math.sin(this.t * 2.4)) * 0.12, this.pz)
       this.bot.rotation.y = Math.atan2(playerX - this.px, playerZ - this.pz)
-      this.armPivot.rotation.z = 2.3 + Math.sin(this.t * 8) * 0.4 // up + waving
+      const yawArcade = Math.atan2(this.dest.x - this.px, this.dest.y - this.pz)
+      // X raises the arm to ~horizontal-and-up; Y (YXZ order) swings it onto the
+      // arcade bearing in world space, minus the bot's own facing.
+      this.armPivot.rotation.set(-Math.PI / 2 - 0.35 + Math.sin(this.t * 3) * 0.06, yawArcade - this.bot.rotation.y, 0)
     }
+
+    // Beacon (ground ring + light column) tracks the bot's feet.
+    this.beacon.position.set(this.px, gy, this.pz)
+
+    // Speech bubble floats over the bot's head, bobbing gently (sprite billboards).
+    this.label.position.set(this.px, gy + 5.6 + Math.sin(this.t * 2) * 0.12, this.pz)
 
     // Arrow sits near spawn and always points at the bot; pulse it, and fade it
     // out once the player has reached the arcade so it doesn't linger.
     const agy = this.arrowGroundY // cached: arrowAt never moves
     this.arrow.position.set(this.arrowAt.x, agy + 0.07, this.arrowAt.y)
     this.arrow.rotation.y = Math.atan2(this.px - this.arrowAt.x, this.pz - this.arrowAt.y)
-    this.label.position.set(this.arrowAt.x, agy + 3.4, this.arrowAt.y)
 
-    // Latch the arrow off once you reach the arcade (front door z~28), and keep it
+    // Latch everything off once you reach the arcade (front door z~28), and keep it
     // off - otherwise it glows back every time you walk back out into the plaza.
     if (playerZ > 32) this.done = true
     const pulse = 0.6 + Math.sin(this.t * 4) * 0.25
     const target = this.done ? 0 : pulse
     this.arrowMat.opacity = THREE.MathUtils.damp(this.arrowMat.opacity, target, 5, dt)
-    ;(this.label.material as THREE.SpriteMaterial).opacity = Math.min(1, this.arrowMat.opacity * 1.6)
+    // Bubble + beacon stay up while guiding (full strength, not the arrow's pulse),
+    // then fade together once you've made it inside.
+    const guideVis = THREE.MathUtils.damp((this.label.material as THREE.SpriteMaterial).opacity, this.done ? 0 : 1, 5, dt)
+    ;(this.label.material as THREE.SpriteMaterial).opacity = guideVis
+    ;(this.beaconMats[0] as THREE.MeshBasicMaterial).opacity = guideVis * (0.4 + Math.sin(this.t * 4) * 0.18)
+    ;(this.beaconMats[1] as THREE.MeshBasicMaterial).opacity = guideVis * 0.16
   }
 
   dispose() {
     this.group.parent?.remove(this.group)
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
+    this.beaconMats.forEach((m) => m.dispose())
     ;(this.label.material as THREE.SpriteMaterial).map?.dispose()
   }
 }
 
-/** A glowing neon text texture for the floating label. */
-function neonText(text: string, color: number): THREE.CanvasTexture {
+/** A neon speech-bubble texture (rounded panel + tail) with up to two text lines. */
+function speechBubble(line1: string, line2: string, color: number): THREE.CanvasTexture {
   const cv = document.createElement('canvas')
-  cv.width = 256; cv.height = 96
+  cv.width = 512; cv.height = 256
   const ctx = cv.getContext('2d')!
-  ctx.font = '800 52px ui-monospace, Menlo, monospace'
+  const hex = '#' + color.toString(16).padStart(6, '0')
+  // Rounded panel.
+  const x = 24, y = 18, w = 464, h = 168, r = 30
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+  // Tail pointing down toward the bot's head.
+  ctx.moveTo(236, y + h)
+  ctx.lineTo(256, y + h + 46)
+  ctx.lineTo(290, y + h)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(6,10,18,0.86)'
+  ctx.fill()
+  ctx.lineWidth = 5
+  ctx.strokeStyle = hex
+  ctx.shadowColor = hex
+  ctx.shadowBlur = 22
+  ctx.stroke()
+  // Text.
+  ctx.shadowBlur = 10
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  ctx.shadowColor = '#' + color.toString(16).padStart(6, '0')
-  ctx.shadowBlur = 18
   ctx.fillStyle = '#eafff2'
-  ctx.fillText(text, 128, 48)
+  ctx.font = '800 52px ui-monospace, Menlo, monospace'
+  ctx.fillText(line1, 256, y + 58)
+  ctx.fillText(line2, 256, y + 116)
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
