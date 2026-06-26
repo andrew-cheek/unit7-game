@@ -21,6 +21,8 @@ import { CameraController } from './Camera'
 import { buildLandmarks } from './Landmarks'
 import { MissionSystem } from './MissionSystem'
 import { ArcadeSystem } from './ArcadeSystem'
+import { Boundary } from './Boundary'
+import { GuideBot } from './GuideBot'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -41,7 +43,7 @@ import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp, damp, lerp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, type Profile } from './storage'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, loadMissionProgress, saveMissionProgress, type Profile } from './storage'
 import {
   loadProgression, addXp, noteLogin, noteDaily, levelForXp, levelInfo, tierForRating, cosmeticById,
   ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
@@ -148,6 +150,7 @@ export class Game {
   // Grapple-arm: previous held state (for the fire edge) + reusable scratch
   // vectors (also borrowed by fireMissiles; they never run in the same frame).
   private grapplePrev = false
+  private grappleHit = false // last grapple latched a target (gates auto chain re-fire)
   private grappleO = new THREE.Vector3()
   private grappleD = new THREE.Vector3()
 
@@ -158,6 +161,8 @@ export class Game {
   // Arcade cabinet proximity + transport beam, owned by ArcadeSystem. enter/exit
   // minigame stays in Game (engine pause, player, rewards).
   private arcade!: ArcadeSystem
+  private boundary!: Boundary // bouncy alien-blob world edge (Earth)
+  private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -277,6 +282,9 @@ export class Game {
     this.unlocked = new Set(this.profile.unlocks)
     // Objective chain + guided beacon (a tall glowing column at the current goal).
     this.missions = new MissionSystem()
+    // Resume the guided chain where it left off. Session captures are 0 here, so
+    // a resumed 'capture' objective rebases cleanly (see MissionSystem.restore).
+    this.missions.restore(loadMissionProgress(), 0)
     this.engine.scene.add(this.missions.objBeacon)
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
     this.missiles = new Missiles(this.engine.scene)
@@ -380,6 +388,32 @@ export class Game {
     // Arcade proximity + transport beam (beam is a pooled mesh ArcadeSystem owns
     // and frees in its own dispose(); the arcade arrays hold only landmark resources).
     this.arcade = new ArcadeSystem(this.engine.scene)
+
+    // Soft world edge: a ring of jiggly alien blobs just inside the city rim that
+    // bounce you back toward the arcade instead of an abrupt invisible wall. Earth
+    // only; count + eyes scale down on the mobile tier.
+    {
+      const lowTier = tier.name === 'low'
+      this.boundary = new Boundary(
+        this.engine.scene,
+        (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
+        // Ring the OUTER rim of the grid (not scattered in the city), so it reads
+        // as the edge of the world. More blobs so the rim stays covered.
+        { radius: config.world.half - 2, count: lowTier ? 22 : tier.name === 'medium' ? 28 : 34, arcade: new THREE.Vector3(0, 0, 46), eyes: !lowTier },
+      )
+    }
+
+    // Spawn greeter: a waving robot + a "FOLLOW ME" ground arrow that walks new
+    // players to the arcade entrance (the arcade hall sits at z 46, front at z 28).
+    // You drop in at the plaza (~z=20, just south of the arcade whose hall is at
+    // z=46, front door z=28). So the greeter waits at the door facing you, the
+    // FOLLOW ME arrow sits at the landing pointing north to it, and it leads you
+    // INTO the hall when you walk up.
+    this.guide = new GuideBot(
+      this.engine.scene,
+      (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
+      { start: new THREE.Vector2(0, 27), arcade: new THREE.Vector2(0, 40), arrowAt: new THREE.Vector2(0, 19) },
+    )
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -772,6 +806,9 @@ export class Game {
     // daily "play" objective. Bouncing straight out earns nothing.
     if (playedLongEnough) {
       this.missions.markMinigamePlayed()
+      // Persist the latch so the arcade objective stays satisfied across reloads,
+      // even if the player hasn't reached that step of the chain yet.
+      saveMissionProgress(this.missions.serialize())
       this.awardXp(15)
       const d = noteDaily('play', 1)
       if (d.completed && d.reward) this.grantDailyReward(d.reward)
@@ -893,6 +930,10 @@ export class Game {
     const solids = zone === 'earth' ? this.world.solidMeshes : env!.solidMeshes
     this.physics.setSurfaces(ground, colliders)
     this.camera.setSolids(solids)
+    // The blob edge + guide bot belong to the Earth city; hide them off-world
+    // (their groups live on the scene, not the swappable world group).
+    if (this.boundary) this.boundary.group.visible = zone === 'earth'
+    if (this.guide) this.guide.group.visible = zone === 'earth'
     // Mechs follow you off-world (pilot your giant robot on Mars/Moon); the cars
     // stay parked on Earth. Missiles can fire in any zone.
     this.vehicles.setZone(zone, spawn)
@@ -1016,17 +1057,18 @@ export class Game {
   private updateGrapple() {
     const held = this.input.held.grapple
     const edge = held && !this.grapplePrev
-    // Fire on the press edge AND re-fire the moment a previous grapple ends while
-    // still held, so a hold (or rapid taps) chains swings and you can grapple again
-    // immediately - independent of whatever movement/steering you're doing.
-    if (held && !this.player.grappling) {
+    // Fire on a fresh press; AND auto-re-fire to CHAIN swings the instant a grapple
+    // that HIT a target ends while still held. A miss does NOT auto-re-fire - that
+    // machine-guns the tendril into open air every frame (a flickery glitch) - so
+    // retrying after a miss needs a fresh press.
+    if (held && !this.player.grappling && (edge || this.grappleHit)) {
       const cam = this.engine.camera
       cam.getWorldDirection(this.grappleD) // aim = where you're looking
       // Raycast the aim against buildings (with forward-cone auto-aim) so the
       // grapple grabs what you're looking at instead of firing into open air.
       const top = this.physics.grappleTarget(cam.position, this.grappleD, config.grapple.range, this.grappleO)
-      if (top !== null) { this.player.fireGrapple(this.grappleO, top); this.audio.play('ui') }
-      else { this.player.fireGrappleMiss(this.grappleD); if (edge) this.audio.play('ui') } // don't spam the miss chime
+      if (top !== null) { this.player.fireGrapple(this.grappleO, top); this.grappleHit = true; this.audio.play('ui') }
+      else { this.player.fireGrappleMiss(this.grappleD); this.grappleHit = false; if (edge) this.audio.play('ui') } // don't spam the miss chime
       if (edge) trackEvent('ability_used', { ability: 'grapple' })
     } else if (!held && this.player.grappling) {
       this.player.endGrapple()
@@ -1767,6 +1809,17 @@ export class Game {
     this.vehicles.update(dt, this.input, gravity)
 
     if (this.vehicles.current) {
+      // Keep vehicles inside the same blob ring (no launch - a fling makes no sense
+      // when piloting) and keep the blobs jiggling while you drive near the rim.
+      if (this.zone === 'earth') {
+        const b = this.boundary.update(dt, this.vehicles.current.position.x, this.vehicles.current.position.z, false)
+        if (b) {
+          this.vehicles.current.position.x = b.x; this.vehicles.current.position.z = b.z
+          // Re-sync the visible mesh too (Vehicles.update already copied the
+          // pre-clamp position to it) so the mech doesn't poke past the rim a frame.
+          this.vehicles.current.model.group.position.copy(this.vehicles.current.position)
+        }
+      }
       this.player.object.position.copy(this.vehicles.current.position)
       this.focus.copy(this.vehicles.current.position)
       // Frame the mech around its torso rather than its feet.
@@ -1779,9 +1832,31 @@ export class Game {
       // Low-G bubbles scale the player's gravity down locally (floaty triple-hops).
       const pg = gravity * this.playground.lowGFactor(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
       this.player.update(dt, this.input, this.physics, pg)
-      const lim = config.world.half - 1
-      this.player.position.x = clamp(this.player.position.x, -lim, lim)
-      this.player.position.z = clamp(this.player.position.z, -lim, lim)
+      if (this.zone === 'earth') {
+        // Bouncy alien-blob edge (replaces the old hard square clamp on Earth): it
+        // shoves you back inside the ring and, on foot/flying, flings you up and
+        // back toward the arcade. Height-independent, so you can't jetpack over it.
+        const canLaunch = this.player.mode === 'robot' || this.player.mode === 'plane'
+        const b = this.boundary.update(dt, this.player.position.x, this.player.position.z, canLaunch)
+        if (b) {
+          this.player.position.x = b.x
+          this.player.position.z = b.z
+          // Re-anchor render interp to the clamped spot, else the next sim step
+          // restores object.position from the pre-clamp rTrue and the player walks
+          // straight through the edge (the old square clamp leaned on the y<120
+          // physics walls; this must hold at any height to stop the jetpack fly-off).
+          this.player.resetInterp()
+          if (b.launch) {
+            this.player.launchVec(b.vx, b.vy, b.vz)
+            this.audio.play('portal'); this.camera.shake(0.6)
+            this.hud.banner = 'BOING!'; this.bannerTimer = 0.9; vibrate(30)
+          }
+        }
+      } else {
+        const lim = config.world.half - 1
+        this.player.position.x = clamp(this.player.position.x, -lim, lim)
+        this.player.position.z = clamp(this.player.position.z, -lim, lim)
+      }
       this.focus.copy(this.player.position)
       this.checkRecovery(dt)
       // Robot dance: first B press starts move 0; each additional press cycles combos.
@@ -1866,12 +1941,14 @@ export class Game {
         this.audio.play('objective')
         trackEvent('objective_complete', { objective: title })
         this.world.pushHeadline(`UNIT 7 PILOT COMPLETES "${title}"`)
+        saveMissionProgress(this.missions.serialize())
       },
     })
 
     if (onEarth) this.npcs.update(dt, this.player.position)
     if (onEarth) this.events.update(dt, this.player.position)
     if (onEarth) this.patrols.update(dt)
+    if (onEarth) this.guide.update(dt, this.player.position.x, this.player.position.z)
     this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
@@ -2225,6 +2302,8 @@ export class Game {
     this.clearWarpModel()
     // Tears down registered systems (multiplayer net + renderers, pooled FX).
     this.systems.dispose()
+    this.boundary.dispose()
+    this.guide.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { clamp } from './utils'
+import { clamp, dampAngle } from './utils'
 import { config } from './config'
 import { createRobot, createRocket, createSpaceship, type RobotModel, type VehicleModel } from './procedural'
 import type { Input } from './Input'
@@ -25,8 +25,6 @@ export interface DropHud {
 // down; leave it too late and you smash into pieces - then a helper bot zips in
 // and reassembles you on the spot.
 const START_Y = 1320 // begin far above the city (a long, high opening drop)
-const TERM_DIVE = -88 // fall speed at a full nose-dive (forward all the way)
-const TERM_FLARE = -30 // fall speed flared right back; the dive lerps between these
 const DEPLOY_REF_ALT = 260 // reference height for canopy-quality scaling (not a cap - deploy anytime)
 
 /**
@@ -76,9 +74,11 @@ export class DropIn {
   private vy = -24
   private hVel = new THREE.Vector3()
   private camHeading = 0
+  private diveHeading = 0 // the direction you're steering the dive (moveX turns it)
   private pitch = 0.5
 
   private phase: DropHud['phase'] = 'dive'
+  private lastAlt = START_Y // height above ground, cached so the camera clamp can skip its raycast up high
   private quality = 0
   private pendingDeploy = false
   private wantCut = false // cut the canopy back to free-fall
@@ -122,13 +122,17 @@ export class DropIn {
   // depth 0..1 = how far down the deck sits (1 = lowest, the city-reveal punch).
   private clouds: { mesh: THREE.Object3D; y: number; punched: boolean; depth: number }[] = []
   private streakBurst = 0 // seconds of forced speed-line intensity after a deep cloud punch
+  private streakTick = 0 // half-rate toggle for the streak buffer upload on mobile
+  private streakDt = 0 // accumulated dt between streak buffer uploads (keeps motion speed right)
   private cloudTex?: THREE.Texture
   private vapor!: THREE.Mesh // pooled punch-through burst
   private vaporMat!: THREE.MeshBasicMaterial
   private vaporT = 1 // >=1 = idle
-  // Sonic boom at terminal velocity.
+  // Sonic boom at terminal velocity: a bright shock ring + a flaring vapor cone.
   private boomRing!: THREE.Mesh
   private boomMat!: THREE.MeshBasicMaterial
+  private boomCone!: THREE.Mesh
+  private boomConeMat!: THREE.MeshBasicMaterial
   private boomT = 1 // >=1 = idle
   private boomCharge = 0
   private boomed = false
@@ -142,8 +146,11 @@ export class DropIn {
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
 
-  private static readonly STEER = 64 // lateral steer authority during the dive
-  private static readonly GLIDE = 70 // forward glide speed at a balanced (mid) tilt
+  private static readonly STEER = 64 // canopy steer authority
+  private static readonly TURN_RATE = 2.6 // dive heading turn speed (rad/s) at full moveX
+  private static readonly THETA_MIN = 0.42 // shallowest dive angle (~24deg) when fully flared
+  private static readonly V_FLARE = 36 // travel speed flared right back
+  private static readonly V_DIVE = 92 // travel speed at a full straight-down plunge
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
 
@@ -157,6 +164,7 @@ export class DropIn {
     this.pos = this.start.clone()
     this.rb = createRobot()
     this.camHeading = Math.atan2(this.target.x - this.start.x, this.target.z - this.start.z)
+    this.diveHeading = this.camHeading
     this.build()
     scene.add(this.group)
     this.placeCamera(true)
@@ -187,7 +195,7 @@ export class DropIn {
     const d = new THREE.Vector3()
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2
-      const rx = Math.cos(a) * 2.5, rz = Math.sin(a) * 2.5, ry = 5.1 // canopy rim
+      const rx = Math.cos(a) * 2.8, rz = Math.sin(a) * 2.8, ry = 6.85 // canopy rim (dome sits at y 6.5, r 2.9)
       const bx = Math.cos(a) * 0.4, bz = Math.sin(a) * 0.4, by = 2.3 // shoulders
       const cord = new THREE.Mesh(cordGeo, cordMat)
       cord.position.set((rx + bx) / 2, (ry + by) / 2, (rz + bz) / 2)
@@ -311,12 +319,19 @@ export class DropIn {
     this.vapor.frustumCulled = false
     this.group.add(this.vapor)
 
-    // Pooled sonic-boom shockwave ring.
-    this.boomMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    this.boomRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1, 0.08, 8, 40)), this.boomMat)
+    // Pooled sonic-boom shockwave: a bright fat ring + a flaring vapor cone that
+    // blooms around the diver, so the boom reads as a punch instead of a thin hoop.
+    this.boomMat = this.own(new THREE.MeshBasicMaterial({ color: 0xdff1ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.boomRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1, 0.16, 10, 56)), this.boomMat)
     this.boomRing.visible = false
     this.boomRing.frustumCulled = false
     this.group.add(this.boomRing)
+    this.boomConeMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    // Open cone (apex up) that flares downward like a pressure cone behind the dive.
+    this.boomCone = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1, 1.6, 28, 1, true)), this.boomConeMat)
+    this.boomCone.visible = false
+    this.boomCone.frustumCulled = false
+    this.group.add(this.boomCone)
   }
 
   /** A few soft cloud decks stacked down the descent. You punch through each one
@@ -390,26 +405,24 @@ export class DropIn {
   private buildPlatforms() {
     const C = { city: 0x27e7ff, arcade: 0xff2bd0, mars: 0xff8a1e, moon: 0xbfe6ff }
     const labels: Record<string, string> = { city: 'CITY', arcade: 'ARCADE', mars: 'MARS', moon: 'MOON' }
-    // Two pads per destination, spread wide on a ring around the descent at big
-    // staggered altitudes - so they're easy to spot, you commit to one (they're
-    // not clustered), and there's always a backup of each. The jetpack lets you
-    // climb to the high ones. Pulled closer to the descent line + higher up so you
-    // pass right by them. [dest, angle, ring radius, altitude]
-    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number, number]> = [
-      ['moon', 0.4, 130, 320],
-      ['mars', 1.2, 200, 280],
-      ['city', 2.0, 150, 470],
-      ['arcade', 2.9, 230, 380],
-      ['moon', 3.7, 180, 660],
-      ['mars', 4.4, 140, 560],
-      ['city', 5.1, 240, 770],
-      ['arcade', 5.9, 160, 500],
+    // One pad per destination, placed right IN the descent corridor at staggered
+    // altitudes with a small left/right offset - so you just drift toward the one
+    // you want as you fall past it. (The old wide ring of pads sat far off the dive
+    // line and was nearly impossible to reach.) [dest, altitude, lateral offset]
+    const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number]> = [
+      ['moon', 900, -64],
+      ['arcade', 690, 64],
+      ['mars', 470, -64],
+      ['city', 280, 48],
     ]
-    for (const [dest, ang, rad, alt] of defs) {
+    const span = this.start.y - this.target.y
+    for (const [dest, alt, off] of defs) {
       const col = C[dest]
-      const x = this.target.x + Math.cos(ang) * rad
-      const z = this.target.z + Math.sin(ang) * rad
-      const y = this.getGround(x, z) + alt
+      const y = this.target.y + alt
+      // Position on the start->target descent line at this altitude, nudged aside.
+      const f = THREE.MathUtils.clamp((this.start.y - y) / span, 0, 1)
+      const x = THREE.MathUtils.lerp(this.start.x, this.target.x, f) + off
+      const z = THREE.MathUtils.lerp(this.start.z, this.target.z, f)
       const group = new THREE.Group()
       group.position.set(x, y, z)
       // Huge landing disk.
@@ -437,7 +450,7 @@ export class DropIn {
       sprite.scale.set(44, 16, 1)
       group.add(sprite)
       this.group.add(group)
-      this.platforms.push({ group, ring, x, y, z, bx: x, by: y, bz: z, ph: ang * 1.7, dest })
+      this.platforms.push({ group, ring, x, y, z, bx: x, by: y, bz: z, ph: alt * 0.013, dest })
     }
   }
 
@@ -518,6 +531,7 @@ export class DropIn {
 
     const ground = this.getGround(this.pos.x, this.pos.z)
     const alt = this.pos.y - ground
+    this.lastAlt = alt
 
     const chute = this.input.consumeEdge('chute')
     if (chute) {
@@ -529,34 +543,41 @@ export class DropIn {
     if (this.input.consumeEdge('net')) this.trick()
     if (this.flipT > 0) this.flipT = Math.max(0, this.flipT - dt)
 
-    // --- horizontal steering (camera-relative) ---
-    const yaw = this.input.yaw
+    // --- horizontal steering (heading-relative for both dive + canopy) ---
     if (this.phase === 'dive') {
-      // moveX strafes; FORWARD travel is derived from attitude, not the stick:
-      // it peaks at a balanced mid tilt and falls to zero both flat (flaring) and
-      // straight-down. So "balance it down and forward" cruises forward fast while
-      // "all the way up" plummets straight down with no forward drift.
-      const glide = Math.sin(this.pitch * Math.PI) * DropIn.GLIDE
-      const lat = this.input.moveX * DropIn.STEER
-      const tvx = Math.sin(yaw) * glide - Math.cos(yaw) * lat
-      const tvz = Math.cos(yaw) * glide + Math.sin(yaw) * lat
-      const k = Math.min(1, dt * 2.6) // responsive approach = tight control
+      // Steer like a skydiver. moveX TURNS your heading (you bank into the turn
+      // instead of sliding sideways); moveY sets the dive ANGLE via `pitch`. Your
+      // velocity vector tilts from a shallow forward glide (flared) to dead vertical
+      // (full push), so pushing all the way gives a CLEAN straight-down plunge with
+      // no drift, and a neutral stick cruises forward at an angle. The approach lerp
+      // keeps real momentum so it still feels like falling, not a cursor.
+      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * dt
+      const tp = Math.min(1, this.pitch * 1.05) // saturate so a near-full hold is dead vertical
+      const theta = THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp)
+      const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch)
+      const hSpeed = Math.cos(theta) * speed
+      const tvx = Math.sin(this.diveHeading) * hSpeed
+      const tvz = Math.cos(this.diveHeading) * hSpeed
+      const k = Math.min(1, dt * 3.4) // momentum, but turns stay responsive
+      this.hVel.x += (tvx - this.hVel.x) * k
+      this.hVel.z += (tvz - this.hVel.z) * k
+    } else if (this.phase === 'canopy') {
+      // Steer the canopy the SAME heading-based way as the dive (moveX turns,
+      // glide along the heading, moveY trims) so the controls can NEVER invert
+      // relative to the view. The old version steered in fixed-yaw world space
+      // while the camera faced wherever you'd turned to, so a turn on the way down
+      // flipped left/right. Plus a gentle pull toward the beacon.
+      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * 0.7 * dt
+      const glide = (20 + this.input.moveY * 10) * (0.6 + this.quality * 0.4)
+      const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
+      const d = Math.hypot(dx, dz) || 1
+      const tvx = Math.sin(this.diveHeading) * glide + (dx / d) * 5
+      const tvz = Math.cos(this.diveHeading) * glide + (dz / d) * 5
+      const k = Math.min(1, dt * 2)
       this.hVel.x += (tvx - this.hVel.x) * k
       this.hVel.z += (tvz - this.hVel.z) * k
     } else {
-      const controlScale = this.phase === 'canopy' ? 0.6 + this.quality * 0.4 : 1
-      const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * controlScale
-      const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER * controlScale
-      this.hVel.x += ax * dt
-      this.hVel.z += az * dt
-      if (this.phase === 'canopy') {
-        // Gentle pull toward the beacon so a flailing drop still ends near the plaza.
-        const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
-        const d = Math.hypot(dx, dz) || 1
-        const assist = 5
-        this.hVel.x += (dx / d) * assist * dt
-        this.hVel.z += (dz / d) * assist * dt
-      }
+      // Land: settle straight down where you are.
       const damp = Math.exp(-DropIn.H_DAMP * dt)
       this.hVel.x *= damp
       this.hVel.z *= damp
@@ -575,12 +596,16 @@ export class DropIn {
         this.vy = this.vy < cap ? Math.min(this.vy + rate, cap) : Math.max(this.vy - rate, cap)
         this.pitch += (0 - this.pitch) * Math.min(1, dt * 4) // upright jet pose
       } else {
-        // Continuous attitude: push forward to tip toward a straight-down dive,
-        // pull back to flatten/flare. moveY -1..1 -> 0..1 tilt (0.5 = hands-off).
-        // The faster you face down, the faster you fall.
-        const diveAmt = clamp(0.5 + this.input.moveY * 0.5, 0, 1)
+        // moveY sets the dive angle: push forward to tip toward straight-down,
+        // pull back to flatten/flare. Neutral sits below mid so letting go settles
+        // into a forward glide (not a hover). Fall speed is the vertical component
+        // of the same tilted velocity vector the steering uses, so a full hold is
+        // ~2x the flared-glide descent and points dead-down.
+        const diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
-        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * this.pitch
+        const tp = Math.min(1, this.pitch * 1.05)
+        const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch)
+        const term = -speed * Math.sin(THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp))
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
         // A full straight-down nose-dive holds steady - flips are deliberate only
         // (FLIP button / H), so pushing all the way forward plunges cleanly at
@@ -604,11 +629,21 @@ export class DropIn {
         return
       }
     } else if (this.phase === 'canopy') {
-      const want = -THREE.MathUtils.lerp(16, 9, this.quality)
+      // Flare control: pull back (moveY < 0) to brake your descent for a soft
+      // touchdown, push forward to sink faster. Base rate scales with how cleanly
+      // you popped the canopy (quality).
+      const base = THREE.MathUtils.lerp(16, 9, this.quality)
+      const want = -base * (1 + this.input.moveY * 0.55) // ~0.45x flared .. ~1.55x pushed
       this.vy += (want - this.vy) * Math.min(1, dt * 2.5)
       this.chuteRig.scale.setScalar(THREE.MathUtils.damp(this.chuteRig.scale.x, 1, 6, dt))
       this.pitch += (0 - this.pitch) * Math.min(1, dt * 3)
-      if (alt <= 1.5) { this.phase = 'land'; this.landingPos.set(this.pos.x, ground, this.pos.z) }
+      if (alt <= 1.5) {
+        this.phase = 'land'
+        this.landingPos.set(this.pos.x, ground, this.pos.z)
+        // A well-timed flare (gentle descent at touchdown) is a feather landing -
+        // a little style bonus, paid out with the perfects in finishDrop.
+        if (-this.vy < 7) { this.perfects++; this.hud.result = 'FEATHER LANDING'; this.resultT = 0 }
+      }
     } else {
       // land: settle straight down where you are - no relocation.
       this.vy += (-2 - this.vy) * Math.min(1, dt * 4)
@@ -620,15 +655,21 @@ export class DropIn {
     this.pos.y += this.vy * dt
 
     this.diver.position.copy(this.pos)
-    if (hs > 0.5) this.camHeading = Math.atan2(this.hVel.x, this.hVel.z)
     const diving = this.phase === 'dive'
-    // Full forward tilt = exactly straight down (PI/2); flared = near belly-flat.
-    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, this.pitch) : 0
+    // The chase camera trails the controlled heading for BOTH dive and canopy, so
+    // turning always turns the view and left/right never invert.
+    if (diving || this.phase === 'canopy') this.camHeading = dampAngle(this.camHeading, this.diveHeading, 6, dt)
+    else if (hs > 0.5) this.camHeading = dampAngle(this.camHeading, Math.atan2(this.hVel.x, this.hVel.z), 7, dt)
+    // Full forward tilt = straight down (PI/2); flared = near belly-flat.
+    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, Math.min(1, this.pitch * 1.05)) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
-    this.diver.rotation.set(bodyPitch + flip, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
+    // Bank into the turn (roll with moveX) while diving for a steered feel.
+    const roll = diving ? clamp(-this.input.moveX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
+    this.diver.rotation.set(bodyPitch + flip, this.camHeading, roll)
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
     this.rb.setSteer?.(this.input.moveX, this.input.moveY)
+    this.rb.setWings(diving ? 1 : 0) // wingsuit: wings spread through the freefall, fold under canopy
     this.rb.setThrust(this.phase === 'dive' && this.input.held.jet ? 1 : 0) // jetpack flame
     this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
@@ -644,7 +685,8 @@ export class DropIn {
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
     this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
-    this.hud.hint = this.phase === 'canopy' ? 'STEER TO A PORTAL OR THE BEACON'
+    this.hud.hint = this.phase === 'canopy'
+      ? (alt < 70 ? (-this.vy < 7 ? 'FLARED - SOFT LANDING' : 'PULL BACK TO FLARE') : 'STEER TO A PORTAL OR THE BEACON')
       : this.phase === 'land' ? 'TOUCHDOWN'
       : 'STEER · SPACE = JETPACK · DEPLOY ANYTIME'
     // Sonic-boom charge bar (only while diving toward terminal velocity); the
@@ -848,9 +890,10 @@ export class DropIn {
     for (const p of this.platforms) {
       p.ring.rotation.z += dt * 0.8
       p.group.rotation.y += dt * 0.25
-      p.x = p.bx + Math.cos(pt * 0.32 + p.ph) * 34
-      p.y = p.by + Math.sin(pt * 0.55 + p.ph) * 22
-      p.z = p.bz + Math.sin(pt * 0.27 + p.ph) * 34
+      // Gentle bob only - the old wide drift made the pads dodge away as you fell.
+      p.x = p.bx + Math.cos(pt * 0.3 + p.ph) * 8
+      p.y = p.by + Math.sin(pt * 0.5 + p.ph) * 7
+      p.z = p.bz + Math.sin(pt * 0.27 + p.ph) * 8
       p.group.position.set(p.x, p.y, p.z)
     }
   }
@@ -858,8 +901,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 36) continue
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 28) {
+      if (Math.abs(this.pos.y - p.y) > 46) continue // taller vertical catch window
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 40) { // wider catch radius
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true
@@ -911,8 +954,11 @@ export class DropIn {
         this.boomRing.position.copy(this.pos)
         this.boomRing.rotation.x = Math.PI / 2
         this.boomRing.visible = true
+        this.boomCone.position.copy(this.pos)
+        this.boomCone.visible = true
         this.boomT = 0
-        this.kick(1.7)
+        this.kick(2.6) // harder camera punch
+        this.streakBurst = Math.max(this.streakBurst, 0.5) // speed-line crack
         this.onSfx?.('deploy')
         // A sonic boom is a marquee beat: let it override the lesser transient
         // labels (combo / overtake) but never a PORTAL lock-in.
@@ -923,11 +969,17 @@ export class DropIn {
       this.boomCharge = 0
     }
     if (this.boomT < 1) {
+      // Ring expands fast + fades; the cone blooms wide and flat behind the diver.
       this.boomT = Math.min(1, this.boomT + dt * 1.5)
+      const e = this.boomT
       this.boomRing.position.copy(this.pos)
-      this.boomRing.scale.setScalar(2 + this.boomT * 95)
-      this.boomMat.opacity = 0.7 * (1 - this.boomT)
-      if (this.boomT >= 1) this.boomRing.visible = false
+      this.boomRing.scale.setScalar(2 + e * 120)
+      this.boomMat.opacity = 0.9 * (1 - e)
+      this.boomCone.position.set(this.pos.x, this.pos.y + 3 - e * 8, this.pos.z) // trails up the dive line
+      const cr = 2 + e * 80
+      this.boomCone.scale.set(cr, 6 + e * 40, cr)
+      this.boomConeMat.opacity = 0.55 * (1 - e) * (1 - e)
+      if (this.boomT >= 1) { this.boomRing.visible = false; this.boomCone.visible = false }
     }
 
     // Rival race: a rival is "ahead" if it already reached the ground or its race
@@ -957,11 +1009,19 @@ export class DropIn {
     const m = this.streaks.material as THREE.PointsMaterial
     m.opacity = THREE.MathUtils.damp(m.opacity, burst ? 1 : fast ? 0.85 : 0.3, burst ? 12 : 5, dt)
     this.streaks.position.copy(this.pos)
+    // Rewriting the 130-point buffer + re-uploading it (needsUpdate) every frame is
+    // a real GPU stall on mobile, and this runs through the whole opening drop-in.
+    // On the low tier do it every other frame (accumulating dt so the lines still
+    // rise at the right speed); the cheap opacity/position above stay per-frame.
+    this.streakDt += dt
+    if (config.tier.name === 'low') { this.streakTick ^= 1; if (this.streakTick === 0) return }
+    const sdt = this.streakDt
+    this.streakDt = 0
     const fp = (this.streaks.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array
     const rise = burst ? 86 : fast ? 54 : 20
     for (let i = 0; i < this.streakVel.length; i++) {
       const j = i * 3 + 1
-      fp[j] += (this.streakVel[i] + rise) * dt
+      fp[j] += (this.streakVel[i] + rise) * sdt
       if (fp[j] > 14) fp[j] = -14
     }
     ;(this.streaks.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
@@ -991,6 +1051,15 @@ export class DropIn {
       // aims well down the dive line).
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -4.2); want.y += 2.6
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 4.5); lookWant.y -= 6.5
+    }
+    // Ground/roof clearance: the drop camera has no other collision, so on the
+    // steep look-down near touchdown its above-behind spot can sink into terrain,
+    // decks or rooftops. Only sample the ground when actually low - up high the
+    // camera is nowhere near the ground, and a raycast every sim step (it allocates)
+    // is what made the long descent hiccup on desktop.
+    if (this.lastAlt < 140) {
+      const camFloor = this.getGround(want.x, want.z) + 2.5
+      if (want.y < camFloor) want.y = camFloor
     }
     // The dive falls FAST (up to ~88 m/s), so a slow lerp leaves the camera
     // lagging tens of metres behind and the robot reads tiny. Follow tightly while

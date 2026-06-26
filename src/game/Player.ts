@@ -718,6 +718,9 @@ export class Player {
       else if (jetEdge && !canHop) this.jumpBufferT = config.player.jumpBuffer
       this.model.setThrust(0)
     }
+    // Wings spread while you fly the jetpack (pop out the moment you press it),
+    // fold back when you're on foot.
+    this.model.setWings(jetting ? 1 : 0)
     // Drain a buffered hop the instant we're back on the ground (on foot, not
     // flying), so a slightly-early jump press still pops you off the landing.
     if (this.jumpBufferT > 0) {

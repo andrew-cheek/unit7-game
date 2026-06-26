@@ -437,10 +437,11 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onSteer }: { drop:
   const onMove = (e: ReactPointerEvent) => {
     const d = dragRef.current
     if (!d || e.pointerId !== d.id) return
-    // Normalize a small drag into a full steer vector; +y forward is up-drag.
-    // The vertical dive axis maxes out sooner than lateral steer so a normal thumb
-    // flick up reaches a FULL nose-dive (lateral stays a touch less twitchy).
-    const x = clampN((e.clientX - d.x) / 85)
+    // Normalize a drag into a steer vector; +y forward is up-drag. X now TURNS the
+    // dive heading (hold a side-drag to keep turning), so it wants a longer throw
+    // for fine control; Y (the dive angle) still maxes out sooner so a thumb flick
+    // up reaches a full straight-down nose-dive.
+    const x = clampN((e.clientX - d.x) / 115)
     const y = clampN((d.y - e.clientY) / 58)
     onSteer(x, y)
   }

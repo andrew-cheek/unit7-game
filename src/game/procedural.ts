@@ -23,6 +23,8 @@ export interface RobotModel extends CharacterModel {
   setThrust(amount: number): void
   /** Morph toward the winged plane form. amount 0..1. */
   setPlanePose(amount: number): void
+  /** Deploy/fold the wings on their own (skydive freefall, jetpack flight). 0..1. */
+  setWings(amount: number): void
   /** Recolor the robot's accent + trim/wing glow (cosmetic). */
   setAccent(color: number): void
   /** Skydiver steering pose: x/y in -1..1 sweep the arms (forward dive sweeps
@@ -193,11 +195,11 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const makeWing = (sx: number) => {
     const pivot = new THREE.Group()
     pivot.position.set(sx * 0.28, 1.34, -0.05)
-    const wing = box(1.5, 0.07, 0.62, wingMat)
-    wing.position.set(sx * 0.85, 0, -0.05)
+    const wing = box(2.0, 0.08, 0.74, wingMat)
+    wing.position.set(sx * 1.0, 0, -0.05)
     wing.rotation.y = sx * 0.18
-    const edge = box(1.5, 0.04, 0.1, wingEdgeMat)
-    edge.position.set(sx * 0.85, 0, 0.25)
+    const edge = box(2.0, 0.05, 0.12, wingEdgeMat)
+    edge.position.set(sx * 1.0, 0, 0.3)
     edge.rotation.y = sx * 0.18
     pivot.add(wing, edge)
     pivot.scale.x = 0.001 // folded away
@@ -242,6 +244,8 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   let thrust = 0
   let steerX = 0
   let steerY = 0
+  let wings = 0 // eased wing-out, independent of the plane morph
+  let wingsTarget = 0
   mats.push(flameMat)
 
   const update = (dt: number, speed01: number, _grounded: boolean) => {
@@ -275,8 +279,9 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     core.rotation.z = Math.sin(phase) * 0.03 * s
     core.rotation.x = pose * 0.35
 
-    // Wings deploy with the plane morph.
-    const ws = 0.001 + plane * 0.999
+    // Wings deploy with the plane morph OR an explicit wing-out (skydive/jetpack).
+    wings += (wingsTarget - wings) * Math.min(1, dt * 12)
+    const ws = 0.001 + Math.max(plane, wings) * 0.999
     wingL.scale.x = ws
     wingR.scale.x = ws
 
@@ -294,6 +299,9 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   }
   const setThrust = (amount: number) => {
     thrust = Math.min(1, Math.max(0, amount))
+  }
+  const setWings = (amount: number) => {
+    wingsTarget = Math.min(1, Math.max(0, amount))
   }
   const setSteer = (x: number, y: number) => {
     steerX = Math.max(-1, Math.min(1, x))
@@ -314,7 +322,7 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     mats.forEach((m) => m.dispose())
   }
 
-  return { group, update, setFlyPose, setPlanePose, setThrust, setAccent, setSteer, dispose }
+  return { group, update, setFlyPose, setPlanePose, setThrust, setWings, setAccent, setSteer, dispose }
 }
 
 /** Spindly big-headed alien with glowing eyes - distinct from the citizens. */
