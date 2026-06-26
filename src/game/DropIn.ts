@@ -543,8 +543,7 @@ export class DropIn {
     if (this.input.consumeEdge('net')) this.trick()
     if (this.flipT > 0) this.flipT = Math.max(0, this.flipT - dt)
 
-    // --- horizontal steering (camera-relative) ---
-    const yaw = this.input.yaw
+    // --- horizontal steering (heading-relative for both dive + canopy) ---
     if (this.phase === 'dive') {
       // Steer like a skydiver. moveX TURNS your heading (you bank into the turn
       // instead of sliding sideways); moveY sets the dive ANGLE via `pitch`. Your
@@ -562,20 +561,23 @@ export class DropIn {
       const k = Math.min(1, dt * 3.4) // momentum, but turns stay responsive
       this.hVel.x += (tvx - this.hVel.x) * k
       this.hVel.z += (tvz - this.hVel.z) * k
+    } else if (this.phase === 'canopy') {
+      // Steer the canopy the SAME heading-based way as the dive (moveX turns,
+      // glide along the heading, moveY trims) so the controls can NEVER invert
+      // relative to the view. The old version steered in fixed-yaw world space
+      // while the camera faced wherever you'd turned to, so a turn on the way down
+      // flipped left/right. Plus a gentle pull toward the beacon.
+      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * 0.7 * dt
+      const glide = (20 + this.input.moveY * 10) * (0.6 + this.quality * 0.4)
+      const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
+      const d = Math.hypot(dx, dz) || 1
+      const tvx = Math.sin(this.diveHeading) * glide + (dx / d) * 5
+      const tvz = Math.cos(this.diveHeading) * glide + (dz / d) * 5
+      const k = Math.min(1, dt * 2)
+      this.hVel.x += (tvx - this.hVel.x) * k
+      this.hVel.z += (tvz - this.hVel.z) * k
     } else {
-      const controlScale = this.phase === 'canopy' ? 0.6 + this.quality * 0.4 : 1
-      const ax = (-Math.cos(yaw) * this.input.moveX + Math.sin(yaw) * this.input.moveY) * DropIn.STEER * controlScale
-      const az = (Math.sin(yaw) * this.input.moveX + Math.cos(yaw) * this.input.moveY) * DropIn.STEER * controlScale
-      this.hVel.x += ax * dt
-      this.hVel.z += az * dt
-      if (this.phase === 'canopy') {
-        // Gentle pull toward the beacon so a flailing drop still ends near the plaza.
-        const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
-        const d = Math.hypot(dx, dz) || 1
-        const assist = 5
-        this.hVel.x += (dx / d) * assist * dt
-        this.hVel.z += (dz / d) * assist * dt
-      }
+      // Land: settle straight down where you are.
       const damp = Math.exp(-DropIn.H_DAMP * dt)
       this.hVel.x *= damp
       this.hVel.z *= damp
@@ -644,9 +646,9 @@ export class DropIn {
 
     this.diver.position.copy(this.pos)
     const diving = this.phase === 'dive'
-    // The chase camera trails the controlled dive heading (so turning turns the
-    // view); under canopy it eases toward the actual travel direction.
-    if (diving) this.camHeading = dampAngle(this.camHeading, this.diveHeading, 6, dt)
+    // The chase camera trails the controlled heading for BOTH dive and canopy, so
+    // turning always turns the view and left/right never invert.
+    if (diving || this.phase === 'canopy') this.camHeading = dampAngle(this.camHeading, this.diveHeading, 6, dt)
     else if (hs > 0.5) this.camHeading = dampAngle(this.camHeading, Math.atan2(this.hVel.x, this.hVel.z), 7, dt)
     // Full forward tilt = straight down (PI/2); flared = near belly-flat.
     const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, Math.min(1, this.pitch * 1.05)) : 0
