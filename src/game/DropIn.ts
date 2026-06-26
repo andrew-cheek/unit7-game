@@ -25,8 +25,6 @@ export interface DropHud {
 // down; leave it too late and you smash into pieces - then a helper bot zips in
 // and reassembles you on the spot.
 const START_Y = 1320 // begin far above the city (a long, high opening drop)
-const TERM_DIVE = -88 // fall speed at a full nose-dive (forward all the way)
-const TERM_FLARE = -30 // fall speed flared right back; the dive lerps between these
 const DEPLOY_REF_ALT = 260 // reference height for canopy-quality scaling (not a cap - deploy anytime)
 
 /**
@@ -76,6 +74,7 @@ export class DropIn {
   private vy = -24
   private hVel = new THREE.Vector3()
   private camHeading = 0
+  private diveHeading = 0 // the direction you're steering the dive (moveX turns it)
   private pitch = 0.5
 
   private phase: DropHud['phase'] = 'dive'
@@ -146,8 +145,11 @@ export class DropIn {
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
 
-  private static readonly STEER = 64 // lateral steer authority during the dive
-  private static readonly GLIDE = 80 // forward glide speed at a mid (angled) tilt
+  private static readonly STEER = 64 // canopy steer authority
+  private static readonly TURN_RATE = 2.6 // dive heading turn speed (rad/s) at full moveX
+  private static readonly THETA_MIN = 0.42 // shallowest dive angle (~24deg) when fully flared
+  private static readonly V_FLARE = 36 // travel speed flared right back
+  private static readonly V_DIVE = 92 // travel speed at a full straight-down plunge
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
 
@@ -161,6 +163,7 @@ export class DropIn {
     this.pos = this.start.clone()
     this.rb = createRobot()
     this.camHeading = Math.atan2(this.target.x - this.start.x, this.target.z - this.start.z)
+    this.diveHeading = this.camHeading
     this.build()
     scene.add(this.group)
     this.placeCamera(true)
@@ -541,17 +544,20 @@ export class DropIn {
     // --- horizontal steering (camera-relative) ---
     const yaw = this.input.yaw
     if (this.phase === 'dive') {
-      // Forward travel is derived from ATTITUDE, not the stick: it peaks at a mid
-      // (angled) tilt and falls to zero at a full straight-down plunge. So holding
-      // forward all the way plunges STRAIGHT DOWN (fast, no drift), while tapping /
-      // letting go keeps a shallower tilt that falls slower AND glides you forward
-      // at an angle. moveX strafes to pick your line / thread a portal. The chase
-      // camera heading is damped (see below) so this no longer swings the view.
-      const glide = Math.sin(this.pitch * Math.PI) * DropIn.GLIDE
-      const lat = this.input.moveX * DropIn.STEER
-      const tvx = Math.sin(yaw) * glide - Math.cos(yaw) * lat
-      const tvz = Math.cos(yaw) * glide + Math.sin(yaw) * lat
-      const k = Math.min(1, dt * 2.6) // responsive approach = tight control
+      // Steer like a skydiver. moveX TURNS your heading (you bank into the turn
+      // instead of sliding sideways); moveY sets the dive ANGLE via `pitch`. Your
+      // velocity vector tilts from a shallow forward glide (flared) to dead vertical
+      // (full push), so pushing all the way gives a CLEAN straight-down plunge with
+      // no drift, and a neutral stick cruises forward at an angle. The approach lerp
+      // keeps real momentum so it still feels like falling, not a cursor.
+      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * dt
+      const tp = Math.min(1, this.pitch * 1.05) // saturate so a near-full hold is dead vertical
+      const theta = THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp)
+      const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch)
+      const hSpeed = Math.cos(theta) * speed
+      const tvx = Math.sin(this.diveHeading) * hSpeed
+      const tvz = Math.cos(this.diveHeading) * hSpeed
+      const k = Math.min(1, dt * 3.4) // momentum, but turns stay responsive
       this.hVel.x += (tvx - this.hVel.x) * k
       this.hVel.z += (tvz - this.hVel.z) * k
     } else {
@@ -586,17 +592,16 @@ export class DropIn {
         this.vy = this.vy < cap ? Math.min(this.vy + rate, cap) : Math.max(this.vy - rate, cap)
         this.pitch += (0 - this.pitch) * Math.min(1, dt * 4) // upright jet pose
       } else {
-        // Continuous attitude: push forward to tip toward a straight-down dive,
-        // pull back to flatten/flare. moveY -1..1 -> 0..1 tilt (0.5 = hands-off).
-        // The faster you face down, the faster you fall.
-        // Neutral sits below mid so letting go settles into a shallow forward
-        // glide (not a hover); holding all the way reaches a full straight-down
-        // plunge. moveY -1..1 -> ~0..1 tilt, biased low.
+        // moveY sets the dive angle: push forward to tip toward straight-down,
+        // pull back to flatten/flare. Neutral sits below mid so letting go settles
+        // into a forward glide (not a hover). Fall speed is the vertical component
+        // of the same tilted velocity vector the steering uses, so a full hold is
+        // ~2x the flared-glide descent and points dead-down.
         const diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
-        // Speed curves up steeply with tilt, so a full straight-down hold falls
-        // ~2x as fast as a tapped, angled glide.
-        const term = TERM_FLARE + (TERM_DIVE - TERM_FLARE) * Math.pow(this.pitch, 1.6)
+        const tp = Math.min(1, this.pitch * 1.05)
+        const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch)
+        const term = -speed * Math.sin(THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp))
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
         // A full straight-down nose-dive holds steady - flips are deliberate only
         // (FLIP button / H), so pushing all the way forward plunges cleanly at
@@ -636,14 +641,17 @@ export class DropIn {
     this.pos.y += this.vy * dt
 
     this.diver.position.copy(this.pos)
-    // Ease the heading toward the travel direction instead of snapping to it, so
-    // strafing left/right swings the chase camera smoothly rather than whipping.
-    if (hs > 0.5) this.camHeading = dampAngle(this.camHeading, Math.atan2(this.hVel.x, this.hVel.z), 7, dt)
     const diving = this.phase === 'dive'
-    // Full forward tilt = exactly straight down (PI/2); flared = near belly-flat.
-    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, this.pitch) : 0
+    // The chase camera trails the controlled dive heading (so turning turns the
+    // view); under canopy it eases toward the actual travel direction.
+    if (diving) this.camHeading = dampAngle(this.camHeading, this.diveHeading, 6, dt)
+    else if (hs > 0.5) this.camHeading = dampAngle(this.camHeading, Math.atan2(this.hVel.x, this.hVel.z), 7, dt)
+    // Full forward tilt = straight down (PI/2); flared = near belly-flat.
+    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, Math.min(1, this.pitch * 1.05)) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
-    this.diver.rotation.set(bodyPitch + flip, this.camHeading, clamp(-this.hVel.x * 0.02, -0.5, 0.5))
+    // Bank into the turn (roll with moveX) while diving for a steered feel.
+    const roll = diving ? clamp(-this.input.moveX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
+    this.diver.rotation.set(bodyPitch + flip, this.camHeading, roll)
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
     this.rb.setSteer?.(this.input.moveX, this.input.moveY)
