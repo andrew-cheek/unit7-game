@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { config } from './config'
 import { isMech, type Vehicle } from './Vehicles'
 import type { Zone } from './types'
+import type { MissionProgress } from './storage'
 
 /**
  * The one-active-at-a-time objective chain (config.missions) and its guided
@@ -48,6 +49,28 @@ export class MissionSystem {
   /** Playing a cabinet completes the 'minigame' objective. */
   markMinigamePlayed() {
     this.minigamePlayed = true
+  }
+
+  /** Snapshot of the chain position for persistence (see storage.ts). */
+  serialize(): MissionProgress {
+    return { idx: this.idx, minigamePlayed: this.minigamePlayed }
+  }
+
+  /**
+   * Restore the chain position from a prior session.
+   *
+   * `captureBase` is intentionally NOT persisted: it's an offset into the
+   * per-session `hud.captured` counter, which resets to 0 on every reload. A
+   * stale base from a previous session would make capture progress
+   * (`captured - base`) negative and the objective uncompletable. Instead we
+   * rebase to the current session's count, so a resumed 'capture' objective
+   * simply starts fresh at 0/N - the only coherent behavior once session
+   * captures are gone.
+   */
+  restore(p: MissionProgress, sessionCaptured: number) {
+    this.idx = Math.max(0, Math.min(Math.floor(Number(p.idx) || 0), config.missions.length))
+    this.minigamePlayed = !!p.minigamePlayed
+    this.captureBase = sessionCaptured
   }
 
   /**
