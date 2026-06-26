@@ -414,11 +414,14 @@ export class DropIn {
     // altitudes with a small left/right offset - so you just drift toward the one
     // you want as you fall past it. (The old wide ring of pads sat far off the dive
     // line and was nearly impossible to reach.) [dest, altitude, lateral offset]
+    // Offset must stay well WIDER than the catch radius (below) + the float bob, or
+    // a normal straight-down freefall passes through a pad and teleports you away
+    // mid-dive. You reach a pad by steering out to it, not by falling past it.
     const defs: Array<['city' | 'arcade' | 'mars' | 'moon', number, number]> = [
-      ['moon', 900, -46],
-      ['arcade', 690, 46],
-      ['mars', 470, -46],
-      ['city', 280, 34],
+      ['moon', 900, -74],
+      ['arcade', 690, 74],
+      ['mars', 470, -74],
+      ['city', 280, 74],
     ]
     const span = this.start.y - this.target.y
     for (const [dest, alt, off] of defs) {
@@ -915,8 +918,8 @@ export class DropIn {
   /** Steered into a destination portal? Lock the destination + start the handoff. */
   private checkPlatforms() {
     for (const p of this.platforms) {
-      if (Math.abs(this.pos.y - p.y) > 60) continue // generous vertical catch window
-      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 56) { // generous catch radius - easy to land on
+      if (Math.abs(this.pos.y - p.y) > 50) continue // vertical catch window
+      if (Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < 44) { // catch radius - kept well under the lateral offset (74) minus bob (8) so a straight-down faller never passes through
         this.chosenDest = p.dest
         this.landingPos.set(p.x, this.getGround(p.x, p.z), p.z)
         this.finishing = true
