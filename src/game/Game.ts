@@ -539,8 +539,8 @@ export class Game {
       this.beginDropIn()
     } else {
       this.startMorning()
-      // No drop-in to hand off the board, so start on it here too.
-      this.player.setBoard(true)
+      // Start on foot here too - the hoverboard is opt-in via the BOARD button.
+      this.player.setBoard(false)
       // Without multiplayer there's no join/solo prompt, so control begins now.
       if (!this.multiplayerEnabled) this.emitGameStart('solo')
     }
@@ -610,9 +610,10 @@ export class Game {
     // Hand off standing exactly where you came down - no relocation.
     this.player.exitVehicle(land)
     this.player.setVisible(true)
-    // Start riding the hover skateboard. The BOARD button (C / mobile) stows it,
-    // and the parachute still works while boarding (boarding resumes on landing).
-    this.player.setBoard(true)
+    // Land on foot, not on the board - the hoverboard is opt-in via the BOARD
+    // button (C / mobile) once you're roaming, so the world opens with the robot
+    // standing and free to walk up to the guide.
+    this.player.setBoard(false)
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
     const fog = this.engine.scene.fog

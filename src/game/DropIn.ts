@@ -76,6 +76,7 @@ export class DropIn {
   private hVel = new THREE.Vector3()
   private camHeading = 0
   private diveHeading = 0 // the direction you're steering the dive (moveX turns it)
+  private steerX = 0 // smoothed steer input - keyboard A/D are binary, so ramp them to an analog value for smooth turns + roll
   private pitch = 0.5
 
   private phase: DropHud['phase'] = 'dive'
@@ -91,6 +92,9 @@ export class DropIn {
   private orbs: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; pos: THREE.Vector3; hit: boolean; popT: number }[] = []
   private orbCombo = 0 // consecutive boost-rings grabbed (resets if you miss a stretch)
   private orbComboT = 0 // time since the last grab (resets the combo)
+  // Drifting neon balloons scattered around the corridor - pure delight: dive
+  // through one and it bursts. Off to the sides so they're a thing you steer into.
+  private balloons: { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; bx: number; by: number; bz: number; ph: number; hit: boolean; popT: number }[] = []
   // Crash + repair.
   private crashT = 0
   private fragGeo!: THREE.BoxGeometry
@@ -316,6 +320,7 @@ export class DropIn {
     this.buildTraffic()
     this.buildPlatforms()
     this.buildClouds()
+    this.buildBalloons()
 
     // Pooled punch-through vapor burst (cloud decks) - one reused sphere.
     this.vaporMat = this.own(new THREE.MeshBasicMaterial({ color: 0xeaf4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
@@ -462,6 +467,59 @@ export class DropIn {
     }
   }
 
+  /** Drifting neon balloons scattered through the descent. Diving through one
+   *  bursts it (scale-up + fade + chime). Decorative - no score, just joy. */
+  private buildBalloons() {
+    const balloonGeo = this.ownG(new THREE.SphereGeometry(2.2, 14, 12))
+    const stringGeo = this.ownG(new THREE.CylinderGeometry(0.05, 0.05, 3, 5))
+    const colors = [0xff5ba8, 0x5bdcff, 0xffd24a, 0x9dff5a, 0xb98cff]
+    const n = config.tier.name === 'low' ? 9 : config.tier.name === 'medium' ? 14 : 20
+    for (let i = 0; i < n; i++) {
+      const f = (i + 0.5) / n
+      const y = THREE.MathUtils.lerp(START_Y - 70, this.target.y + 70, f) + (Math.random() - 0.5) * 36
+      // Scattered in a ring around the descent line, biased outward so they fill
+      // the sky to the sides rather than blocking the straight-down corridor.
+      const ang = i * 2.39 + Math.random() // golden-ish angle so they don't clump
+      const rad = 16 + Math.random() * 44
+      const cx = THREE.MathUtils.lerp(this.start.x, this.target.x, f)
+      const cz = THREE.MathUtils.lerp(this.start.z, this.target.z, f)
+      const x = cx + Math.cos(ang) * rad
+      const z = cz + Math.sin(ang) * rad
+      const col = colors[i % colors.length]
+      const mat = this.own(new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 1 }))
+      const mesh = new THREE.Mesh(balloonGeo, mat)
+      mesh.position.set(x, y, z)
+      mesh.scale.y = 1.18 // slightly egg-shaped, like a real balloon
+      const str = new THREE.Mesh(stringGeo, this.own(new THREE.MeshBasicMaterial({ color: 0x9fb0c8, transparent: true, opacity: 0.4, fog: false })))
+      str.position.y = -2.7
+      mesh.add(str)
+      this.group.add(mesh)
+      this.balloons.push({ mesh, mat, bx: x, by: y, bz: z, ph: i * 1.7, hit: false, popT: 0 })
+    }
+  }
+
+  /** Bob the balloons and burst any the diver passes through. */
+  private updateBalloons(dt: number) {
+    for (const b of this.balloons) {
+      if (b.hit) {
+        if (b.popT < 1) {
+          b.popT = Math.min(1, b.popT + dt * 3.5)
+          b.mesh.scale.setScalar(1 + b.popT * 2.2)
+          b.mat.opacity = 1 - b.popT
+          if (b.popT >= 1) b.mesh.visible = false
+        }
+        continue
+      }
+      const py = b.by + Math.sin(this.totalT * 0.8 + b.ph) * 1.4
+      const px = b.bx + Math.cos(this.totalT * 0.5 + b.ph) * 1.2
+      b.mesh.position.set(px, py, b.bz)
+      if (Math.abs(this.pos.y - py) < 4) {
+        const d = Math.hypot(this.pos.x - px, this.pos.z - b.bz)
+        if (d < 4.4) { b.hit = true; this.onSfx?.('ring') }
+      }
+    }
+  }
+
   /** A neon text billboard sprite for the platform labels. */
   private labelSprite(text: string, color: number): THREE.Sprite {
     const cv = document.createElement('canvas')
@@ -564,7 +622,10 @@ export class DropIn {
       // (you turn by flaring out, then dive again). Boost = thrust the way you point.
       // moveX is SUBTRACTED: a +x heading rotation reads as screen-left, so right
       // input must lower the heading to actually turn right.
-      this.diveHeading -= this.input.moveX * DropIn.TURN_RATE * (1 - this.pitch * 0.8) * dt
+      // Ramp the raw stick to an analog steer so keyboard turns ease in/out
+      // instead of snapping (the desktop "turns feel jerky" fix).
+      this.steerX += (this.input.moveX - this.steerX) * Math.min(1, dt * 8)
+      this.diveHeading -= this.steerX * DropIn.TURN_RATE * (1 - this.pitch * 0.8) * dt
       const tp = Math.min(1, this.pitch * 1.05) // saturate so a near-full hold is dead vertical
       const theta = THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp)
       const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * (this.input.held.boost ? 1.5 : 1)
@@ -580,7 +641,8 @@ export class DropIn {
       // relative to the view. The old version steered in fixed-yaw world space
       // while the camera faced wherever you'd turned to, so a turn on the way down
       // flipped left/right. Plus a gentle pull toward the beacon.
-      this.diveHeading -= this.input.moveX * DropIn.TURN_RATE * 0.7 * dt // right input turns right (see dive note)
+      this.steerX += (this.input.moveX - this.steerX) * Math.min(1, dt * 8)
+      this.diveHeading -= this.steerX * DropIn.TURN_RATE * 0.7 * dt // right input turns right (see dive note)
       const glide = (20 + this.input.moveY * 10) * (0.6 + this.quality * 0.4)
       const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
       const d = Math.hypot(dx, dz) || 1
@@ -678,7 +740,7 @@ export class DropIn {
     const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, Math.min(1, this.pitch * 1.05)) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     // Bank into the turn (roll with moveX) while diving for a steered feel.
-    const roll = diving ? clamp(this.input.moveX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
+    const roll = diving ? clamp(this.steerX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
     this.diver.rotation.set(bodyPitch + flip, this.camHeading, roll)
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
@@ -689,7 +751,7 @@ export class DropIn {
 
     this.updateAi(dt)
     this.updateTraffic(dt)
-    if (this.phase === 'dive' || this.phase === 'canopy') this.checkPlatforms()
+    if (this.phase === 'dive' || this.phase === 'canopy') { this.checkPlatforms(); this.updateBalloons(dt) }
     this.updateStreaks(dt, diving)
     this.updateSkyFx(dt)
     this.placeCamera(false)

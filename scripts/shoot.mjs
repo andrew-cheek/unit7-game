@@ -102,6 +102,16 @@ if (SCENE === 'dive') {
   await shot('at')
   const info = await ev(() => { const g = window.__unit7; return { pos: g.player.position.toArray().map((n) => Math.round(n)) } })
   console.log('at info', JSON.stringify(info))
+} else if (SCENE === 'guide') {
+  await skip()
+  // Dismiss any welcome / multiplayer prompt so it doesn't cover the bot.
+  await ev(() => { const b = [...document.querySelectorAll('button')].find((x) => /roam|play solo/i.test(x.textContent || '')); if (b) b.click() })
+  await sleep(3600) // let the TOUCHDOWN banner fade
+  // Stand a little south-east of the guide (bot at (0,27)) and aim up at it, so
+  // the bubble, the pointing arm, and the beacon all frame cleanly.
+  await place(9, 17, Math.atan2(-9, 10), 0.28)
+  await sleep(800)
+  await shot('guide')
 } else if (SCENE === 'underroad') {
   await skip(); await sleep(800)
   await place(Number(process.env.UX || 0), Number(process.env.UZ || -120), Math.PI, 0.12)
