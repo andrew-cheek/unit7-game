@@ -168,12 +168,17 @@ export class DropIn {
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
 
-  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number) {
+  // Push the diver out of building walls (and cancel into-wall speed). Optional so
+  // the drop still works without a physics world; set from Game.
+  private solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void
+
+  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number, solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void) {
     this.scene = scene
     this.cam = cam
     this.input = input
     this.target = target.clone()
     this.getGround = getGround
+    this.solid = solid
     this.start = new THREE.Vector3(target.x + 30, START_Y, target.z - 300)
     this.pos = this.start.clone()
     this.rb = createRobot()
@@ -906,6 +911,19 @@ export class DropIn {
     this.pos.x += this.hVel.x * dt
     this.pos.z += this.hVel.z * dt
     this.pos.y += this.vy * dt
+
+    // Buildings are solid: push out of any wall the diver enters (the resolver only
+    // acts when the diver overlaps a building vertically, so you still sail ABOVE
+    // rooftops). A hard, fast head-on smack into a wall while diving is a crash -
+    // the repair drone reassembles you, which is its own little spectacle.
+    if (this.solid && (this.phase === 'dive' || this.phase === 'canopy')) {
+      const pre = Math.hypot(this.hVel.x, this.hVel.z)
+      this.solid(this.pos, this.hVel)
+      if (this.phase === 'dive') {
+        const lost = pre - Math.hypot(this.hVel.x, this.hVel.z)
+        if (lost > 30 && this.vy < -22) { this.beginCrash(this.getGround(this.pos.x, this.pos.z)); return }
+      }
+    }
 
     this.diver.position.copy(this.pos)
     const diving = this.phase === 'dive'

@@ -102,6 +102,13 @@ if (SCENE === 'dive') {
   await shot('at')
   const info = await ev(() => { const g = window.__unit7; return { pos: g.player.position.toArray().map((n) => Math.round(n)) } })
   console.log('at info', JSON.stringify(info))
+} else if (SCENE === 'land') {
+  // Let the drop run a beat, then skip to touchdown so the landing burst fires.
+  await sleep(1400)
+  await ev(() => window.__unit7.dropIn?.skip?.())
+  await page.waitForFunction(() => { const g = window.__unit7; return g && !g.dropIn }, { timeout: 20000 }).catch(() => {})
+  await sleep(250); await shot('land_1')
+  await sleep(450); await shot('land_2')
 } else if (SCENE === 'guide') {
   await skip()
   // Dismiss any welcome / multiplayer prompt so it doesn't cover the bot.

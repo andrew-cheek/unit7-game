@@ -23,6 +23,7 @@ import { MissionSystem } from './MissionSystem'
 import { ArcadeSystem } from './ArcadeSystem'
 import { Boundary } from './Boundary'
 import { GuideBot } from './GuideBot'
+import { LandingFx } from './LandingFx'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -163,6 +164,7 @@ export class Game {
   private arcade!: ArcadeSystem
   private boundary!: Boundary // bouncy alien-blob world edge (Earth)
   private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
+  private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -414,6 +416,7 @@ export class Game {
       (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
       { start: new THREE.Vector2(0, 27), arcade: new THREE.Vector2(0, 40), arrowAt: new THREE.Vector2(0, 19) },
     )
+    this.landingFx = new LandingFx(this.engine.scene, tier.name === 'low')
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -559,7 +562,15 @@ export class Game {
     const tx = 0, tz = 20
     this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
 
-    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    // Ground that includes building rooftops, so you can land ON a roof instead of
+    // sinking through it; and a wall resolver so the diver can't pass through
+    // buildings. Both reuse the live physics colliders.
+    const dropGround = (x: number, z: number) => {
+      const g = this.physics.sampleGround(x, z, 80)?.y ?? 0
+      const roof = this.physics.topSupport(x, z, 1e6)
+      return roof != null && roof > g ? roof : g
+    }
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3))
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
     this.hud.intro = true // surfaces the SKIP button
     this.player.setVisible(false)
@@ -628,6 +639,9 @@ export class Game {
       // The drop ended on a brief fade; fade back in on the gameplay side so the
       // hand-off to the follow camera reads as one continuous shot.
       this.trans = { phase: 'in', t: 0, target: this.zone }
+      // Make every arrival a moment: a shockwave + spark burst at the touchdown
+      // spot, tinted by how it went (crash = ember, clean = green, else cyan).
+      this.landingFx.trigger(land, crashed ? 0xff5a3c : q >= 0.78 ? 0x9dff5a : 0x27e7ff)
       // Grace period so the player can orient before the Mars gate (which sits on
       // the route out) can fire — stops an accidental yank to Mars on hand-off.
       this.travelCooldown = 3
@@ -1950,6 +1964,7 @@ export class Game {
     if (onEarth) this.events.update(dt, this.player.position)
     if (onEarth) this.patrols.update(dt)
     if (onEarth) this.guide.update(dt, this.player.position.x, this.player.position.z)
+    this.landingFx.update(dt) // unconditional so the touchdown burst finishes after the hand-off
     this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
@@ -2305,6 +2320,7 @@ export class Game {
     this.systems.dispose()
     this.boundary.dispose()
     this.guide.dispose()
+    this.landingFx.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()
