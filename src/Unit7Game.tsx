@@ -513,7 +513,7 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onBoost, onSteer }
         {drop.canTrick && drop.phase === 'dive' && (
           <button style={{ ...dropActionBtn, color: '#ffd24a', borderColor: '#ff2bd0' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onTrick() }}>FLIP</button>
         )}
-        {touch && drop.phase === 'dive' && (
+        {drop.phase === 'dive' && (touch ? (
           <button
             style={{ ...dropActionBtn, color: '#ff8a1e', borderColor: '#ff8a1e', touchAction: 'none' }}
             onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onBoost(true) }}
@@ -521,8 +521,10 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onBoost, onSteer }
             onPointerCancel={() => onBoost(false)}
             onPointerLeave={() => onBoost(false)}
           >BOOST »</button>
-        )}
-        {touch && (drop.phase === 'dive' || drop.phase === 'canopy') && (
+        ) : (
+          <div style={{ ...dropActionBtn, color: '#ff8a1e', borderColor: '#ff8a1e', pointerEvents: 'none' }}>F · BOOST »</div>
+        ))}
+        {(drop.phase === 'dive' || drop.phase === 'canopy') && (touch ? (
           <button
             style={{ ...dropActionBtn, color: '#27e7ff', borderColor: '#27e7ff', touchAction: 'none' }}
             onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onJet(true) }}
@@ -530,7 +532,9 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onBoost, onSteer }
             onPointerCancel={() => onJet(false)}
             onPointerLeave={() => onJet(false)}
           >JETPACK ▲</button>
-        )}
+        ) : (
+          <div style={{ ...dropActionBtn, color: '#27e7ff', borderColor: '#27e7ff', pointerEvents: 'none' }}>SPACE · JETPACK ▲</div>
+        ))}
         {drop.phase === 'dive' && (
           <button style={{ ...dropActionBtn, opacity: armed ? 1 : 0.5, borderColor: armed ? '#9dff5a' : 'rgba(39,231,255,0.5)', color: armed ? '#9dff5a' : 'rgba(223,238,255,0.92)' }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDeploy() }}>CHUTE ◉</button>
         )}

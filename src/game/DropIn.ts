@@ -559,7 +559,9 @@ export class DropIn {
       // Turn freely when flat/flared, but barely while plunging near-vertical - so
       // holding a turn in a steep dive no longer spirals you around your own axis
       // (you turn by flaring out, then dive again). Boost = thrust the way you point.
-      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * (1 - this.pitch * 0.8) * dt
+      // moveX is SUBTRACTED: a +x heading rotation reads as screen-left, so right
+      // input must lower the heading to actually turn right.
+      this.diveHeading -= this.input.moveX * DropIn.TURN_RATE * (1 - this.pitch * 0.8) * dt
       const tp = Math.min(1, this.pitch * 1.05) // saturate so a near-full hold is dead vertical
       const theta = THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp)
       const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * (this.input.held.boost ? 1.5 : 1)
@@ -575,7 +577,7 @@ export class DropIn {
       // relative to the view. The old version steered in fixed-yaw world space
       // while the camera faced wherever you'd turned to, so a turn on the way down
       // flipped left/right. Plus a gentle pull toward the beacon.
-      this.diveHeading += this.input.moveX * DropIn.TURN_RATE * 0.7 * dt
+      this.diveHeading -= this.input.moveX * DropIn.TURN_RATE * 0.7 * dt // right input turns right (see dive note)
       const glide = (20 + this.input.moveY * 10) * (0.6 + this.quality * 0.4)
       const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z
       const d = Math.hypot(dx, dz) || 1
@@ -673,7 +675,7 @@ export class DropIn {
     const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, Math.min(1, this.pitch * 1.05)) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     // Bank into the turn (roll with moveX) while diving for a steered feel.
-    const roll = diving ? clamp(-this.input.moveX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
+    const roll = diving ? clamp(this.input.moveX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
     this.diver.rotation.set(bodyPitch + flip, this.camHeading, roll)
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
