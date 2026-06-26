@@ -95,6 +95,13 @@ export class DropIn {
   // Drifting neon balloons scattered around the corridor - pure delight: dive
   // through one and it bursts. Off to the sides so they're a thing you steer into.
   private balloons: { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; bx: number; by: number; bz: number; ph: number; hit: boolean; popT: number }[] = []
+  // Big "fly through" boost gates on the centre line: thread one for a speed surge.
+  private boostGates: { mesh: THREE.Group; mat: THREE.MeshBasicMaterial; pos: THREE.Vector3; hit: boolean; popT: number }[] = []
+  private boostT = 0 // seconds of active speed surge from a boost gate
+  // A flock of little drones near each cloud deck that scatter when you punch through.
+  private drones: { mesh: THREE.Mesh; bx: number; by: number; bz: number; vx: number; vy: number; vz: number; ph: number; scattered: boolean; life: number; mat: THREE.MeshStandardMaterial }[] = []
+  // Glowing rings that climb each destination beam (the "this way up" playground look).
+  private beamChevrons: { mesh: THREE.Mesh; base: number; top: number; speed: number }[] = []
   // Crash + repair.
   private crashT = 0
   private fragGeo!: THREE.BoxGeometry
@@ -123,6 +130,7 @@ export class DropIn {
   private streakVel!: Float32Array
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
+  private texs: THREE.Texture[] = [] // canvas textures (holograms) to dispose on exit
 
   // Cloud decks you punch through on the way down (a staged reveal of the city).
   // depth 0..1 = how far down the deck sits (1 = lowest, the city-reveal punch).
@@ -321,6 +329,9 @@ export class DropIn {
     this.buildPlatforms()
     this.buildClouds()
     this.buildBalloons()
+    this.buildBoostGates()
+    this.buildDrones()
+    this.buildHolograms()
 
     // Pooled punch-through vapor burst (cloud decks) - one reused sphere.
     this.vaporMat = this.own(new THREE.MeshBasicMaterial({ color: 0xeaf4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
@@ -429,6 +440,7 @@ export class DropIn {
       ['city', 280, 74],
     ]
     const span = this.start.y - this.target.y
+    const chevGeo = this.ownG(new THREE.TorusGeometry(6, 0.45, 8, 26)) // shared: rings that climb each beam
     for (const [dest, alt, off] of defs) {
       const col = C[dest]
       const y = this.target.y + alt
@@ -457,6 +469,17 @@ export class DropIn {
       const beam = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(7, 7, 1100, 16, 1, true)), this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
       beam.position.y = 520 // mostly above the pad, reaching into the sky
       group.add(beam)
+      // Glowing rings that climb the beam - the "this way up" playground look that
+      // makes each destination read as an inviting lift, not just a marker.
+      const chevMat = this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const CHEV = 5, top = 200
+      for (let c = 0; c < CHEV; c++) {
+        const chev = new THREE.Mesh(chevGeo, chevMat)
+        chev.rotation.x = Math.PI / 2 // lie flat so it rings the vertical beam
+        chev.position.y = 20 + (c / CHEV) * top
+        group.add(chev)
+        this.beamChevrons.push({ mesh: chev, base: 20, top: 20 + top, speed: 26 + c * 1.5 })
+      }
       // Big floating label above the ring.
       const sprite = this.labelSprite(labels[dest], col)
       sprite.position.set(0, 40, 0)
@@ -518,6 +541,160 @@ export class DropIn {
         if (d < 4.4) { b.hit = true; this.onSfx?.('ring') }
       }
     }
+  }
+
+  /** Big "fly through" boost gates on the centre line - thread one for a speed
+   *  surge + speed-line crack, rewarding a committed straight-down plunge. */
+  private buildBoostGates() {
+    const N = 4
+    const ringGeo = this.ownG(new THREE.TorusGeometry(11, 0.9, 12, 40))
+    const chevGeo = this.ownG(new THREE.ConeGeometry(2.4, 3.2, 4))
+    for (let i = 0; i < N; i++) {
+      const f = (i + 0.7) / (N + 0.5)
+      const y = THREE.MathUtils.lerp(START_Y - 120, this.target.y + 150, f)
+      const x = THREE.MathUtils.lerp(this.start.x, this.target.x, f)
+      const z = THREE.MathUtils.lerp(this.start.z, this.target.z, f)
+      const g = new THREE.Group()
+      const mat = this.own(new THREE.MeshBasicMaterial({ color: 0x6cf6ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const ring = new THREE.Mesh(ringGeo, mat)
+      ring.rotation.x = Math.PI / 2 // lie flat - you drop straight down through it
+      g.add(ring)
+      for (let k = 0; k < 3; k++) {
+        const cv = new THREE.Mesh(chevGeo, mat)
+        cv.rotation.x = Math.PI // point the cone down: "dive through here"
+        cv.position.y = 4 - k * 4
+        g.add(cv)
+      }
+      g.position.set(x, y, z)
+      this.group.add(g)
+      this.boostGates.push({ mesh: g, mat, pos: new THREE.Vector3(x, y, z), hit: false, popT: 0 })
+    }
+  }
+
+  /** Combined dive speed multiplier: the hold-to-boost button and any active
+   *  boost-gate surge stack. */
+  private boostMul(): number {
+    return (this.input.held.boost ? 1.5 : 1) * (this.boostT > 0 ? 1.5 : 1)
+  }
+
+  /** Spin/pulse the gates and fire a surge when the diver threads one. */
+  private updateBoostGates(dt: number) {
+    if (this.boostT > 0) this.boostT = Math.max(0, this.boostT - dt)
+    for (const gt of this.boostGates) {
+      if (gt.hit) {
+        if (gt.popT < 1) {
+          gt.popT = Math.min(1, gt.popT + dt * 2.5)
+          gt.mesh.scale.setScalar(1 + gt.popT * 0.9)
+          gt.mat.opacity = 0.9 * (1 - gt.popT)
+          if (gt.popT >= 1) gt.mesh.visible = false
+        }
+        continue
+      }
+      gt.mesh.rotation.y += dt * 0.6
+      gt.mat.opacity = 0.7 + Math.sin(this.totalT * 4 + gt.pos.y * 0.1) * 0.22
+      if (this.phase === 'dive' && Math.abs(this.pos.y - gt.pos.y) < 6) {
+        if (Math.hypot(this.pos.x - gt.pos.x, this.pos.z - gt.pos.z) < 11) {
+          gt.hit = true
+          this.boostT = 1.5
+          this.streakBurst = Math.max(this.streakBurst, 0.6)
+          this.kick(0.7)
+          this.onSfx?.('deploy')
+          if (!this.hud.result || (!this.hud.result.startsWith('PORTAL') && !this.hud.result.startsWith('SONIC'))) { this.hud.result = 'BOOST!'; this.resultT = 0 }
+        }
+      }
+    }
+  }
+
+  /** A little flock of drones hovering at each cloud deck - they scatter when you
+   *  punch through that deck (wired from the cloud-punch in updateSkyFx). */
+  private buildDrones() {
+    const bodyGeo = this.ownG(new THREE.BoxGeometry(1.0, 0.34, 1.0))
+    const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a, 0xb98cff]
+    const perDeck = config.tier.name === 'low' ? 3 : 5
+    let i = 0
+    for (const c of this.clouds) {
+      for (let k = 0; k < perDeck; k++, i++) {
+        const ang = (k / perDeck) * Math.PI * 2 + c.depth * 2
+        const rad = 10 + Math.random() * 38
+        const x = this.target.x + Math.cos(ang) * rad
+        const z = this.target.z + Math.sin(ang) * rad
+        const y = c.y + (Math.random() - 0.5) * 14
+        const col = tints[i % tints.length]
+        const mat = this.own(new THREE.MeshStandardMaterial({ color: 0x10151f, emissive: col, emissiveIntensity: 1.5, roughness: 0.5, transparent: true, opacity: 1 }))
+        const mesh = new THREE.Mesh(bodyGeo, mat)
+        mesh.position.set(x, y, z)
+        this.group.add(mesh)
+        this.drones.push({ mesh, bx: x, by: y, bz: z, vx: 0, vy: 0, vz: 0, ph: ang, scattered: false, life: 0, mat })
+      }
+    }
+  }
+
+  /** Hover the drones in formation; once scattered they tumble away and fade. */
+  private updateDrones(dt: number) {
+    for (const d of this.drones) {
+      if (d.scattered) {
+        d.life += dt
+        d.vy -= 16 * dt
+        d.bx += d.vx * dt; d.by += d.vy * dt; d.bz += d.vz * dt
+        d.mesh.position.set(d.bx, d.by, d.bz)
+        d.mesh.rotation.x += dt * 5
+        d.mesh.rotation.z += dt * 4
+        d.mat.opacity = Math.max(0, 1 - d.life * 0.5)
+        if (d.life > 2.2) d.mesh.visible = false
+        continue
+      }
+      d.mesh.position.set(d.bx + Math.cos(this.totalT * 0.6 + d.ph) * 1.4, d.by + Math.sin(this.totalT * 1.6 + d.ph) * 0.8, d.bz)
+      d.mesh.rotation.y += dt * 2.5
+    }
+  }
+
+  /** When a cloud deck is punched, scatter the drones hovering at that altitude. */
+  private scatterDrones(y: number) {
+    for (const d of this.drones) {
+      if (d.scattered || Math.abs(d.by - y) > 46) continue
+      d.scattered = true
+      d.vx = Math.cos(d.ph) * (20 + Math.random() * 18)
+      d.vz = Math.sin(d.ph) * (20 + Math.random() * 18)
+      d.vy = 6 + Math.random() * 12
+      d.bx = d.mesh.position.x; d.by = d.mesh.position.y; d.bz = d.mesh.position.z
+    }
+  }
+
+  /** Holographic billboards drifting past at the sides of the descent (flavor). */
+  private buildHolograms() {
+    const lines: [string, string][] = [['WELCOME TO', 'UNIT 7'], ['NEON', 'CITY'], ['DROP', 'ZONE']]
+    for (let i = 0; i < lines.length; i++) {
+      const f = (i + 0.6) / (lines.length + 0.3)
+      const y = THREE.MathUtils.lerp(START_Y - 200, this.target.y + 230, f)
+      const side = i % 2 === 0 ? 1 : -1
+      const x = THREE.MathUtils.lerp(this.start.x, this.target.x, f) + side * 95
+      const z = THREE.MathUtils.lerp(this.start.z, this.target.z, f) + side * 24
+      const col = i % 2 === 0 ? 0x27e7ff : 0xff2bd0
+      const tex = this.holoText(lines[i][0], lines[i][1], col)
+      this.texs.push(tex)
+      const spr = new THREE.Sprite(this.own(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })) as THREE.SpriteMaterial)
+      spr.position.set(x, y, z)
+      spr.scale.set(72, 36, 1)
+      this.group.add(spr)
+    }
+  }
+
+  /** Two-line neon hologram texture for the sky billboards. */
+  private holoText(line1: string, line2: string, color: number): THREE.CanvasTexture {
+    const cv = document.createElement('canvas')
+    cv.width = 512; cv.height = 256
+    const ctx = cv.getContext('2d')!
+    const hex = '#' + color.toString(16).padStart(6, '0')
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.shadowColor = hex; ctx.shadowBlur = 26
+    ctx.fillStyle = hex
+    ctx.font = '800 64px ui-monospace, Menlo, monospace'
+    ctx.fillText(line1, 256, 90)
+    ctx.font = '900 104px ui-monospace, Menlo, monospace'
+    ctx.fillText(line2, 256, 176)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   /** A neon text billboard sprite for the platform labels. */
@@ -628,7 +805,7 @@ export class DropIn {
       this.diveHeading -= this.steerX * DropIn.TURN_RATE * (1 - this.pitch * 0.8) * dt
       const tp = Math.min(1, this.pitch * 1.05) // saturate so a near-full hold is dead vertical
       const theta = THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp)
-      const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * (this.input.held.boost ? 1.5 : 1)
+      const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * this.boostMul()
       const hSpeed = Math.cos(theta) * speed
       const tvx = Math.sin(this.diveHeading) * hSpeed
       const tvz = Math.cos(this.diveHeading) * hSpeed
@@ -680,7 +857,7 @@ export class DropIn {
         const diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
         this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
         const tp = Math.min(1, this.pitch * 1.05)
-        const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * (this.input.held.boost ? 1.5 : 1)
+        const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * this.boostMul()
         const term = -speed * Math.sin(THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp))
         this.vy += (term - this.vy) * Math.min(1, dt * 1.6)
         // A full straight-down nose-dive holds steady - flips are deliberate only
@@ -751,7 +928,7 @@ export class DropIn {
 
     this.updateAi(dt)
     this.updateTraffic(dt)
-    if (this.phase === 'dive' || this.phase === 'canopy') { this.checkPlatforms(); this.updateBalloons(dt) }
+    if (this.phase === 'dive' || this.phase === 'canopy') { this.checkPlatforms(); this.updateBalloons(dt); this.updateBoostGates(dt); this.updateDrones(dt) }
     this.updateStreaks(dt, diving)
     this.updateSkyFx(dt)
     this.placeCamera(false)
@@ -975,6 +1152,12 @@ export class DropIn {
       p.z = p.bz + Math.sin(pt * 0.27 + p.ph) * 8
       p.group.position.set(p.x, p.y, p.z)
     }
+    // Climb the beam rings upward (local to each platform group), wrapping at the top.
+    for (const ch of this.beamChevrons) {
+      let y = ch.mesh.position.y + ch.speed * dt
+      if (y > ch.top) y = ch.base + (y - ch.top)
+      ch.mesh.position.y = y
+    }
   }
 
   /** Steered into a destination portal? Lock the destination + start the handoff. */
@@ -1014,6 +1197,7 @@ export class DropIn {
       // so it kicks the camera more and fires a brief speed-line burst.
       this.kick(1.1 + c.depth * 1.4)
       this.streakBurst = Math.max(this.streakBurst, 0.3 + c.depth * 0.25)
+      this.scatterDrones(c.y) // burst the flock hovering at this deck
       this.onSfx?.('land')
     }
     if (this.vaporT < 1) {
@@ -1176,6 +1360,7 @@ export class DropIn {
     for (const t of this.traffic) t.v.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
+    this.texs.forEach((t) => t.dispose())
     this.cloudTex?.dispose()
   }
 }
