@@ -176,6 +176,7 @@ export class Game {
   private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
   private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
+  private launchCineT = -1 // >=0 while the opening establishing-orbit cinematic plays
   private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
   private dropVehicle: Vehicle | null = null // the car/bike you rode off the pad edge, falling with the dive
   private raidActive = false // the post-skydive city raid is live
@@ -664,6 +665,7 @@ export class Game {
     }
     this.input.yaw = this.launchPad.spawnYaw
     this.input.pitch = 0.15 // raised from the old cramped 0.06, but still framing the tower ahead
+    this.launchCineT = 0 // kick off the establishing-orbit cinematic
     this.player.resetInterp()
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)
@@ -688,6 +690,7 @@ export class Game {
 
   private endLaunchPad() {
     if (!this.launchPad) return
+    this.launchCineT = -1
     this.physics.removeGroundMesh(this.launchPad.collider)
     for (const b of this.launchPadColliders) { const i = this.physics.colliders.indexOf(b); if (i >= 0) this.physics.colliders.splice(i, 1) }
     this.launchPadColliders.length = 0
@@ -2555,6 +2558,21 @@ export class Game {
       if (this.fovBoostCur !== 0) { this.fovBoostCur = 0; this.engine.setFovBoost(0) }
       return
     }
+    // Opening establishing cinematic: a slow elevated orbit around the launch pad
+    // that shows the level off (the factory tower, the assembly hangar, the
+    // rockets, the city + sky) while you decide to play. It hands off to the
+    // normal follow camera the instant you move or drag to look.
+    if (this.launchPad && this.launchCineT >= 0) {
+      const interacted = Math.abs(this.input.moveX) + Math.abs(this.input.moveY) > 0.15 || (this.launchCineT > 0.4 && this.input.sinceLook < 0.12)
+      if (interacted || this.launchCineT > 16) {
+        this.launchCineT = -1
+        this.camera.snap(this.player.position)
+      } else {
+        this.updateLaunchCinematic(frameDt)
+        if (this.fovBoostCur !== 0) { this.fovBoostCur = 0; this.engine.setFovBoost(0) }
+        return
+      }
+    }
     // Smooth the on-foot body between fixed sim steps (no high-refresh stepping),
     // and follow the interpolated position so the camera tracks it exactly.
     if (!this.vehicles.current) {
@@ -2570,6 +2588,23 @@ export class Game {
     const targetBoost = clamp(sp / maxSp, 0, 1) * 5
     this.fovBoostCur = damp(this.fovBoostCur, targetBoost, 6, frameDt)
     this.engine.setFovBoost(this.fovBoostCur)
+  }
+
+  /** Drive the opening establishing-orbit: an elevated camera that slowly circles
+   *  the launch pad, starting behind the robot looking out over the hangar +
+   *  factory tower + city, then panning around to take in the whole level. */
+  private updateLaunchCinematic(dt: number) {
+    this.launchCineT += dt
+    const lp = this.launchPad!
+    const c = lp.spawn
+    const yaw = lp.spawnYaw
+    // Start behind the robot (looking forward over the hangar/factory), then orbit.
+    const ang = yaw + Math.PI + this.launchCineT * 0.11
+    const r = 34, h = 22
+    const cam = this.engine.camera
+    cam.position.set(c.x + Math.sin(ang) * r, c.y + h, c.z + Math.cos(ang) * r)
+    cam.lookAt(c.x, c.y + 5.5, c.z)
+    this.focus.copy(this.player.position)
   }
 
   /** Nearest live capturable alien to a point, across both the local roamers and
