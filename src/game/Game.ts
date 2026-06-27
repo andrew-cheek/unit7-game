@@ -41,6 +41,7 @@ import { DustDevils } from './DustDevils'
 import { Aurora } from './Aurora'
 import { SkyLeviathans } from './SkyLeviathans'
 import { CompanionDrone } from './CompanionDrone'
+import { FloatingPopups } from './FloatingPopups'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -207,6 +208,7 @@ export class Game {
   private collectibles!: Collectibles
   private dustDevils!: DustDevils
   private meteorShower!: MeteorShower
+  private popups!: FloatingPopups
   // Reused solo-mode leaderboard (you + bots), rebuilt only on a score change.
   private soloLb: { name: string; score: number }[] = []
   private soloLbVersion = -1
@@ -398,6 +400,8 @@ export class Game {
     this.systems.register(new SkyLeviathans(this.engine.scene, {
       focus: () => this.focus,
     }))
+    // Floating "+score" reward popups at captures / pickups.
+    this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
     // A little hover-drone buddy that trails you on foot in every zone.
     this.systems.register(new CompanionDrone(this.engine.scene, {
       focus: () => this.player.position,
@@ -1525,6 +1529,7 @@ export class Game {
       trackEvent('npc_captured', { total: this.hud.captured })
       // Juice: a quick cyan ring pop + micro freeze-frame where the target netted.
       this.missiles.shockwave({ x: best.position.x, y: best.position.y, z: best.position.z }, 0x27e7ff, 3, 0.4)
+      this.popups.pop(best.position.x, best.position.y + 1.6, best.position.z, `+${gained}`, chainMul > 1 ? '#ffd24a' : '#27e7ff')
       this.engine.triggerHitstop(0.035)
       vibrate(25)
       this.audio.play('capture')
@@ -1640,8 +1645,10 @@ export class Game {
     if (hits > 0) {
       // One chain tick per blast; the multiplier scales the whole payout.
       const mul = this.scoreMul * this.captureCombo.registerCapture()
-      this.hud.score += Math.round(rawAward * mul)
+      const gained = Math.round(rawAward * mul)
+      this.hud.score += gained
       this.addCredits(Math.round(rawAward * 0.5 * mul))
+      this.popups.pop(pos.x, pos.y + 2, pos.z, `+${gained}${hits > 1 ? ` ×${hits}` : ''}`, '#ffb24a')
       vibrate(40)
       this.awardCaptureProgress(hits)
       // One event per blast (not per target) so a big missile hit can't spam GA.
@@ -1921,6 +1928,7 @@ export class Game {
     this.bannerTimer = 1.4
     this.audio.play('capture')
     this.missiles.shockwave({ x, y, z }, 0x8a5cff, 2.2, 0.35)
+    this.popups.pop(x, y + 1.2, z, `+${value}c`, '#bfa8ff')
     this.fxPool.puff(x, y, z, { color: 0xbfa8ff, count: 4, spread: 0.8, rise: 2.2, ttl: 0.7, scale: 0.5, opacity: 0.6, additive: true })
     vibrate(12)
     this.awardXp(4) // also refreshes progression -> re-checks shard achievements
