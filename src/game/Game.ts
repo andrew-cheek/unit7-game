@@ -42,6 +42,10 @@ import { Aurora } from './Aurora'
 import { SkyLeviathans } from './SkyLeviathans'
 import { CompanionDrone } from './CompanionDrone'
 import { FloatingPopups } from './FloatingPopups'
+import { NeonFlora } from './NeonFlora'
+import { GlowMotes } from './GlowMotes'
+import { SkyFlock } from './SkyFlock'
+import { StepRipples } from './StepRipples'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -400,6 +404,26 @@ export class Game {
     // Sky leviathans: colossal glowing creatures that drift high over the city.
     this.systems.register(new SkyLeviathans(this.engine.scene, {
       focus: () => this.focus,
+    }))
+    // Reactive bio-luminescent flora scattered across the city, brightening as you pass.
+    this.systems.register(new NeonFlora(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      focus: () => this.focus,
+    }))
+    // Ambient drifting glow-motes that surround you in every zone (1 draw call).
+    this.systems.register(new GlowMotes(this.engine.scene, {
+      focus: () => this.focus,
+    }))
+    // A loose flock of glowing neon birds wheeling high over the city.
+    this.systems.register(new SkyFlock(this.engine.scene, {
+      focus: () => this.focus,
+    }))
+    // Expanding neon ground rings at your feet as you run + land.
+    this.systems.register(new StepRipples(this.engine.scene, {
+      focus: () => this.player.position,
+      grounded: () => this.player.grounded,
+      speed: () => this.player.speed,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
