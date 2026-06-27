@@ -321,11 +321,12 @@ export class LaunchPad {
     }
   }
 
-  /** Returns true once the position has dropped off the deck (stepped over the edge). */
+  /** Returns true once you've left the deck - walked/fell off the edge (dropped
+   *  below the surface past the rim) OR flew clearly out past it (jetpack). */
   steppedOff(x: number, y: number, z: number): boolean {
-    if (y > this.topY - 2.5) return false // still up on the deck
-    const dx = x - this.center.x, dz = z - this.center.z
-    return Math.hypot(dx, dz) > this.radius - 4 // and out past the rim
+    const d = Math.hypot(x - this.center.x, z - this.center.z)
+    if (d <= this.radius - 4) return false // still well within the deck
+    return y < this.topY - 1.5 || d > this.radius + 12
   }
 
   private cloudSign(): THREE.CanvasTexture {

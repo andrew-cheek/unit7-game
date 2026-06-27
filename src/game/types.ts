@@ -58,6 +58,7 @@ export interface HudState {
   loadingProgress: number // 0..1
   loadingMsg: string
   intro: boolean
+  onPlatform: boolean // standing on the launch-pad platform at the start of the dive (normal controls, but no arcade warp)
   vehicle: string | null // name of the vehicle currently piloted
   radar: RadarBlip[]
   fade: number // 0..1 black overlay for zone transitions / launch

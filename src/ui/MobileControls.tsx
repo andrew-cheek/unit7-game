@@ -81,7 +81,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   }
   // GAMES warp lives right in the cluster on foot (Earth) - the clear, always-there
   // shortcut to the arcade the player asked for.
-  const showGames = !inVehicle && !airborne && hud.zone === 'earth' && !hud.minigame && !hud.intro
+  const showGames = !inVehicle && !airborne && hud.zone === 'earth' && !hud.minigame && !hud.intro && !hud.onPlatform
 
   const helper = inMech
     ? 'JET TO FLY · FIRE'
