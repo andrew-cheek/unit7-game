@@ -204,6 +204,10 @@ export class Game {
   private collectibles!: Collectibles
   private dustDevils!: DustDevils
   private meteorShower!: MeteorShower
+  // Reused solo-mode leaderboard (you + bots), rebuilt only on a score change.
+  private soloLb: { name: string; score: number }[] = []
+  private soloLbVersion = -1
+  private soloLbScore = NaN
   // Style-combo scoring for expressive traversal (air / board / jet / glide).
   private traversal!: TraversalScore
   // Capture chain multiplier (rapid captures scale score + credits).
@@ -1809,6 +1813,29 @@ export class Game {
   // --- progression / gamification ---------------------------------------------
 
   /** Refresh the cached progression snapshot and mark the HUD roster dirty. */
+  /** Merge the player into the (already sorted, descending) bot rows, top 10,
+   *  into the reused `soloLb` array - reusing row objects so steady state is
+   *  allocation-free. */
+  private buildSoloLeaderboard(botRows: { name: string; score: number }[]) {
+    const lb = this.soloLb
+    const set = (i: number, name: string, score: number) => {
+      if (lb[i]) { lb[i].name = name; lb[i].score = score }
+      else lb[i] = { name, score }
+    }
+    let n = 0
+    let inserted = false
+    for (let i = 0; i < botRows.length && n < 10; i++) {
+      if (!inserted && this.hud.score >= botRows[i].score) {
+        set(n++, this.soloName, this.hud.score)
+        inserted = true
+        if (n >= 10) break
+      }
+      set(n++, botRows[i].name, botRows[i].score)
+    }
+    if (!inserted && n < 10) set(n++, this.soloName, this.hud.score)
+    lb.length = n
+  }
+
   private refreshProgression() {
     this.progression = loadProgression()
     this.mp.markProfileDirty()
@@ -2743,9 +2770,16 @@ export class Game {
       this.hud.leaderboard = mp.leaderboard
     } else {
       this.hud.online = 1 + this.bots.rosterSize
-      this.hud.leaderboard = [{ name: this.soloName, score: this.hud.score }, ...this.bots.leaderboard()]
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 10)
+      // Merge YOU into the bots' (cached) ranking. Rebuild only when a bot's
+      // score changed or your score changed, into a reused array - the HUD polls
+      // this 20x/sec and the old spread+sort+slice allocated on every poll.
+      const botRows = this.bots.leaderboard()
+      if (this.bots.leaderboardVersion !== this.soloLbVersion || this.hud.score !== this.soloLbScore) {
+        this.soloLbVersion = this.bots.leaderboardVersion
+        this.soloLbScore = this.hud.score
+        this.buildSoloLeaderboard(botRows)
+      }
+      this.hud.leaderboard = this.soloLb
     }
     this.hud.profiles = mp.profiles
     this.hud.challenge = mp.challenge
