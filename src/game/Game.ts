@@ -1858,6 +1858,25 @@ export class Game {
     this.fxPool.puff(x, y, z, { color: 0xbfa8ff, count: 4, spread: 0.8, rise: 2.2, ttl: 0.7, scale: 0.5, opacity: 0.6, additive: true })
     vibrate(12)
     this.awardXp(4) // also refreshes progression -> re-checks shard achievements
+    // Clearing every shard in a zone pays a completion bonus + a fanfare. Fires
+    // once per field (shards never un-collect), so no need to latch it.
+    if (c.total > 0 && c.found === c.total) this.onZoneShardsComplete()
+  }
+
+  /** All shards in the current zone collected: bonus credits/XP + a fanfare. */
+  private onZoneShardsComplete() {
+    const bonus = this.zone === 'earth' ? 500 : 350
+    const xp = this.zone === 'earth' ? 200 : 140
+    this.addCredits(bonus)
+    this.awardXp(xp)
+    const where = this.zone === 'earth' ? 'THE CITY' : this.zone.toUpperCase()
+    this.hud.banner = `ALL SHARDS — ${where} CLEARED  +${bonus}c`
+    this.bannerTimer = 3.5
+    this.hud.missionPopup = { title: 'ARCHIVE COMPLETE', body: `Every data shard on ${where.toLowerCase()} recovered. +${bonus} credits, +${xp} XP. Nice sweep, Unit 7.` }
+    this.missionPopupTimer = 5
+    this.camera.shake(0.6)
+    this.audio.play('objective')
+    vibrate(80)
   }
 
   /** A style combo banked: pay out credits + XP and flash the multiplier. */
