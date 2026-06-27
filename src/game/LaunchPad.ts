@@ -49,6 +49,15 @@ export class LaunchPad {
   private arrowMat!: THREE.MeshBasicMaterial
   private arrowChevs: THREE.Mesh[] = []
   private edgeGlow!: THREE.MeshBasicMaterial
+  // Epic upgrade: a tall glass skyline behind the deck + an overhead assembly
+  // gantry, holographic blueprint and a heavier forge that animate.
+  private beacons: { mat: THREE.MeshBasicMaterial; ph: number }[] = []
+  private gTrolley?: THREE.Group
+  private gWeldMat?: THREE.MeshBasicMaterial
+  private gWeld?: THREE.Mesh
+  private scanMat?: THREE.MeshBasicMaterial
+  private scan?: THREE.Mesh
+  private forgePistons: { o: THREE.Object3D; ph: number; base: number }[] = []
 
   // Belt runs along X (forge at beltX0, output at beltX1), sitting at z = beltZ
   // just in front of the spawn so the line crosses your view head-on.
@@ -67,8 +76,11 @@ export class LaunchPad {
     this.group.position.copy(this.center)
     this.group.rotation.y = faceYaw
 
+    this.buildTowers()
     this.buildDeck()
     this.buildConveyor()
+    this.buildForgeMachine()
+    this.buildGantry()
     this.buildArms()
     this.buildSign()
     this.buildProps()
@@ -96,6 +108,134 @@ export class LaunchPad {
 
     scene.add(this.group)
     this.group.updateMatrixWorld(true)
+  }
+
+  /** Procedural glass-tower facade: a grid of lit/unlit windows for the skyline. */
+  private windowTex(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 512
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#060a14'; ctx.fillRect(0, 0, 128, 512)
+    const cols = 7, rows = 30
+    const mw = 128 / cols, mh = 512 / rows
+    const lit = ['#cfeeff', '#8fd8ff', '#ffe0ad', '#a8ecff', '#6fc4ff', '#dfe9ff']
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const on = Math.random() < 0.74
+      ctx.fillStyle = on ? lit[(Math.random() * lit.length) | 0] : '#0a1322'
+      ctx.fillRect(c * mw + 1.5, r * mh + 1.5, mw - 3, mh - 3)
+      if (on && Math.random() < 0.45) { ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(c * mw + 1.5, r * mh + mh * 0.5, mw - 3, mh * 0.5 - 1.5) }
+    }
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }
+
+  /** A skyline of tall, sleek glass towers rising behind and beside the deck, so
+   *  the factory reads as the crown of a colossal future-city megastructure. Pure
+   *  backdrop (beyond the deck rim, so never an obstacle) with lit-window facades,
+   *  accent light strips, antenna spires and blinking rooftop beacons. */
+  private buildTowers() {
+    const low = config.tier.name === 'low'
+    const winTex = this.windowTex(); this.texs.push(winTex)
+    const winMat = this.own(new THREE.MeshStandardMaterial({ map: winTex, emissiveMap: winTex, emissive: 0xffffff, emissiveIntensity: 0.6, metalness: 0.35, roughness: 0.5 }))
+    const capMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0c1424, metalness: 0.7, roughness: 0.4, emissive: 0x0a2236, emissiveIntensity: 0.5 }))
+    const stripMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const spireMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4 }))
+    // [x, z, footprint, height] - kept to the back hemisphere so the dive view stays open.
+    const specs: [number, number, number, number][] = [
+      [-16, -82, 22, 132], [18, -92, 18, 168], [-48, -56, 17, 104],
+      [46, -62, 19, 120], [-72, -16, 14, 82], [70, -22, 15, 90], [2, -64, 14, 196],
+    ]
+    const list = low ? specs.slice(0, 4) : specs
+    const baseY = -54
+    for (const [x, z, fp, h] of list) {
+      const g = new THREE.Group(); g.position.set(x, baseY, z)
+      // Stacked setback tiers for a modern stepped profile.
+      const tiers = 3
+      let cy = 0, w = fp, rem = h
+      for (let t = 0; t < tiers; t++) {
+        const th = (rem / (tiers - t)) * (t === tiers - 1 ? 1 : 0.82)
+        rem -= th
+        const shaft = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w, th, w)), winMat)
+        shaft.position.y = cy + th / 2; g.add(shaft)
+        // Vertical accent light strips on the corners.
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
+          const strip = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, th * 0.96, 0.5)), stripMat)
+          strip.position.set(sx * w / 2, cy + th / 2, sz * w / 2); g.add(strip)
+        }
+        cy += th; w *= 0.74
+      }
+      // Roof cap, antenna spire + a blinking beacon.
+      const cap = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w * 1.25, 2.4, w * 1.25)), capMat); cap.position.y = cy + 1.2; g.add(cap)
+      const spire = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.18, 0.5, 14, 7)), spireMat); spire.position.y = cy + 9; g.add(spire)
+      const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff4a6a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const beacon = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.7, 10, 8)), beaconMat); beacon.position.y = cy + 16; g.add(beacon)
+      this.beacons.push({ mat: beaconMat, ph: Math.random() * 6.28 })
+      this.group.add(g)
+    }
+  }
+
+  /** A heavy forge "birthing machine" at the head of the line: a glowing furnace
+   *  block where raw chassis are pressed into being, with pumping pistons. */
+  private buildForgeMachine() {
+    const Z = this.beltZ, X = this.beltX0
+    const shellMat = this.own(new THREE.MeshStandardMaterial({ color: 0x161f33, metalness: 0.75, roughness: 0.35, emissive: 0x0c2236, emissiveIntensity: 0.5 }))
+    const hotMat = this.own(new THREE.MeshStandardMaterial({ color: 0x140a06, emissive: 0xff5a1e, emissiveIntensity: 2.2, roughness: 0.3 }))
+    // Big furnace housing straddling the belt start.
+    const housing = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(6, 9, 12)), shellMat); housing.position.set(X - 2.5, 4.5, Z); this.group.add(housing)
+    const mawMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff7a2e, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const maw = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(5, 4)), mawMat); maw.position.set(X + 0.1, 3.2, Z); maw.rotation.y = -Math.PI / 2; this.group.add(maw)
+    const core = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.9, 0.9, 5, 12)), hotMat); core.position.set(X - 2.5, 6.5, Z); this.group.add(core)
+    // Pumping pistons on top that bob.
+    for (let i = 0; i < 3; i++) {
+      const pist = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.4, 0.4, 3, 8)), shellMat)
+      pist.position.set(X - 4 + i * 1.6, 10, Z - 3 + i * 3); this.group.add(pist)
+      this.forgePistons.push({ o: pist, ph: i * 1.5, base: 10 })
+    }
+    // Crucible glow spill on the belt.
+    const spill = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(6, 7)), this.own(new THREE.MeshBasicMaterial({ color: 0xff6a1e, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    spill.rotation.x = -Math.PI / 2; spill.position.set(X + 2, 1.25, Z); this.group.add(spill)
+  }
+
+  /** Overhead assembly gantry: a bridge crane spanning the line with a trolley that
+   *  tracks back and forth and lowers a welder, a rotating holographic blueprint of
+   *  the robot being built, and a scanner arch the chassis passes under. */
+  private buildGantry() {
+    const Z = this.beltZ, cx = (this.beltX0 + this.beltX1) / 2, len = this.lenX
+    const steelMat = this.own(new THREE.MeshStandardMaterial({ color: 0x222c44, metalness: 0.7, roughness: 0.35, emissive: 0x0c1830, emissiveIntensity: 0.3 }))
+    const bridgeY = 13
+    // End towers + spanning bridge beams.
+    for (const ex of [this.beltX0 - 3, this.beltX1 + 3]) for (const sz of [-6, 6]) {
+      const col = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.7, bridgeY, 0.7)), steelMat); col.position.set(ex, bridgeY / 2, Z + sz); this.group.add(col)
+    }
+    for (const sz of [-6, 6]) { const beam = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(len + 8, 0.7, 0.7)), steelMat); beam.position.set(cx, bridgeY, Z + sz); this.group.add(beam) }
+    // Trolley that rides the bridge + a lowered welder head.
+    const trolley = new THREE.Group(); trolley.position.set(cx, bridgeY, Z)
+    const cab = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2.2, 1.1, 4)), steelMat); trolley.add(cab)
+    const cable = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.16, 6.5, 0.16)), steelMat); cable.position.y = -3.4; trolley.add(cable)
+    const welder = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.7, 1.2, 0.7)), steelMat); welder.position.y = -7; trolley.add(welder)
+    this.gWeldMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe9ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.gWeld = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.4, 8, 6)), this.gWeldMat); this.gWeld.position.y = -7.7; trolley.add(this.gWeld)
+    this.group.add(trolley); this.gTrolley = trolley
+
+    // Big rotating holographic blueprint of a robot, high over the line.
+    const bpMat = this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, wireframe: true, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const bp = new THREE.Group()
+    const add = (geo: THREE.BufferGeometry, x: number, y: number, z = 0) => { const m = new THREE.Mesh(this.ownG(geo), bpMat); m.position.set(x, y, z); bp.add(m) }
+    add(new THREE.BoxGeometry(1.1, 1.4, 0.7), 0, 0)        // torso
+    add(new THREE.BoxGeometry(0.7, 0.7, 0.7), 0, 1.3)      // head
+    add(new THREE.BoxGeometry(0.32, 1.3, 0.32), -0.8, -0.1) // arm L
+    add(new THREE.BoxGeometry(0.32, 1.3, 0.32), 0.8, -0.1)  // arm R
+    add(new THREE.BoxGeometry(0.36, 1.4, 0.36), -0.32, -1.6) // leg L
+    add(new THREE.BoxGeometry(0.36, 1.4, 0.36), 0.32, -1.6)  // leg R
+    bp.scale.setScalar(1.7); bp.position.set(cx, bridgeY + 4.5, Z)
+    this.group.add(bp); this.holos.push({ o: bp, sp: 0.5 })
+
+    // Scanner arch midway down the line, with a sweeping scan plane.
+    const archX = cx
+    const archMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2438, metalness: 0.7, roughness: 0.4, emissive: 0x123a52, emissiveIntensity: 0.6 }))
+    for (const sz of [-5, 5]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 8, 0.5)), archMat); post.position.set(archX, 4, Z + sz); this.group.add(post) }
+    const top = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.6, 0.6, 11)), archMat); top.position.set(archX, 8, Z); this.group.add(top)
+    this.scanMat = this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
+    this.scan = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(0.9, 10)), this.scanMat); this.scan.rotation.z = Math.PI / 2; this.scan.position.set(archX, 4, Z); this.group.add(this.scan)
   }
 
   /** Detailed circular deck: paneled floor with a neon grid, a raised rim wall with
@@ -525,6 +665,24 @@ export class LaunchPad {
     // Sci-fi props.
     for (const h of this.holos) { h.o.rotation.y += h.sp * dt; h.o.rotation.x += h.sp * 0.4 * dt }
     for (const m of this.pylons) m.opacity = 0.45 + Math.sin(this.t * 3.2) * 0.4
+    // Skyline rooftop beacons blink out of phase.
+    for (const b of this.beacons) b.mat.opacity = 0.25 + Math.pow(Math.max(0, Math.sin(this.t * 1.6 + b.ph)), 6) * 0.75
+    // Forge pistons pump.
+    for (const p of this.forgePistons) p.o.position.y = p.base + Math.sin(this.t * 3 + p.ph) * 0.8
+    // Gantry trolley tracks back and forth over the line; welder flares as it works.
+    if (this.gTrolley && this.gWeldMat && this.gWeld) {
+      const cx = (this.beltX0 + this.beltX1) / 2
+      const tx = cx + Math.sin(this.t * 0.55) * (this.lenX / 2 - 2)
+      this.gTrolley.position.x = tx
+      const work = Math.max(0, Math.sin(this.t * 16))
+      this.gWeldMat.opacity = work * 0.95
+      this.gWeld.scale.setScalar(1 + work * 1.4)
+    }
+    // Scanner plane sweeps up and down the arch.
+    if (this.scan && this.scanMat) {
+      this.scan.position.y = 1.6 + (Math.sin(this.t * 1.3) * 0.5 + 0.5) * 6
+      this.scanMat.opacity = 0.25 + Math.sin(this.t * 6) * 0.12
+    }
     for (const c of this.cargo) { c.o.position.y = c.baseY + Math.sin(this.t * 1.2 + c.ph) * 0.3; c.o.rotation.y += 0.2 * dt }
     for (const d of this.drones) {
       d.a += d.sp * dt
