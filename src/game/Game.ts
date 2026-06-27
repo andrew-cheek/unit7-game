@@ -2589,7 +2589,10 @@ export class Game {
     const inv = sp > 0.1 ? 1 / sp : 0
     const onFoot = p.mode === 'robot' || p.mode === 'plane'
     return {
-      distanceScale: p.mode === 'plane' ? 1.35 : 1,
+      // Pull the camera well back during the launch-pad opening so the whole
+      // scene (the assembly hangar + the factory tower) reads as an establishing
+      // shot and the robot isn't filling the frame.
+      distanceScale: this.launchPad ? 2.1 : p.mode === 'plane' ? 1.35 : 1,
       followYaw: p.yaw,
       moveX: p.velocity.x * inv,
       moveZ: p.velocity.z * inv,

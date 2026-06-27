@@ -84,8 +84,7 @@ export class LaunchPad {
     this.buildDeck()
     this.buildConveyor()
     this.buildForgeMachine()
-    // (the overhead gantry was retired - the glass tower's bays now show the
-    //  assembly, and the gantry only cluttered the sightline to it)
+    this.buildAssemblyHangar()
     this.buildArms()
     this.buildSign()
     this.buildProps()
@@ -489,19 +488,8 @@ export class LaunchPad {
     }
     const railMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2438, metalness: 0.7, roughness: 0.4 }))
     for (const sz of [-3.6, 3.6]) { const rail = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(len, 1.3, 0.5)), railMat); rail.position.set(cx, 0.85, Z + sz); this.group.add(rail) }
-    // Open overhead gantry: thin top rails + end legs only - NO tall side walls,
-    // so nothing stands between the camera and the robots on the belt.
-    const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.65, roughness: 0.4, emissive: 0x123a52, emissiveIntensity: 0.5 }))
-    for (const sz of [-6.5, 6.5]) {
-      const rail = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(len + 4, 0.45, 0.45)), frameMat); rail.position.set(cx, 7.3, Z + sz); this.group.add(rail)
-      for (const ex of [cx - (len + 4) / 2, cx + (len + 4) / 2]) { const leg = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 7.5, 0.5)), frameMat); leg.position.set(ex, 3.75, Z + sz); this.group.add(leg) }
-    }
-    const trimMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    for (let i = 0; i <= 5; i++) {
-      const bx = this.beltX0 + (i / 5) * len
-      const beam = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.4, 13)), frameMat); beam.position.set(bx, 7.6, Z); this.group.add(beam)
-      const trim = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.06, 0.06, 13)), trimMat); trim.position.set(bx, 7.38, Z); this.group.add(trim)
-    }
+    // (the exposed overhead truss "gantry" was retired - the belt now sits inside
+    //  the vaulted assembly hangar built in buildAssemblyHangar)
     // Hot forge arch at the head where raw chassis drop in.
     const forgeMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0c1018, emissive: 0xff6a1e, emissiveIntensity: 1.9, roughness: 0.3 }))
     const forge = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.6, 0.5, 7)), forgeMat); forge.position.set(this.beltX0, 2.4, Z); this.group.add(forge)
@@ -512,6 +500,51 @@ export class LaunchPad {
     // Conduits running along the gantry.
     const pipeMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.75, roughness: 0.35, emissive: 0x112233, emissiveIntensity: 0.3 }))
     for (const sz of [-6.85, 6.85]) for (const yy of [2.4, 3.4]) { const pipe = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.18, 0.18, len + 4, 8)), pipeMat); pipe.rotation.z = Math.PI / 2; pipe.position.set(cx, yy, Z + sz); this.group.add(pipe) }
+  }
+
+  /** A vaulted assembly HANGAR that houses the conveyor line - a wide, peaked-roof
+   *  building (a different silhouette to the tall glass tower) that you look into
+   *  through its open front as the units are built and march out the back toward
+   *  the ledge. Glass sides, neon-trimmed gable + eaves, no colliders. */
+  private buildAssemblyHangar() {
+    const Z = this.beltZ
+    const HW = 22, depth = 24, eave = 9, ridge = 15
+    const frontZ = Z - depth / 2, backZ = Z + depth / 2
+    const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4, emissive: 0x0c2236, emissiveIntensity: 0.4 }))
+    const roofMat = this.own(new THREE.MeshStandardMaterial({ color: 0x131c2e, metalness: 0.7, roughness: 0.4, emissive: 0x0a1830, emissiveIntensity: 0.3 }))
+    const glassMat = this.own(new THREE.MeshStandardMaterial({ color: 0x8fd6ff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.12, side: THREE.DoubleSide, emissive: 0x2a6ea0, emissiveIntensity: 0.2 }))
+    const cyan = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const mag = this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.towerStripMats.push(cyan, mag)
+
+    // Peaked roof: two long angled slabs meeting at the ridge.
+    const run = HW, rise = ridge - eave
+    const slabLen = Math.hypot(run, rise), ang = Math.atan2(rise, run)
+    for (const side of [-1, 1]) {
+      const slab = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(slabLen, 0.6, depth)), roofMat)
+      slab.position.set(side * HW / 2, (eave + ridge) / 2, Z); slab.rotation.z = -side * ang
+      this.group.add(slab)
+    }
+    // Ridge skylight beam + eave trims (neon).
+    const ridgeBeam = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 0.5, depth)), cyan); ridgeBeam.position.set(0, ridge + 0.2, Z); this.group.add(ridgeBeam)
+    for (const side of [-1, 1]) { const t = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.4, depth)), mag); t.position.set(side * HW, eave, Z); this.group.add(t) }
+
+    // Glass side walls with vertical frame ribs - the line shows through them.
+    for (const side of [-1, 1]) {
+      const wall = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.3, eave, depth)), glassMat); wall.position.set(side * HW, eave / 2, Z); this.group.add(wall)
+      for (let i = 0; i <= 4; i++) { const rib = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, eave, 0.5)), frameMat); rib.position.set(side * HW, eave / 2, frontZ + (i / 4) * depth); this.group.add(rib) }
+    }
+    // Corner columns.
+    for (const sx of [-1, 1]) for (const sz of [frontZ, backZ]) { const col = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.9, eave + 1.4, 0.9)), frameMat); col.position.set(sx * HW, (eave + 1.4) / 2, sz); this.group.add(col) }
+
+    // Front entrance: a wide neon lintel + the gable triangle outline you look through.
+    const lintel = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(HW * 2, 0.55, 0.55)), cyan); lintel.position.set(0, eave, frontZ); this.group.add(lintel)
+    for (const side of [-1, 1]) {
+      const g = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(slabLen, 0.32, 0.32)), mag)
+      g.position.set(side * HW / 2, (eave + ridge) / 2, frontZ); g.rotation.z = -side * ang; this.group.add(g)
+    }
+    // Floor guide strips flanking the belt inside.
+    for (const sz of [-7.5, 7.5]) { const fl = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(HW * 1.7, 0.05, 0.3)), cyan); fl.position.set(0, 0.13, Z + sz); this.group.add(fl) }
   }
 
   /** Industrial worker arms at stations down both sides of the belt. */
