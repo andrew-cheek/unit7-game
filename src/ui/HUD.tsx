@@ -209,10 +209,11 @@ export function HUD({
         </div>
       )}
 
-      {/* current objective (top-center, persistent + readable). On touch it drops
-          below the corner control row so it never collides with the PAUSE button. */}
+      {/* current objective (top-center, persistent + readable). On touch the corner
+          control row wraps to TWO rows on narrow phones (RESTART/SOUND, then PAUSE),
+          so drop the objective below both so it never collides with the PAUSE button. */}
       {hud.objective && !hud.minigame && !hideTopCenter && (
-        <div style={{ ...objectiveStyle, top: touch ? 'max(48px, calc(env(safe-area-inset-top) + 38px))' : objectiveStyle.top }}>
+        <div style={{ ...objectiveStyle, top: touch ? 'calc(env(safe-area-inset-top) + 84px)' : objectiveStyle.top }}>
           <span style={{ color: NEON.dim, marginRight: 8 }}>OBJECTIVE</span>
           <span style={{ color: NEON.lime }}>{hud.objective}</span>
         </div>
@@ -220,7 +221,7 @@ export function HUD({
 
       {/* city-raid wave tracker (post-skydive assault) */}
       {hud.raid && !hud.minigame && !hideTopCenter && (
-        <div style={{ ...raidStyle, top: touch ? '86px' : '54px' }}>
+        <div style={{ ...raidStyle, top: touch ? 'calc(env(safe-area-inset-top) + 120px)' : '54px' }}>
           <span style={{ color: '#ff5a6a' }}>⚠ CITY RAID</span>
           <span style={{ margin: '0 10px', color: NEON.dim }}>WAVE {Math.max(1, hud.raid.wave)}/{hud.raid.waves}</span>
           <span style={{ color: hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
