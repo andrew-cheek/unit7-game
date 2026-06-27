@@ -58,6 +58,9 @@ export class LaunchPad {
   private scanMat?: THREE.MeshBasicMaterial
   private scan?: THREE.Mesh
   private forgePistons: { o: THREE.Object3D; ph: number; base: number }[] = []
+  private lifts: { o: THREE.Object3D; lo: number; hi: number; ph: number }[] = []
+  private towerArms: { pivot: THREE.Group; elbow: THREE.Group; spark: THREE.Mesh; sparkMat: THREE.MeshBasicMaterial; ph: number }[] = []
+  private towerStripMats: THREE.MeshBasicMaterial[] = []
 
   // Belt runs along X (forge at beltX0, output at beltX1), sitting at z = beltZ
   // just in front of the spawn so the line crosses your view head-on.
@@ -77,6 +80,7 @@ export class LaunchPad {
     this.group.rotation.y = faceYaw
 
     this.buildTowers()
+    this.buildFactoryTower()
     this.buildDeck()
     this.buildConveyor()
     this.buildForgeMachine()
@@ -141,8 +145,8 @@ export class LaunchPad {
     const spireMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4 }))
     // [x, z, footprint, height] - kept to the back hemisphere so the dive view stays open.
     const specs: [number, number, number, number][] = [
-      [-16, -82, 22, 132], [18, -92, 18, 168], [-48, -56, 17, 104],
-      [46, -62, 19, 120], [-72, -16, 14, 82], [70, -22, 15, 90], [2, -64, 14, 196],
+      [-36, -94, 22, 132], [36, -100, 18, 168], [-60, -60, 17, 104],
+      [58, -66, 19, 120], [-80, -18, 14, 82], [78, -24, 15, 90],
     ]
     const list = low ? specs.slice(0, 4) : specs
     const baseY = -54
@@ -171,6 +175,151 @@ export class LaunchPad {
       this.beacons.push({ mat: beaconMat, ph: Math.random() * 6.28 })
       this.group.add(g)
     }
+  }
+
+  /** A partially-assembled humanoid hung in an assembly bay - the robot being
+   *  built, posed mid-construction. Body-colored metal with glowing joints. */
+  private makeSuspendedBot(col: number): THREE.Group {
+    const g = new THREE.Group()
+    const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0xaeb8cc, metalness: 0.6, roughness: 0.4, emissive: col, emissiveIntensity: 0.35 }))
+    const jointMat = this.own(new THREE.MeshBasicMaterial({ color: col, fog: false }))
+    const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x10151f, metalness: 0.7, roughness: 0.4 }))
+    const torso = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.5, 2.1, 1)), bodyMat); torso.position.y = 0; g.add(torso)
+    const chest = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.3, 0.3, 0.18, 12)), jointMat); chest.rotation.x = Math.PI / 2; chest.position.set(0, 0.4, 0.52); g.add(chest)
+    const head = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.9, 0.9, 0.9)), bodyMat); head.position.y = 1.75; g.add(head)
+    const visor = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.7, 0.18, 0.1)), jointMat); visor.position.set(0, 1.78, 0.46); g.add(visor)
+    // Arms out (being worked on).
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 1.7, 0.4)), bodyMat); arm.position.set(sx * 1.15, 0.1, 0); arm.rotation.z = sx * 0.5; g.add(arm)
+      const shoulder = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.32, 8, 6)), jointMat); shoulder.position.set(sx * 0.95, 0.85, 0); g.add(shoulder)
+    }
+    for (const sx of [-0.45, 0.45]) { const leg = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 1.9, 0.5)), bodyMat); leg.position.set(sx, -2, 0); g.add(leg) }
+    const hip = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.3, 0.5, 0.9)), darkMat); hip.position.y = -1.1; g.add(hip)
+    return g
+  }
+
+  /** A robotic assembly arm mounted in a bay, welding the suspended unit. Pushed
+   *  to towerArms so it animates. Returns its root group (already positioned). */
+  private makeBayArm(x: number, y: number, z: number, faceSign: number): THREE.Group {
+    const segMat = this.own(new THREE.MeshStandardMaterial({ color: 0xdfe6f2, metalness: 0.6, roughness: 0.35 }))
+    const jMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.7, roughness: 0.4, emissive: 0x123a52, emissiveIntensity: 0.4 }))
+    const root = new THREE.Group(); root.position.set(x, y, z)
+    const base = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.45, 0.6, 0.7, 10)), jMat); base.position.y = 0.35; root.add(base)
+    const pivot = new THREE.Group(); pivot.position.y = 0.7; root.add(pivot)
+    const upper = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.3, 0.3, 2.2)), segMat); upper.position.z = faceSign * 1; pivot.add(upper)
+    const elbow = new THREE.Group(); elbow.position.z = faceSign * 2; pivot.add(elbow)
+    const fore = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.24, 0.24, 1.8)), segMat); fore.position.set(0, -0.2, faceSign * 0.8); elbow.add(fore)
+    const sparkMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe9ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const spark = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.18, 8, 6)), sparkMat); spark.position.set(0, -0.35, faceSign * 1.6); elbow.add(spark)
+    this.towerArms.push({ pivot, elbow, spark, sparkMat, ph: Math.random() * 6.28 })
+    return root
+  }
+
+  /** THE factory: a tall, multi-storey glass robotics tower rising behind the deck.
+   *  You can see right into each lit bay where assembly arms weld suspended humanoid
+   *  units; glass lift tubes with travelling cores run the corners, a giant
+   *  "UNIT 7 ROBOTICS" sign crowns it, and neon bands ring every floor. */
+  private buildFactoryTower() {
+    const low = config.tier.name === 'low'
+    const W = 30, D = 17, FH = 13
+    const floors = low ? 2 : 3
+    const cz = -64 // behind the deck rim (back edge ~ -50), so it never blocks the deck
+    const g = new THREE.Group(); g.position.set(0, 0, cz)
+
+    const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0xe6ebf4, metalness: 0.5, roughness: 0.4 }))
+    const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x141d30, metalness: 0.75, roughness: 0.35, emissive: 0x0a2236, emissiveIntensity: 0.4 }))
+    const glassMat = this.own(new THREE.MeshStandardMaterial({ color: 0x8fd6ff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.16, side: THREE.DoubleSide, emissive: 0x2a6ea0, emissiveIntensity: 0.25 }))
+    const floorMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2740, metalness: 0.6, roughness: 0.4, emissive: 0x0c2236, emissiveIntensity: 0.4 }))
+    const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a]
+
+    // Podium base.
+    const podium = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W + 6, 4, D + 6)), darkMat); podium.position.set(0, -56, 0); g.add(podium)
+    const shaft = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W + 2, 52, D + 2)), darkMat); shaft.position.set(0, -28, 0); g.add(shaft) // structural base rising from below
+
+    // Corner pillars running the full visible height.
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const pil = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.4, floors * FH + 4, 1.4)), frameMat)
+      pil.position.set(sx * (W / 2), floors * FH / 2, sz * (D / 2)); g.add(pil)
+    }
+
+    // Assembly floors.
+    for (let f = 0; f < floors; f++) {
+      const y0 = f * FH
+      const tint = tints[f % tints.length]
+      // Floor + ceiling slabs.
+      const slab = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W, 0.7, D)), floorMat); slab.position.y = y0 + 0.35; g.add(slab)
+      // Glass shell (you see through it into the bay).
+      const glass = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W - 0.6, FH - 1, D - 0.6)), glassMat); glass.position.y = y0 + FH / 2; g.add(glass)
+      // Neon band ringing the floor.
+      const bandMat = this.own(new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      this.towerStripMats.push(bandMat)
+      for (const ey of [y0 + 0.9, y0 + FH - 0.6]) {
+        for (const [w, d, ox, oz, rot] of [[W, 0.001, 0, D / 2, 0], [W, 0.001, 0, -D / 2, 0], [D, 0.001, W / 2, 0, Math.PI / 2], [D, 0.001, -W / 2, 0, Math.PI / 2]] as [number, number, number, number, number][]) {
+          const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w, 0.22, 0.22)), bandMat); bar.position.set(ox, ey, oz); bar.rotation.y = rot; g.add(bar)
+        }
+      }
+      // Ceiling light strips inside.
+      for (const sx of [-W * 0.28, 0, W * 0.28]) {
+        const strip = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.1, D - 3)), this.own(new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0.8, fog: false })))
+        strip.position.set(sx, y0 + FH - 1.2, 0); g.add(strip)
+      }
+      // Back-wall holo screen.
+      const scr = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(5, 3)), this.own(new THREE.MeshBasicMaterial({ map: this.screenTexture(), toneMapped: false, transparent: true })))
+      scr.position.set(-W * 0.3, y0 + FH * 0.55, -D / 2 + 0.5); g.add(scr)
+      this.texs.push((scr.material as THREE.MeshBasicMaterial).map!)
+
+      // The robots being built: suspended units + welding arms, in 2 bays per floor.
+      const bays = low ? 1 : 2
+      for (let bidx = 0; bidx < bays; bidx++) {
+        const bx = bays === 1 ? W * 0.12 : (bidx === 0 ? -W * 0.24 : W * 0.22)
+        const bot = this.makeSuspendedBot(tint); bot.scale.setScalar(1.15); bot.position.set(bx, y0 + FH * 0.5, 0.5); g.add(bot)
+        // A cable holding it from the ceiling.
+        const cable = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.06, 0.06, FH * 0.32, 5)), frameMat); cable.position.set(bx, y0 + FH * 0.82, 0.5); g.add(cable)
+        // Two welding arms flanking it.
+        g.add(this.makeBayArm(bx - 3, y0 + 0.7, 2.6, -1))
+        if (!low) g.add(this.makeBayArm(bx + 3, y0 + 0.7, -2.6, 1))
+      }
+    }
+
+    // Side glass lift tubes with a travelling glowing core.
+    for (const sx of [-1, 1]) {
+      const tubeX = sx * (W / 2 + 2)
+      const tube = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(2, 2, floors * FH + 2, 16, 1, true)), this.own(new THREE.MeshStandardMaterial({ color: 0x9fdcff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.18, side: THREE.DoubleSide, emissive: 0x2a6ea0, emissiveIntensity: 0.3 })))
+      tube.position.set(tubeX, floors * FH / 2, 0); g.add(tube)
+      const coreMat = this.own(new THREE.MeshBasicMaterial({ color: 0x6fe0ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const core = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.5, 1.5, 2.4, 14)), coreMat); core.position.set(tubeX, 0, 0); g.add(core)
+      this.lifts.push({ o: core, lo: 1, hi: floors * FH - 1, ph: sx > 0 ? 0 : Math.PI })
+    }
+
+    // Crown: sign housing + a big lit "UNIT 7 ROBOTICS" panel facing the deck (+Z).
+    const topY = floors * FH
+    const housing = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W * 0.78, 7, D * 0.7)), darkMat); housing.position.set(0, topY + 3.5, 0); g.add(housing)
+    const signTex = this.factorySignTex(); this.texs.push(signTex)
+    const sign = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(W * 0.72, 5.5)), this.own(new THREE.MeshBasicMaterial({ map: signTex, transparent: true, toneMapped: false, side: THREE.DoubleSide })))
+    sign.position.set(0, topY + 3.6, D * 0.35 + 0.1); g.add(sign)
+    const signFrameMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, fog: false }))
+    for (const ey of [topY + 6.4, topY + 0.9]) { const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W * 0.74, 0.3, 0.3)), signFrameMat); bar.position.set(0, ey, D * 0.35 + 0.1); g.add(bar) }
+    // Roof antenna + beacon.
+    const ant = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.16, 0.4, 12, 7)), frameMat); ant.position.set(0, topY + 13, 0); g.add(ant)
+    const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff4a6a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const beacon = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.8, 10, 8)), beaconMat); beacon.position.set(0, topY + 19, 0); g.add(beacon)
+    this.beacons.push({ mat: beaconMat, ph: 1.2 })
+
+    this.group.add(g)
+  }
+
+  private factorySignTex(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 256
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#05080f'; ctx.fillRect(0, 0, 1024, 256)
+    ctx.fillStyle = 'rgba(39,231,255,0.05)'; for (let y = 0; y < 256; y += 6) ctx.fillRect(0, y, 1024, 2)
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 26; ctx.fillStyle = '#cdfaff'
+    ctx.font = '900 130px ui-monospace, Menlo, monospace'; ctx.fillText('UNIT 7', 512, 96)
+    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 18; ctx.fillStyle = '#ff8ae6'
+    ctx.font = '800 70px ui-monospace, Menlo, monospace'; ctx.fillText('R O B O T I C S', 512, 188)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   /** A heavy forge "birthing machine" at the head of the line: a glowing furnace
@@ -667,6 +816,15 @@ export class LaunchPad {
     for (const m of this.pylons) m.opacity = 0.45 + Math.sin(this.t * 3.2) * 0.4
     // Skyline rooftop beacons blink out of phase.
     for (const b of this.beacons) b.mat.opacity = 0.25 + Math.pow(Math.max(0, Math.sin(this.t * 1.6 + b.ph)), 6) * 0.75
+    // Factory tower: lift cores travel the tubes, bay arms weld, neon bands pulse.
+    for (const l of this.lifts) l.o.position.y = l.lo + (Math.sin(this.t * 0.6 + l.ph) * 0.5 + 0.5) * (l.hi - l.lo)
+    for (const a of this.towerArms) {
+      a.pivot.rotation.x = Math.sin(this.t * 2.2 + a.ph) * 0.4 - 0.2
+      a.elbow.rotation.x = Math.sin(this.t * 3.3 + a.ph) * 0.5
+      a.sparkMat.opacity = Math.max(0, Math.sin(this.t * 17 + a.ph)) * 0.9
+      a.spark.scale.setScalar(1 + a.sparkMat.opacity)
+    }
+    for (let i = 0; i < this.towerStripMats.length; i++) this.towerStripMats[i].opacity = 0.6 + Math.sin(this.t * 2.4 + i) * 0.3
     // Forge pistons pump.
     for (const p of this.forgePistons) p.o.position.y = p.base + Math.sin(this.t * 3 + p.ph) * 0.8
     // Gantry trolley tracks back and forth over the line; welder flares as it works.
