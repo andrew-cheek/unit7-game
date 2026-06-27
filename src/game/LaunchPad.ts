@@ -31,7 +31,8 @@ export class LaunchPad {
   private center: THREE.Vector3
 
   private units: {
-    g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Mesh; legR: THREE.Mesh
+    g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Object3D; legR: THREE.Object3D
+    wheel: THREE.Object3D | null; kind: 'biped' | 'roller'
     bodyMat: THREE.MeshStandardMaterial; headMat: THREE.MeshStandardMaterial
     x: number; z: number; tx: number; tz: number; state: 'build' | 'wander' | 'edge' | 'fall'
     v: number; ph: number; fallT: number; wait: number; lane: number
@@ -39,6 +40,11 @@ export class LaunchPad {
   private arms: { pivot: THREE.Group; elbow: THREE.Group; spark: THREE.Mesh; sparkMat: THREE.MeshBasicMaterial; ph: number }[] = []
   private cores: THREE.Mesh[] = []
   private beltSeams: THREE.Mesh[] = []
+  // Sci-fi props that animate.
+  private drones: { g: THREE.Group; a: number; r: number; h: number; sp: number; rotors: THREE.Object3D[] }[] = []
+  private holos: { o: THREE.Object3D; sp: number }[] = []
+  private pylons: THREE.MeshBasicMaterial[] = []
+  private cargo: { o: THREE.Object3D; ph: number; baseY: number }[] = []
   private arrowMat!: THREE.MeshBasicMaterial
   private arrowChevs: THREE.Mesh[] = []
   private edgeGlow!: THREE.MeshBasicMaterial
@@ -65,6 +71,7 @@ export class LaunchPad {
     this.buildArms()
     this.buildSign()
     this.buildProps()
+    this.buildSciFi()
     this.buildClouds()
     this.buildUnits()
 
@@ -257,39 +264,176 @@ export class LaunchPad {
     }
   }
 
+  // Shared low-poly part geometries (reused across every unit; only materials
+  // differ per robot, so the variety is cheap).
+  private ug = {
+    torso: this.ownG(new THREE.BoxGeometry(0.95, 1.1, 0.6)),
+    torsoSlim: this.ownG(new THREE.BoxGeometry(0.7, 1.25, 0.5)),
+    headBox: this.ownG(new THREE.BoxGeometry(0.55, 0.55, 0.55)),
+    headDome: this.ownG(new THREE.SphereGeometry(0.32, 10, 8)),
+    leg: this.ownG(new THREE.BoxGeometry(0.26, 0.95, 0.26)),
+    foot: this.ownG(new THREE.BoxGeometry(0.34, 0.18, 0.5)),
+    arm: this.ownG(new THREE.BoxGeometry(0.22, 0.9, 0.22)),
+    claw: this.ownG(new THREE.BoxGeometry(0.16, 0.32, 0.16)),
+    hips: this.ownG(new THREE.BoxGeometry(0.9, 0.32, 0.7)),
+    wheel: this.ownG(new THREE.CylinderGeometry(0.6, 0.6, 0.26, 16)),
+    hub: this.ownG(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 8)),
+    fork: this.ownG(new THREE.BoxGeometry(0.22, 0.8, 0.22)),
+    visor: this.ownG(new THREE.BoxGeometry(0.5, 0.13, 0.08)),
+    eye: this.ownG(new THREE.BoxGeometry(0.1, 0.1, 0.06)),
+    pad: this.ownG(new THREE.BoxGeometry(0.3, 0.22, 0.5)),
+    core: this.ownG(new THREE.CylinderGeometry(0.16, 0.16, 0.08, 12)),
+    antenna: this.ownG(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 5)),
+    tip: this.ownG(new THREE.SphereGeometry(0.07, 6, 5)),
+    pack: this.ownG(new THREE.BoxGeometry(0.55, 0.7, 0.28)),
+  }
+
   private buildUnits() {
-    const torsoGeo = this.ownG(new THREE.BoxGeometry(0.95, 1.1, 0.6))
-    const headGeo = this.ownG(new THREE.BoxGeometry(0.55, 0.55, 0.55))
-    const legGeo = this.ownG(new THREE.BoxGeometry(0.26, 0.95, 0.26))
-    const armGeo = this.ownG(new THREE.BoxGeometry(0.22, 0.9, 0.22))
-    const baseGeo = this.ownG(new THREE.BoxGeometry(0.9, 0.3, 0.7))
-    const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a, 0xb98cff, 0xff8a1e]
+    const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a, 0xb98cff, 0xff8a1e, 0x4af0c0, 0xff5a7a]
     const n = config.tier.name === 'low' ? 8 : 13
     for (let i = 0; i < n; i++) {
-      const g = new THREE.Group()
-      g.scale.setScalar(1.45)
       const col = tints[i % tints.length]
-      // Self-illuminating in the unit's tint so robots pop against the dark deck
-      // (scene lights alone left them camouflaged at distance).
-      const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x5a6f96, emissive: col, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.5, transparent: true, opacity: 1 }))
-      const headMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: col, emissiveIntensity: 2.4, roughness: 0.4, transparent: true, opacity: 1 }))
-      const base = new THREE.Mesh(baseGeo, bodyMat); base.position.y = 0.15
-      const legL = new THREE.Mesh(legGeo, bodyMat); legL.position.set(-0.22, 0.75, 0)
-      const legR = new THREE.Mesh(legGeo, bodyMat); legR.position.set(0.22, 0.75, 0)
-      const torso = new THREE.Mesh(torsoGeo, bodyMat); torso.position.y = 1.75
-      const armL = new THREE.Mesh(armGeo, bodyMat); armL.position.set(-0.62, 1.75, 0)
-      const armR = new THREE.Mesh(armGeo, bodyMat); armR.position.set(0.62, 1.75, 0)
-      const head = new THREE.Mesh(headGeo, headMat); head.position.y = 2.6
-      const parts = [base, legL, legR, torso, armL, armR, head]
-      for (const p of parts) g.add(p)
-      this.group.add(g)
-      const u = { g, parts, legL, legR, bodyMat, headMat, x: 0, z: 0, tx: 0, tz: 0, state: 'build' as const, v: 4.8 + Math.random() * 1.8, ph: Math.random() * 6.28, fallT: 0, wait: 0, lane: (Math.random() - 0.5) * 1.4 }
+      const roller = i % 3 === 2          // every third unit rolls on wheels
+      const humanoid = !roller && i % 2 === 0 // half-human variant for some bipeds
+      const scale = 0.85 + ((i * 0.37) % 1) * 0.8 // 0.85 .. 1.65, deterministic spread
+      const u = this.makeUnit(col, scale, roller ? 'roller' : 'biped', humanoid)
       this.units.push(u)
       // Seed a lively mix: most mid-build along the belt, a couple already finished
-      // and walking the deck - so the instant you spawn you see robots being built
-      // AND robots walking off to dive.
+      // and walking the deck - so you see robots being built AND walking off to dive.
       if (i % 3 === 1) this.startWalker(u)
       else this.respawnUnit(u, this.beltX0 + (i / n) * this.lenX * 0.95)
+    }
+  }
+
+  /** Build one varied robot: legs or wheels, with a visor, antenna, chest core,
+   *  shoulder pads and a back module - some leaning humanoid. */
+  private makeUnit(col: number, scale: number, kind: 'biped' | 'roller', humanoid: boolean) {
+    const g = new THREE.Group(); g.scale.setScalar(1.45 * scale)
+    const ug = this.ug
+    const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: humanoid ? 0x8a93ab : 0x5a6f96, emissive: col, emissiveIntensity: 0.5, metalness: 0.4, roughness: 0.5, transparent: true, opacity: 1 }))
+    const headMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: col, emissiveIntensity: 2.4, roughness: 0.4, transparent: true, opacity: 1 }))
+    const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x161d2e, metalness: 0.7, roughness: 0.4 }))
+
+    const hips = new THREE.Mesh(ug.hips, bodyMat); hips.position.y = 0.32
+
+    // Locomotion: legs (biped) or a wheel rig (roller).
+    let legL: THREE.Object3D, legR: THREE.Object3D, wheel: THREE.Object3D | null = null
+    if (kind === 'roller') {
+      const rig = new THREE.Group()
+      const w = new THREE.Group() // spun while moving
+      for (const sx of [-0.42, 0.42]) {
+        const tire = new THREE.Mesh(ug.wheel, darkMat); tire.rotation.z = Math.PI / 2; tire.position.x = sx; w.add(tire)
+        const hub = new THREE.Mesh(ug.hub, headMat); hub.rotation.z = Math.PI / 2; hub.position.x = sx; w.add(hub)
+      }
+      w.position.y = 0.6; rig.add(w)
+      const fork = new THREE.Mesh(ug.fork, darkMat); fork.position.y = 0.95; rig.add(fork)
+      wheel = w; legL = rig; legR = new THREE.Group() // legR unused for rollers
+      hips.position.y = 1.15
+    } else {
+      legL = new THREE.Mesh(ug.leg, bodyMat); legL.position.set(-0.22, 0.75, 0)
+      legR = new THREE.Mesh(ug.leg, bodyMat); legR.position.set(0.22, 0.75, 0)
+      for (const leg of [legL, legR]) { const foot = new THREE.Mesh(ug.foot, darkMat); foot.position.set(0, -0.52, 0.08); leg.add(foot) }
+    }
+
+    const torsoY = kind === 'roller' ? 2.0 : 1.75
+    const torso = new THREE.Mesh(humanoid ? ug.torsoSlim : ug.torso, bodyMat); torso.position.y = torsoY
+    const core = new THREE.Mesh(ug.core, headMat); core.rotation.x = Math.PI / 2; core.position.set(0, 0.05, (humanoid ? 0.26 : 0.31)); torso.add(core)
+    for (const sx of [-0.62, 0.62]) { const pad = new THREE.Mesh(ug.pad, darkMat); pad.position.set(sx, 0.5, 0); torso.add(pad) }
+    const pack = new THREE.Mesh(ug.pack, darkMat); pack.position.set(0, 0.1, -0.42); torso.add(pack)
+
+    const armL = new THREE.Mesh(ug.arm, bodyMat); armL.position.set(-0.62, torsoY, 0)
+    const armR = new THREE.Mesh(ug.arm, bodyMat); armR.position.set(0.62, torsoY, 0)
+    // One hand is a little claw for character.
+    for (const dx of [-0.07, 0.07]) { const cl = new THREE.Mesh(ug.claw, darkMat); cl.position.set(dx, -0.55, 0); armR.add(cl) }
+    const hand = new THREE.Mesh(ug.tip, headMat); hand.scale.setScalar(1.6); hand.position.y = -0.5; armL.add(hand)
+
+    const headY = torsoY + 0.85
+    // Head shell is body-colored metal; the visor/eyes glow. Details parent to the
+    // head so they only appear once the head is welded on.
+    const headShell = new THREE.Mesh(humanoid ? ug.headDome : ug.headBox, bodyMat); headShell.position.y = headY
+    const visor = new THREE.Mesh(ug.visor, headMat); visor.position.set(0, 0.02, humanoid ? 0.26 : 0.29); headShell.add(visor)
+    if (humanoid) { for (const sx of [-0.12, 0.12]) { const e = new THREE.Mesh(ug.eye, headMat); e.position.set(sx, 0.03, 0.27); headShell.add(e) } }
+    const ant = new THREE.Mesh(ug.antenna, darkMat); ant.position.set(0.18, 0.42, 0); headShell.add(ant)
+    const tip = new THREE.Mesh(ug.tip, headMat); tip.position.set(0.18, 0.7, 0); headShell.add(tip)
+
+    // parts[] drives the staged build reveal: [hips, loco, loco, torso, armL, armR, head]
+    const parts: THREE.Object3D[] = [hips, legL, legR, torso, armL, armR, headShell]
+    for (const p of parts) g.add(p)
+    this.group.add(g)
+
+    return {
+      g, parts, legL, legR, wheel, kind, bodyMat, headMat,
+      x: 0, z: 0, tx: 0, tz: 0, state: 'build' as const,
+      v: (5.4 - scale * 1.2) + Math.random() * 1.2, ph: Math.random() * 6.28, fallT: 0, wait: 0, lane: (Math.random() - 0.5) * 1.4,
+    }
+  }
+
+  /** Wild sci-fi set dressing around the deck: hover drones, hologram projectors,
+   *  energy pylons and floating cargo. */
+  private buildSciFi() {
+    const R = this.radius, low = config.tier.name === 'low'
+    // Hologram projectors to the sides: a pedestal beaming a rotating wireframe.
+    const holoMat = this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, wireframe: true, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const beamMat = this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
+    const padMat = this.own(new THREE.MeshStandardMaterial({ color: 0x141d30, metalness: 0.7, roughness: 0.4, emissive: 0x0c3050, emissiveIntensity: 0.6 }))
+    const holoGeos = [this.ownG(new THREE.IcosahedronGeometry(1.5, 0)), this.ownG(new THREE.TorusKnotGeometry(0.9, 0.32, 48, 6))]
+    const spots: [number, number, number][] = [[-R * 0.62, 6, 0], [R * 0.62, 6, 0]]
+    spots.forEach((s, i) => {
+      const ped = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.3, 1.6, 0.6, 16)), padMat); ped.position.set(s[0], 0.3, s[2]); this.group.add(ped)
+      const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(1.4, 0.08, 8, 24)), this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, fog: false }))); ring.rotation.x = -Math.PI / 2; ring.position.set(s[0], 0.65, s[2]); this.group.add(ring)
+      const beam = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.3, 4.5, 16, 1, true)), beamMat); beam.position.set(s[0], 2.9, s[2]); this.group.add(beam)
+      const holo = new THREE.Mesh(holoGeos[i % holoGeos.length], holoMat); holo.position.set(s[0], 3.4, s[2]); this.group.add(holo)
+      this.holos.push({ o: holo, sp: i ? -0.6 : 0.8 })
+    })
+
+    // Energy pylons at the back corners: poles capped with a pulsing orb.
+    const poleMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4 }))
+    for (const sx of [-R * 0.66, R * 0.66]) {
+      const pole = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.35, 0.5, 9, 10)), poleMat); pole.position.set(sx, 4.5, -R * 0.5); this.group.add(pole)
+      const cage = new THREE.Mesh(this.ownG(new THREE.IcosahedronGeometry(1.1, 0)), this.own(new THREE.MeshBasicMaterial({ color: 0x9b6bff, wireframe: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))); cage.position.set(sx, 9.4, -R * 0.5); this.group.add(cage); this.holos.push({ o: cage, sp: 1.4 })
+      const orbMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbf9bff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const orb = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.6, 12, 10)), orbMat); orb.position.set(sx, 9.4, -R * 0.5); this.group.add(orb); this.pylons.push(orbMat)
+    }
+
+    // Floating cargo pods scattered near the rim.
+    const crateMat = this.own(new THREE.MeshStandardMaterial({ color: 0x223052, metalness: 0.6, roughness: 0.45, emissive: 0x16324f, emissiveIntensity: 0.5 }))
+    const stripeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const crateGeo = this.ownG(new THREE.BoxGeometry(2.4, 2.4, 2.4))
+    const stGeo = this.ownG(new THREE.BoxGeometry(2.46, 0.18, 2.46))
+    const cpos: [number, number][] = [[-R * 0.5, -R * 0.66], [R * 0.46, -R * 0.6], [-R * 0.72, R * 0.18], [R * 0.7, R * 0.2]]
+    cpos.forEach(([cx, cz], i) => {
+      const crate = new THREE.Group()
+      const box = new THREE.Mesh(crateGeo, crateMat); crate.add(box)
+      const st = new THREE.Mesh(stGeo, stripeMat); st.position.y = 0.4; crate.add(st)
+      crate.scale.setScalar(0.7 + (i % 3) * 0.18); crate.rotation.y = i * 0.7
+      const baseY = 1.6 + (i % 2) * 0.8
+      crate.position.set(cx, baseY, cz); this.group.add(crate)
+      // anti-grav glow under it
+      const ag = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(1.6, 16)), this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      ag.rotation.x = -Math.PI / 2; ag.position.set(cx, 0.1, cz); this.group.add(ag)
+      this.cargo.push({ o: crate, ph: i * 1.7, baseY })
+    })
+
+    // Hover drones that orbit the deck, bobbing, with spinning rotors and an eye.
+    const droneBody = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.6, roughness: 0.4, emissive: 0x0c2030, emissiveIntensity: 0.6 }))
+    const droneEye = this.own(new THREE.MeshBasicMaterial({ color: 0xff4a6a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const rotorMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const bodyGeo = this.ownG(new THREE.SphereGeometry(0.6, 10, 8))
+    const eyeGeo = this.ownG(new THREE.SphereGeometry(0.16, 8, 6))
+    const armGeo = this.ownG(new THREE.BoxGeometry(1.5, 0.06, 0.12))
+    const rotorGeo = this.ownG(new THREE.CircleGeometry(0.34, 12))
+    const nD = low ? 2 : 4
+    for (let i = 0; i < nD; i++) {
+      const d = new THREE.Group()
+      const body = new THREE.Mesh(bodyGeo, droneBody); d.add(body)
+      const eye = new THREE.Mesh(eyeGeo, droneEye); eye.position.set(0, 0, 0.55); d.add(eye)
+      const rotors: THREE.Object3D[] = []
+      for (let k = 0; k < 2; k++) { const a = new THREE.Mesh(armGeo, droneBody); a.rotation.y = k * Math.PI / 2; d.add(a) }
+      for (const [rx, rz] of [[0.72, 0], [-0.72, 0], [0, 0.72], [0, -0.72]] as [number, number][]) {
+        const r = new THREE.Mesh(rotorGeo, rotorMat); r.rotation.x = -Math.PI / 2; r.position.set(rx, 0.12, rz); d.add(r); rotors.push(r)
+      }
+      this.group.add(d)
+      this.drones.push({ g: d, a: (i / nD) * Math.PI * 2, r: R * 0.5 + (i % 2) * 7, h: 9 + (i % 3) * 3, sp: 0.25 + (i % 2) * 0.12, rotors })
     }
   }
 
@@ -335,6 +479,17 @@ export class LaunchPad {
       a.spark.scale.setScalar(1 + a.sparkMat.opacity * 0.9)
     }
     for (let i = 0; i < this.cores.length; i++) { const c = this.cores[i]; c.rotation.x += dt * 1.1; c.rotation.y += dt * 0.8; c.position.y = 3.4 + Math.sin(this.t * 1.4 + i) * 0.5 }
+    // Sci-fi props.
+    for (const h of this.holos) { h.o.rotation.y += h.sp * dt; h.o.rotation.x += h.sp * 0.4 * dt }
+    for (const m of this.pylons) m.opacity = 0.45 + Math.sin(this.t * 3.2) * 0.4
+    for (const c of this.cargo) { c.o.position.y = c.baseY + Math.sin(this.t * 1.2 + c.ph) * 0.3; c.o.rotation.y += 0.2 * dt }
+    for (const d of this.drones) {
+      d.a += d.sp * dt
+      const cz = this.beltZ * 0.4
+      d.g.position.set(Math.cos(d.a) * d.r, d.h + Math.sin(this.t * 1.5 + d.a) * 1.3, cz + Math.sin(d.a) * d.r)
+      d.g.rotation.y = -d.a
+      for (const r of d.rotors) r.rotation.z += dt * 40
+    }
     this.arrowMat.opacity = 0.5 + Math.sin(this.t * 4) * 0.35
     for (let i = 0; i < this.arrowChevs.length; i++) this.arrowChevs[i].position.y = 6 - i * 2.3 - ((this.t * 3 + i) % 1) * 0.6
 
@@ -351,6 +506,7 @@ export class LaunchPad {
         u.parts[6].visible = f > 0.78
         u.bodyMat.emissiveIntensity = 0.25 + f * 0.4 // "powers up" as it's assembled
         u.g.rotation.y = Math.PI / 2 // face along the belt (+x)
+        if (u.wheel) u.wheel.rotation.x -= dt * 2.2
         u.g.position.set(u.x, 0.9, this.beltZ + u.lane)
         if (u.x >= this.beltX1) {
           for (const p of u.parts) p.visible = true; u.bodyMat.emissiveIntensity = 0.55
@@ -367,12 +523,17 @@ export class LaunchPad {
         if (d > 0.4) {
           u.x += (dx / d) * u.v * dt; u.z += (dz / d) * u.v * dt
           u.g.rotation.y = Math.atan2(dx, dz)
-          const sw = Math.sin(this.t * 8 + u.ph) * 0.5; u.legL.rotation.x = sw; u.legR.rotation.x = -sw
-          u.g.position.set(u.x, Math.abs(Math.sin(this.t * 8 + u.ph)) * 0.06, u.z)
+          if (u.kind === 'roller') {
+            if (u.wheel) u.wheel.rotation.x -= u.v * dt * 1.7
+            u.g.position.set(u.x, 0, u.z)
+          } else {
+            const sw = Math.sin(this.t * 8 + u.ph) * 0.5; u.legL.rotation.x = sw; u.legR.rotation.x = -sw
+            u.g.position.set(u.x, Math.abs(Math.sin(this.t * 8 + u.ph)) * 0.06, u.z)
+          }
         } else if (u.state === 'edge') {
           u.state = 'fall'; u.fallT = 0
         } else {
-          u.legL.rotation.x = 0; u.legR.rotation.x = 0
+          if (u.kind === 'biped') { u.legL.rotation.x = 0; u.legR.rotation.x = 0 }
           u.wait -= dt
           u.g.position.set(u.x, 0, u.z)
           if (u.wait <= 0) {
