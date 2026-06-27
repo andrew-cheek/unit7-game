@@ -143,6 +143,33 @@ function buildPlasmaScreen(): { texture: THREE.CanvasTexture; update: (dt: numbe
 }
 
 /** A stylized "screenshot" of a game: an iconic motif in its accent color. */
+/** The iconic black-light arcade carpet: a dark base strewn with neon geometric
+ *  confetti (triangles, dots, zigzags). Tiled across the hall floor. */
+function retroCarpet(): THREE.CanvasTexture {
+  const cv = document.createElement('canvas')
+  cv.width = 256; cv.height = 256
+  const ctx = cv.getContext('2d')!
+  ctx.fillStyle = '#0a0a20'; ctx.fillRect(0, 0, 256, 256)
+  const cols = ['#27e7ff', '#ff2bd0', '#ffd24a', '#9dff5a', '#b46bff', '#ff6a3c']
+  // Deterministic scatter (no Math.random in render-adjacent code paths).
+  let seed = 9173
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+  for (let i = 0; i < 80; i++) {
+    const x = rnd() * 256, y = rnd() * 256, s = 4 + rnd() * 11, c = cols[(rnd() * cols.length) | 0]
+    ctx.fillStyle = c; ctx.strokeStyle = c; ctx.lineWidth = 2.4; ctx.globalAlpha = 0.92
+    const shape = (rnd() * 3) | 0
+    if (shape === 0) { ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s, y + s); ctx.lineTo(x - s, y + s); ctx.closePath(); ctx.fill() }
+    else if (shape === 1) { ctx.beginPath(); ctx.arc(x, y, s * 0.55, 0, 7); ctx.fill() }
+    else { ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x - s / 2, y - s); ctx.lineTo(x, y); ctx.lineTo(x + s / 2, y - s); ctx.lineTo(x + s, y); ctx.stroke() }
+  }
+  ctx.globalAlpha = 1
+  const tex = new THREE.CanvasTexture(cv)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(6, 5)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 function arcadeThumbnail(kind: MinigameKind, color: number): THREE.CanvasTexture {
   const cv = document.createElement('canvas')
   cv.width = 256
@@ -288,8 +315,11 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     scene.add(ceilCollider)
     solids.push(ceilCollider)
 
-    // floor + a glowing centre medallion so the hall reads as a polished lobby
-    const floor = new THREE.Mesh(ownG(new THREE.BoxGeometry(W - t, 0.1, D - t)), floorMat)
+    // floor + a glowing centre medallion so the hall reads as a polished lobby.
+    // Retro arcade carpet on top so it feels like a 90s game hall, not a lobby.
+    const carpetTex = retroCarpet(); texs.push(carpetTex)
+    const carpetMat = own(new THREE.MeshStandardMaterial({ map: carpetTex, roughness: 0.92, metalness: 0.0 }))
+    const floor = new THREE.Mesh(ownG(new THREE.BoxGeometry(W - t, 0.1, D - t)), carpetMat)
     floor.position.set(CX, gy + 0.05, CZ)
     {
       const medallion = new THREE.Mesh(ownG(new THREE.CircleGeometry(6, 40)), own(new THREE.MeshBasicMaterial({ color: config.palette.cyan, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })))
@@ -490,6 +520,30 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
 
       arcadePortals.push({ kind: g.kind, pos: new THREE.Vector3(padX, gy, z), group: door, screenMat })
     }
+
+    // Retro upright cabinets flanking the entrance: the classic arcade silhouette
+    // (body + lit marquee + glowing CRT + angled control panel) you walk past on
+    // the way in. Against the front wall in the corners, clear of the aisle.
+    const cabDark = own(new THREE.MeshStandardMaterial({ color: 0x0c0e1a, metalness: 0.35, roughness: 0.65 }))
+    const cabBodyGeo = ownG(new THREE.BoxGeometry(1.6, 4.2, 1.4))
+    const cabMarqGeo = ownG(new THREE.BoxGeometry(1.7, 0.7, 1.5))
+    const cabScreenGeo = ownG(new THREE.PlaneGeometry(1.2, 1.0))
+    const cabStripGeo = ownG(new THREE.BoxGeometry(0.05, 3.6, 1.0))
+    const cabPanelGeo = ownG(new THREE.BoxGeometry(1.5, 0.16, 0.7))
+    const cabinet = (x: number, z: number, col: number) => {
+      const cab = new THREE.Group(); cab.position.set(x, gy, z)
+      const body = new THREE.Mesh(cabBodyGeo, cabDark); body.position.y = 2.1; body.castShadow = true; cab.add(body)
+      const side = own(new THREE.MeshBasicMaterial({ color: col, fog: false }))
+      for (const sx of [-0.83, 0.83]) { const st = new THREE.Mesh(cabStripGeo, side); st.position.set(sx, 2.2, 0.0); cab.add(st) }
+      const marq = new THREE.Mesh(cabMarqGeo, own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: col, emissiveIntensity: 2.0, roughness: 0.4 }))); marq.position.set(0, 4.25, 0); cab.add(marq)
+      const screen = new THREE.Mesh(cabScreenGeo, own(new THREE.MeshBasicMaterial({ color: col, toneMapped: false }))); screen.position.set(0, 3.0, 0.71); cab.add(screen)
+      const panel = new THREE.Mesh(cabPanelGeo, cabDark); panel.position.set(0, 1.75, 0.72); panel.rotation.x = -0.5; cab.add(panel)
+      scene.add(cab)
+      physics.colliders.push(new THREE.Box3(new THREE.Vector3(x - 0.85, gy, z - 0.75), new THREE.Vector3(x + 0.85, gy + 4.2, z + 0.75)))
+    }
+    const cabCols = [0x27e7ff, 0xff2bd0, 0xffd24a, 0x9dff5a]
+    let ci = 0
+    for (const sgn of [-1, 1]) for (const off of [2.4, 5.4]) cabinet(CX + sgn * (ENTRANCE / 2 + off), frontZ + 1.5, cabCols[ci++ % cabCols.length])
   }
 
   // ===========================================================================

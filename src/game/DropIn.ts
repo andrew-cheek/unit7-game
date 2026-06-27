@@ -1250,8 +1250,10 @@ export class DropIn {
     }
 
     // Sonic boom: hold a full nose-dive to terminal velocity and you punch a
-    // shockwave. Re-arms once you slow back down.
-    if (this.phase === 'dive' && this.vy < -82) {
+    // shockwave. Re-arms once you slow back down. DESKTOP ONLY - on mobile the
+    // big additive cone + camera punch were a flicker culprit, so it's removed
+    // there entirely (no charge, ring, cone, or kick).
+    if (config.tier.name !== 'low' && this.phase === 'dive' && this.vy < -82) {
       this.boomCharge += dt
       if (this.boomCharge > 0.5 && !this.boomed) {
         this.boomed = true

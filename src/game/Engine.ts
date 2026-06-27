@@ -104,6 +104,8 @@ export class Engine {
   private renderScale = 1
   private adaptTimer = 0
   private adaptiveOn = true // when false, adapt() is frozen (e.g. during the drop-in)
+  private adaptCooldown = 0 // seconds remaining before another scale change is allowed
+  private adaptStreak = 0 // consecutive same-direction out-of-band evals (debounce)
   private contextLost = false // true between webglcontextlost and ...restored
   private static readonly SCALE_FLOOR = 0.6
   // Hitstop: a brief sim-time slowdown for impact weight. We scale the wall-clock
@@ -429,21 +431,33 @@ export class Engine {
 
   private adapt(frame: number) {
     if (!this.adaptiveOn) return
+    if (this.adaptCooldown > 0) this.adaptCooldown -= frame
     this.adaptTimer += frame
     if (this.adaptTimer < 1) return
     this.adaptTimer = 0
-    const prev = this.renderScale
-    // Tier-aware band: desktop targets 60fps (back off below 48, recover above 56);
-    // mobile only needs its 30fps floor (back off below 28, recover above 44). The
-    // old 30/52 band left a dead zone so a 36-43fps desktop crowd never downscaled.
-    const downAt = this.tier.name === 'low' ? 28 : 48
-    const upAt = this.tier.name === 'low' ? 44 : 56
-    if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) {
-      this.renderScale = Math.max(Engine.SCALE_FLOOR, this.renderScale - 0.1)
-    } else if (this.fps > upAt && this.renderScale < 1) {
-      this.renderScale = Math.min(1, this.renderScale + 0.1)
-    }
-    if (Math.abs(this.renderScale - prev) > 0.001) this.applyResolution()
+    // Each render-scale change reallocates the composer's render targets, and on
+    // tile-based mobile GPUs that realloc flashes the canvas black for a frame.
+    // The old code re-evaluated every second and flipped on any transient FPS dip,
+    // so just MOVING around (which briefly drops FPS) caused constant black
+    // flicker. Now: a cooldown after each change, a debounce that needs the FPS
+    // out of band for several seconds running before acting, and on mobile we only
+    // ratchet DOWN (never back up) so the scale settles once and stops resizing -
+    // a stable buffer means no more flicker.
+    if (this.adaptCooldown > 0) return
+    const downAt = this.tier.name === 'low' ? 26 : 46
+    const upAt = this.tier.name === 'low' ? 52 : 58
+    let dir = 0
+    if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) dir = -1
+    else if (this.tier.name !== 'low' && this.fps > upAt && this.renderScale < 1) dir = 1
+    if (dir === 0) { this.adaptStreak = 0; return }
+    // Sustained out-of-band only: a momentary dip from movement won't trigger it.
+    this.adaptStreak = Math.sign(this.adaptStreak) === dir ? this.adaptStreak + dir : dir
+    const need = this.tier.name === 'low' ? 3 : 2
+    if (Math.abs(this.adaptStreak) < need) return
+    this.adaptStreak = 0
+    this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, this.renderScale + dir * 0.1))
+    this.adaptCooldown = 5 // seconds of quiet after a change, so it can't thrash
+    this.applyResolution()
   }
 
   /** Effective drawing-buffer pixel ratio (device ratio, capped, then scaled). */
