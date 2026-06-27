@@ -292,6 +292,8 @@ export interface AchContext {
   colorsOwned: number
   dailyCompleted: boolean // a daily objective has been completed (this session or ever)
   shardsFound: number // lifetime data shards collected (discovery layer)
+  motherships: number // raid motherships destroyed (lifetime)
+  zonesArchived: number // zones whose shard field is 100% collected
 }
 
 export interface AchievementDef {
@@ -328,6 +330,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'shard25', name: 'Scavenger', desc: 'Collect 25 data shards', color: BRONZE, ok: (c) => c.shardsFound >= 25 },
   { id: 'shard150', name: 'Data Hoarder', desc: 'Collect 150 data shards', color: SILVER, ok: (c) => c.shardsFound >= 150 },
   { id: 'shard500', name: 'Archivist', desc: 'Collect 500 data shards', color: GOLD, ok: (c) => c.shardsFound >= 500 },
+  { id: 'boss1', name: 'Sky Breaker', desc: 'Destroy a raid mothership', color: GOLD, ok: (c) => c.motherships >= 1 },
+  { id: 'boss5', name: 'Fleet Bane', desc: 'Destroy 5 raid motherships', color: GOLD, ok: (c) => c.motherships >= 5 },
+  { id: 'archive1', name: 'Sweep', desc: 'Collect every shard in a zone', color: SILVER, ok: (c) => c.zonesArchived >= 1 },
+  { id: 'archive3', name: 'Completionist', desc: 'Clear the shard field on all three worlds', color: GOLD, ok: (c) => c.zonesArchived >= 3 },
 ]
 
 /** Evaluate all achievements against the context; persist + return newly unlocked. */

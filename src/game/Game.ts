@@ -846,6 +846,9 @@ export class Game {
       this.landingFx.trigger(pos, 0xff8a3c, false)
       this.audio.play('portal')
       vibrate(120)
+      this.profile.motherships += 1
+      saveProfile(this.profile)
+      this.refreshProgression() // unlock Sky Breaker / Fleet Bane
     }
     // Mothership ground-strike: a big shield hit (and knockback) if it catches you;
     // a near-miss still rattles the camera so dodging feels earned.
@@ -1811,6 +1814,8 @@ export class Game {
       colorsOwned: this.progression.cosmetics.owned.length,
       dailyCompleted: this.progression.daily.claimed,
       shardsFound: this.profile.shardsFound,
+      motherships: this.profile.motherships,
+      zonesArchived: this.profile.zonesArchived.length,
     })
     if (newly.length) {
       this.progression = loadProgression() // pick up the newly persisted ids
@@ -1877,6 +1882,11 @@ export class Game {
     this.camera.shake(0.6)
     this.audio.play('objective')
     vibrate(80)
+    if (!this.profile.zonesArchived.includes(this.zone)) {
+      this.profile.zonesArchived.push(this.zone)
+      saveProfile(this.profile)
+    }
+    this.refreshProgression() // unlock Sweep / Completionist
   }
 
   /** A style combo banked: pay out credits + XP and flash the multiplier. */
