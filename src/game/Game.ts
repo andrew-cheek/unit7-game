@@ -589,9 +589,9 @@ export class Game {
     // warp while you're up here.
     this.hud.intro = false
     this.hud.onPlatform = true
-    this.hud.banner = 'UNIT 7 · LAUNCH PLATFORM'
+    this.hud.banner = 'ROBOT FACTORY · DROP ZONE'
     this.bannerTimer = 2.6
-    this.hud.missionPopup = { title: 'BEGIN YOUR JOURNEY', body: "You're a fresh Unit-7 on the launch platform, high above the city. Walk (WASD / the stick) to the glowing neon arrow at the edge and step or jump off - that starts your skydive down. The other units are doing exactly that." }
+    this.hud.missionPopup = { title: 'TO THE DROP ZONE', body: 'You\'re a freshly-built unit on the factory launch platform, high above the city. Walk (WASD / the stick) past the assembly line to the glowing neon arrow at the edge and step or jump off - that starts your skydive down. Every unit coming off the line is doing exactly that.' }
     this.missionPopupTimer = 7
     if (!this.multiplayerEnabled) this.emitGameStart('solo') // controls live now (solo); MP starts on the join pick
   }
