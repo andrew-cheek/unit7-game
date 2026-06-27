@@ -54,6 +54,9 @@ import { SkyShards } from './SkyShards'
 import { CourierDrones } from './CourierDrones'
 import { NeonRain } from './NeonRain'
 import { SkySearchlights } from './SkySearchlights'
+import { AirGates } from './AirGates'
+import { HostileDrones } from './HostileDrones'
+import { StuntScore } from './StuntScore'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -515,6 +518,43 @@ export class Game {
     this.systems.register(new SkySearchlights(this.engine.scene, {
       focus: () => this.focus,
       dayFactor: () => this.world.dayFactor,
+    }))
+    // Air-gates: an aerial slalom skill course - fly the rings in order for a combo payout.
+    this.systems.register(new AirGates(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onScore: (credits, xp, x, y, z, label) => {
+        if (credits) this.addCredits(credits)
+        if (xp) this.awardXp(xp)
+        this.popups.pop(x, y + 1, z, label, label.startsWith('COURSE CLEAR') ? '#ffd24a' : label === 'TIME!' ? '#ff5a6a' : '#9bff6a')
+        if (credits) this.audio.play('ui')
+      },
+    }))
+    // Hostile sentry drones that chase + zap you; destroy them with net/missiles for a bounty.
+    this.systems.register(new HostileDrones(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onZap: (kx, kz, ky) => {
+        this.player.velocity.x += kx
+        this.player.velocity.z += kz
+        this.player.velocity.y += ky
+        this.player.grounded = false
+      },
+    }))
+    // Stunt scoring: aerial tricks (airtime / spins / big air) pay style credits + XP.
+    this.systems.register(new StuntScore({
+      focus: () => this.player.position,
+      grounded: () => this.player.grounded,
+      yaw: () => this.player.yaw,
+      velocity: () => this.player.velocity,
+      onStunt: (credits, xp, x, y, z, label) => {
+        this.addCredits(credits)
+        this.awardXp(xp)
+        this.popups.pop(x, y, z, `${label}  +${credits}c`, '#ffd24a')
+        this.hud.banner = `${label}  +${credits}c`
+        this.bannerTimer = 1.8
+        this.audio.play('objective')
+      },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
