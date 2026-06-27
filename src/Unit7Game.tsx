@@ -162,6 +162,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onWarp={() => controlsRef.current?.toggleWarp()}
           onArcade={() => controlsRef.current?.openArcade()}
           hideTopCenter={touch && joinPanelVisible}
+          hideCorners={touch && joinPanelVisible}
         />
       )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (
@@ -184,8 +185,10 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           }}
         />
       )}
-      {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && !hud.onPlatform && <OnlinePill n={hud.online} />}
-      {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && !hud.onPlatform && <Leaderboard rows={hud.leaderboard} />}
+      {/* Desktop-only floating online count + world scores; on touch they'd cover
+          the objective/raid HUD, so the PILOTS button opens the roster instead. */}
+      {!touch && mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && !hud.onPlatform && <OnlinePill n={hud.online} />}
+      {!touch && mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && !hud.onPlatform && <Leaderboard rows={hud.leaderboard} />}
       {hud?.intro && hud.drop && (
         <DropOverlay
           drop={hud.drop}

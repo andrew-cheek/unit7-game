@@ -47,6 +47,7 @@ export function HUD({
   onWarp,
   onArcade,
   hideTopCenter,
+  hideCorners,
 }: {
   hud: HudState
   touch: boolean
@@ -61,6 +62,9 @@ export function HUD({
   // While the one-time join/solo gate is up it occupies the top-centre on touch;
   // suppress the top-centre HUD elements so they don't collide behind it.
   hideTopCenter?: boolean
+  // The touch welcome panel also covers the top-left corner controls; hide them
+  // until the player has chosen solo / multiplayer.
+  hideCorners?: boolean
 }) {
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
@@ -75,7 +79,7 @@ export function HUD({
   return (
     <div style={wrap}>
       {/* top-left controls (restart replays the cinematic; pause is touch-only since desktop has Esc) */}
-      <div style={topLeftRow}>
+      {!hideCorners && <div style={topLeftRow}>
         <button style={pillBtn} onClick={onRestart}>RESTART ↺</button>
         <button style={{ ...pillBtn, borderColor: 'rgba(138,92,255,0.5)', boxShadow: '0 0 14px rgba(138,92,255,0.2)' }} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
         {/* Quick-warp to the arcade entrance. Desktop only - mobile has it down in
@@ -99,7 +103,7 @@ export function HUD({
             {statsOpen ? 'STATS ✕' : 'STATS'}
           </button>
         )}
-      </div>
+      </div>}
 
       {/* top-left meters: always-on action/alert chips; full meters behind STATS.
           Hidden during the launch-pad opening to keep it clean. */}
@@ -248,9 +252,10 @@ export function HUD({
         </div>
       )}
 
-      {/* contextual prompt */}
+      {/* contextual prompt - on touch it anchors to the lower-left so it clears the
+          action-button cluster (bottom-right) instead of colliding with it. */}
       {hud.prompt && (
-        <div style={promptStyle}>
+        <div style={touch ? { ...promptStyle, left: 'max(12px, env(safe-area-inset-left))', transform: 'none', textAlign: 'left', maxWidth: '50vw', bottom: '26%' } : promptStyle}>
           <span style={{ color: NEON.cyan }}>{hud.prompt}</span>
         </div>
       )}
@@ -285,12 +290,9 @@ export function HUD({
         </div>
       )}
 
-      {/* control hints (touch) — desktop hides its legend on touch, so mirror a short one */}
-      {touch && !hud.paused && !hud.onPlatform && (
-        <div style={hints}>
-          left stick move · drag right to look · tap actions · PAUSE top-left
-        </div>
-      )}
+      {/* (the persistent touch legend was removed - it collided with the PILOTS /
+          STORE row and the action cluster; first-timers get the one-time touch
+          coach overlay instead) */}
 
       {/* pilots roster: open profiles + stats for yourself and everyone online.
           On touch they move to the bottom-center so they clear the thumb-stick
