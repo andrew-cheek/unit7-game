@@ -174,6 +174,9 @@ export class Game {
   private raidActive = false // the post-skydive city raid is live
   private raidDone = false // the opening raid only ever happens once
   private raidWaveShown = 0 // last wave number announced via banner
+  private raidShield = 1 // mech shield during the raid (1=full); drains on contact
+  private raidStagger = 0 // brief invuln/recover window after a shield break
+  private raidHitPulse = 0 // throttles the shake/vibe while taking contact damage
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -792,6 +795,8 @@ export class Game {
     this.raidDone = true
     this.raidActive = true
     this.raidWaveShown = 0
+    this.raidShield = 1
+    this.raidStagger = 0
     // Set the free starter mech down a few steps away so it's an obvious grab.
     const mech = this.vehicles.list.find((v) => v.kind === 'mechM')
     if (mech) {
@@ -830,11 +835,27 @@ export class Game {
     return `Repel WAVE ${s.wave}/${s.waves} - ${s.alive} hostiles`
   }
 
-  private updateCityRaid() {
+  private updateCityRaid(dt: number) {
     if (!this.raidActive) return
     const s = this.events.raidState
     if (!s) { this.raidActive = false; this.hud.raid = null; return }
-    this.hud.raid = { wave: s.wave, waves: s.waves, alive: s.alive, incoming: s.phase === 'incoming' }
+    // Mech shield: invaders that crowd you drain it; it regenerates when you get
+    // clear. Hit zero and you're knocked back + briefly staggered (never killed -
+    // the raid has stakes, not a fail state).
+    const inMech = !!this.vehicles.current && isWalker(this.vehicles.current.kind)
+    const meleeR = inMech ? 8 : 5
+    const contacts = this.events.raidContacts(this.player.position, meleeR)
+    if (this.raidStagger > 0) {
+      this.raidStagger = Math.max(0, this.raidStagger - dt)
+    } else if (contacts > 0) {
+      this.raidShield = Math.max(0, this.raidShield - contacts * 0.16 * dt)
+      this.raidHitPulse -= dt
+      if (this.raidHitPulse <= 0) { this.raidHitPulse = 0.22; this.camera.shake(0.18); vibrate(12) }
+      if (this.raidShield <= 0) this.breakRaidShield()
+    } else {
+      this.raidShield = Math.min(1, this.raidShield + 0.12 * dt)
+    }
+    this.hud.raid = { wave: s.wave, waves: s.waves, alive: s.alive, incoming: s.phase === 'incoming', shield: this.raidShield }
     // Announce each new wave with a banner + sting.
     if (s.phase === 'fight' && s.wave !== this.raidWaveShown) {
       this.raidWaveShown = s.wave
@@ -844,6 +865,29 @@ export class Game {
       vibrate(30)
     }
     if (s.cleared) this.endCityRaid()
+  }
+
+  /** Shield depleted: shove the player/mech away from the nearest invader, shake,
+   *  and grant a brief stagger window (invulnerable while you recover). */
+  private breakRaidShield() {
+    this.raidShield = 0.4
+    this.raidStagger = 1.4
+    const target = this.vehicles.current ? this.vehicles.current.position : this.player.position
+    const near = this.events.nearestRaidAlien(target)
+    if (near) {
+      const dx = target.x - near.x, dz = target.z - near.z
+      const d = Math.hypot(dx, dz) || 1
+      target.x += (dx / d) * 8
+      target.z += (dz / d) * 8
+      if (this.vehicles.current) this.vehicles.current.model.group.position.copy(target)
+      else this.player.resetInterp()
+    }
+    this.camera.shake(1.1)
+    this.engine.triggerHitstop(0.05)
+    this.audio.play('ui')
+    vibrate(60)
+    this.hud.banner = 'SHIELD DOWN — KNOCKED BACK'
+    this.bannerTimer = 1.4
   }
 
   private endCityRaid() {
@@ -2237,7 +2281,7 @@ export class Game {
     })
 
     const ambient = onEarth && !this.launchPad // skip ground crowds while up on the launch pad
-    if (this.raidActive) this.updateCityRaid()
+    if (this.raidActive) this.updateCityRaid(dt)
     if (onEarth) this.citySpectacle.update(dt)
     if (ambient) this.npcs.update(dt, this.player.position)
     if (ambient) this.events.update(dt, this.player.position)
