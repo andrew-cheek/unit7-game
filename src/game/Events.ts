@@ -854,6 +854,12 @@ export class Events {
     }
   }
 
+  /** The mothership's map position (XZ), live from spawn (even mid-descent), for
+   *  the radar - or null when there's no boss. */
+  bossMapPos(): THREE.Vector3 | null {
+    return this.boss ? this.boss.group.position.clone() : null
+  }
+
   /** The boss weak-point world position (for the game's missile hit test), or null. */
   bossWeakPoint(): THREE.Vector3 | null {
     if (!this.boss || !this.boss.descended) return null

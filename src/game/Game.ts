@@ -2541,6 +2541,17 @@ export class Game {
       add(64, 8, 'objective') // race start gate
       add(-110, 64, 'objective') // robot factory
     }
+    // During the raid, flag the things you need to find as objective blips: the
+    // mothership once it's inbound, or the free mech to board while on foot.
+    if (this.raidActive && this.zone === 'earth') {
+      const bp = this.events.bossMapPos()
+      if (bp) add(bp.x, bp.z, 'objective')
+      const inMech = !!this.vehicles.current && isWalker(this.vehicles.current.kind)
+      if (!inMech) {
+        const mech = this.vehicles.list.find((v) => v.kind === 'mechM')
+        if (mech) add(mech.position.x, mech.position.z, 'objective')
+      }
+    }
     const ot = this.missions.objTarget
     if (ot) add(ot.x, ot.z, 'objective') // guide blip
     return blips
