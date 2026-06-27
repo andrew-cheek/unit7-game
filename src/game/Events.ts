@@ -57,6 +57,7 @@ interface Police {
   waypoints: THREE.Vector3[]
   wp: number
   speed: number
+  chasing: boolean // broke patrol to pursue the player (heat >= pursueAt)
 }
 interface BusWaypoint {
   p: THREE.Vector3
@@ -97,6 +98,12 @@ export class Events {
   private physics: Physics
   private capturables: Capturable[]
   private onPowerup: (kind: PowerupKind) => void
+  private onBust: () => void
+
+  // Police-heat pursuit state. `pursue` mirrors heat >= pursueAt for the frame;
+  // `bustContact` accumulates seconds a chasing cruiser has been on the player.
+  private pursue = false
+  private bustContact = 0
 
   private root = new THREE.Group()
   private powerups: Powerup[] = []
@@ -124,11 +131,12 @@ export class Events {
   }
   private t = 0
 
-  constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], onPowerup: (kind: PowerupKind) => void) {
+  constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], onPowerup: (kind: PowerupKind) => void, onBust: () => void) {
     this.scene = scene
     this.physics = physics
     this.capturables = capturables
     this.onPowerup = onPowerup
+    this.onBust = onBust
     scene.add(this.root)
 
     const q = config.tier.densityScale
@@ -238,7 +246,7 @@ export class Events {
       const pos = waypoints[start].clone()
       pos.y = (this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0) + 1.0
       model.group.position.copy(pos)
-      this.police.push({ model, pos, yaw: 0, waypoints, wp: (start + 1) % waypoints.length, speed: 15 + i * 2 })
+      this.police.push({ model, pos, yaw: 0, waypoints, wp: (start + 1) % waypoints.length, speed: 15 + i * 2, chasing: false })
     }
   }
 
@@ -297,9 +305,10 @@ export class Events {
 
   // --- per-frame -----------------------------------------------------------
 
-  update(dt: number, playerPos: THREE.Vector3) {
+  update(dt: number, playerPos: THREE.Vector3, heatStars = 0) {
     this.t += dt
     this.playerPos.copy(playerPos)
+    this.pursue = heatStars >= config.heat.pursueAt
     this.updatePowerups(dt, playerPos)
     this.updateDrones(dt)
     this.updateTraffic(dt)
@@ -371,7 +380,6 @@ export class Events {
 
   private updateBuses(dt: number) {
     for (const b of this.buses) {
-      b.model.update(dt, 1)
       if (b.state === 'boarding') {
         b.timer -= dt
         if (b.timer <= 0) {
@@ -405,10 +413,17 @@ export class Events {
           b.yaw = dampAngle(b.yaw, Math.atan2(dx, dz), 5, dt)
         }
       }
+      // Distance-cull the per-frame ground raycast + wheel animation: the bus
+      // state machine (movement, commuter drop-off) keeps running so the city
+      // stays alive, but the expensive work is skipped when it's off-screen.
+      const far = this.farFromPlayer(b.pos.x, b.pos.z)
+      b.model.group.visible = !far
+      if (far) continue
       const gy = this.physics.sampleGround(b.pos.x, b.pos.z, b.pos.y + 6)?.y ?? 0
       b.pos.y = gy
       b.model.group.position.copy(b.pos)
       b.model.group.rotation.y = b.yaw
+      b.model.update(dt, 1)
     }
   }
 
@@ -457,23 +472,58 @@ export class Events {
   }
 
   private updatePolice(dt: number) {
+    const h = config.heat
+    let nearestContact = Infinity // closest chasing cruiser's distance to the player this frame
     for (const p of this.police) {
-      p.model.update(dt, 1) // strobes the light bar
-      const tgt = p.waypoints[p.wp]
-      const dx = tgt.x - p.pos.x
-      const dz = tgt.z - p.pos.z
-      const d = Math.hypot(dx, dz)
-      if (d < 2) {
-        p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
-      } else {
-        p.pos.x += (dx / d) * p.speed * dt
-        p.pos.z += (dz / d) * p.speed * dt
+      p.chasing = this.pursue
+      if (p.chasing) {
+        // Pursuit: steer straight at the player at a boosted speed. (Movement runs
+        // even when culled so a distant cruiser still closes in off-screen.)
+        const dx = this.playerPos.x - p.pos.x
+        const dz = this.playerPos.z - p.pos.z
+        const d = Math.hypot(dx, dz) || 1
+        const speed = p.speed * h.pursuitSpeedMul
+        if (d > h.catchRange * 0.6) {
+          p.pos.x += (dx / d) * speed * dt
+          p.pos.z += (dz / d) * speed * dt
+        }
         p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
+        if (d < nearestContact) nearestContact = d
+      } else {
+        // Ambient patrol: loop the rectangular beat.
+        const tgt = p.waypoints[p.wp]
+        const dx = tgt.x - p.pos.x
+        const dz = tgt.z - p.pos.z
+        const d = Math.hypot(dx, dz)
+        if (d < 2) {
+          p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
+        } else {
+          p.pos.x += (dx / d) * p.speed * dt
+          p.pos.z += (dz / d) * p.speed * dt
+          p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
+        }
       }
+      // Skip the per-frame ground raycast + light-bar strobe when off-screen.
+      const far = this.farFromPlayer(p.pos.x, p.pos.z)
+      p.model.group.visible = !far
+      if (far) continue
       const gy = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? 0
       p.pos.y = gy + 1.0
       p.model.group.position.copy(p.pos)
       p.model.group.rotation.y = p.yaw
+      p.model.update(dt, 1) // strobes the light bar
+    }
+    // Bust logic: a chasing cruiser within catchRange builds contact time; hold it
+    // long enough and the player is busted. Contact decays quickly when they break
+    // away, so a clean getaway resets the timer.
+    if (this.pursue && nearestContact <= h.catchRange) {
+      this.bustContact += dt
+      if (this.bustContact >= h.catchTime) {
+        this.bustContact = 0
+        this.onBust()
+      }
+    } else {
+      this.bustContact = Math.max(0, this.bustContact - dt * 2)
     }
   }
 

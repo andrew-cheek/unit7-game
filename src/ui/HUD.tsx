@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { memo, useState, type CSSProperties } from 'react'
 import type { BlipKind, HudState, PlayerProfile } from '../game/types'
 import { ACHIEVEMENTS } from '../game/progression'
 
@@ -114,6 +114,7 @@ export function HUD({
           </div>
         )}
         {hud.shield && <div style={{ ...chip, color: NEON.purple, borderColor: NEON.purple }}>SHIELD</div>}
+        <WantedChip stars={hud.heat.stars} max={hud.heat.max} wanted={hud.heat.wanted} />
         <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />
         {statsOpen && (
           <>
@@ -434,6 +435,31 @@ const DAILY_LABEL: Record<string, (t: number) => string> = {
   duelWins: (t) => `Win ${t} duels`,
 }
 
+// Wanted-level chip: filled stars for the current heat, pulsing magenta while
+// police are actively chasing, steady orange while heat is just building. Hidden
+// at zero. Primitive props -> memo skips it except when the level actually moves.
+const WantedChip = memo(function WantedChip({ stars, max, wanted }: { stars: number; max: number; wanted: boolean }) {
+  if (stars <= 0) return null
+  const color = wanted ? NEON.magenta : NEON.orange
+  return (
+    <div
+      style={{
+        ...chip,
+        marginTop: 4,
+        color,
+        borderColor: color,
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        animation: wanted ? 'unit7pulse 0.7s ease-in-out infinite' : undefined,
+      }}
+    >
+      <span>{wanted ? 'WANTED' : 'HEAT'}</span>
+      <span style={{ letterSpacing: 1 }}>{'★'.repeat(Math.min(max, stars))}</span>
+    </div>
+  )
+})
+
 function WarpChip({ w, touch, onTap }: { w: HudState['warp']; touch: boolean; onTap?: () => void }) {
   const pct = Math.round(w.charge01 * 100)
   const label = w.active ? `WARPED${touch ? '' : ' · R'}` : w.ready ? `WARP READY${touch ? '' : ' · R'}` : `WARP ${pct}%`
@@ -535,16 +561,21 @@ function CosmeticsStore({
   )
 }
 
-function Logo() {
+// The HUD parent re-runs ~20x/sec (a fresh hud snapshot each push). These leaves
+// take primitive props, so wrapping them in memo means an unchanged value (e.g.
+// SCORE between captures) skips its re-render entirely — shallow compare is exact
+// for primitives. Cuts the per-frame reconciliation of the always-mounted stat
+// readouts, which matters most on the mobile tier.
+const Logo = memo(function Logo() {
   return (
     <div style={{ font: '800 15px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.22em', marginBottom: 8 }}>
       <span style={{ color: NEON.cyan, textShadow: `0 0 12px ${NEON.cyan}` }}>UNIT</span>
       <span style={{ color: NEON.magenta, textShadow: `0 0 12px ${NEON.magenta}` }}> 7</span>
     </div>
   )
-}
+})
 
-function Bar({ label, value, color }: { label: string; value: number; color: string }) {
+const Bar = memo(function Bar({ label, value, color }: { label: string; value: number; color: string }) {
   const v = Math.max(0, Math.min(1, value))
   return (
     <div style={{ marginBottom: 6, width: 160 }}>
@@ -563,16 +594,16 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
       </div>
     </div>
   )
-}
+})
 
-function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+const Stat = memo(function Stat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div style={{ textAlign: 'right', minWidth: 54 }}>
       <div style={{ ...microLabel, color: NEON.dim }}>{label}</div>
       <div style={{ font: '700 14px/1.1 ui-monospace, Menlo, monospace', color }}>{value}</div>
     </div>
   )
-}
+})
 
 function Radar({ hud }: { hud: HudState }) {
   const R = 52

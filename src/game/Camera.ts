@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { config } from './config'
 import { damp, dampAngle, dampVec3 } from './utils'
+import { enableBVH, buildBVH } from './bvh'
 import type { Input } from './Input'
 
 /** Optional per-frame follow hints from gameplay (robot heading, vehicle yaw). */
@@ -78,10 +79,17 @@ export class CameraController {
   constructor(cam: THREE.PerspectiveCamera, solids: THREE.Object3D[]) {
     this.cam = cam
     this.solids = solids
+    // Accelerate the per-frame collision rays against the merged building shells.
+    // firstHitOnly returns just the nearest BVH hit per mesh — exactly what every
+    // camera probe wants (nearest wall / any ceiling) — for a further speed-up.
+    enableBVH()
+    this.raycaster.firstHitOnly = true
+    buildBVH(this.solids)
   }
 
   setSolids(solids: THREE.Object3D[]) {
     this.solids = solids
+    buildBVH(this.solids) // index a freshly-swapped zone's shells once
   }
 
   /** Dynamic collision objects (e.g. vehicle groups) tested in addition to the

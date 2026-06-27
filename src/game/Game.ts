@@ -52,7 +52,7 @@ import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
 import { DawnShow } from './DawnShow'
 import { RobotFactory } from './RobotFactory'
-import { RaceActivity, type RaceHud } from './RaceActivity'
+import { RaceActivity, type RaceHud, type RaceCourse } from './RaceActivity'
 import { config } from './config'
 import { detectTier, TIERS } from './tiers'
 import { clamp, damp, lerp, vibrate } from './utils'
@@ -76,6 +76,32 @@ const NET_SEGMENTS = 22
 // Mech unlock costs (credits). mechM is free so the "pilot a mech" objective is
 // always reachable; the bigger mechs are earned by capturing aliens.
 const MECH_COST: Record<string, number> = { mechM: 0, mechL: 400, mechXL: 1200 }
+
+// Time-trial courses, one per zone. Earth reproduces the original city circuit
+// exactly (gate, ring path, cyan accent, 150/+150c, 120xp). The off-world courses
+// give the Moon/Mars zones a repeatable scored loop over their low-gravity
+// terrain — bigger hop/launch lines, a small travel premium on the reward, and
+// their own persisted best time. Ring coords are XZ; rings sit 5m above whatever
+// terrain is under them, so the same path works on any zone's displaced ground.
+const RACE_COURSES: RaceCourse[] = [
+  {
+    zone: 'earth', gate: [64, 8], accent: 0x27e7ff, storageKey: 'race',
+    circuit: [[64, -60], [10, -104], [-70, -84], [-104, -10], [-78, 70], [-8, 104], [78, 84], [104, 16]],
+    baseCredits: 150, bestBonus: 150, xp: 120,
+  },
+  {
+    // Moon: long low-gravity hops on foot / jetpack. Cyan gates pop on the gray dust.
+    zone: 'moon', gate: [0, 12], accent: 0x27e7ff, storageKey: 'race-moon',
+    circuit: [[60, -50], [20, -110], [-60, -90], [-110, -20], [-80, 70], [0, 110], [80, 80], [100, 10]],
+    baseCredits: 180, bestBonus: 180, xp: 150,
+  },
+  {
+    // Mars: a rover circuit that banks the dune launches; lime gates pop on the rust.
+    zone: 'mars', gate: [0, 14], accent: 0x9bff4d, storageKey: 'race-mars',
+    circuit: [[70, -40], [30, -100], [-50, -100], [-100, -40], [-90, 50], [-10, 100], [70, 90], [110, 20]],
+    baseCredits: 180, bestBonus: 180, xp: 150,
+  },
+]
 
 // Hero fill-light color the night-blue eases toward at full day, so the follow
 // light reads as warm sun-bounce at noon instead of an unmotivated blue pool.
@@ -155,6 +181,13 @@ export class Game {
   private netLine: THREE.Line
   private netTimer = 0
   private missileCooldown = 0
+  // Police-heat / wanted state (Earth only). `heat` is a continuous 0..max star
+  // value; `heatCalm` counts seconds since the last crime (drives cool-down);
+  // `bustImmunity` is a grace window after a bust so you can't be re-busted in
+  // the same breath.
+  private heat = 0
+  private heatCalm = 0
+  private bustImmunity = 0
   private invasionTriggered = false
   private playClock = 0 // seconds of active gameplay (lets the peaceful morning play before the invasion)
   private profile: Profile = loadProfile()
@@ -162,6 +195,7 @@ export class Game {
   private credits = 0
   private unlocked = new Set<string>()
   private scratchFwd = new THREE.Vector3()
+  private camFwd = new THREE.Vector3() // scratch: camera world direction for behind-camera culling
   // Grapple-arm: previous held state (for the fire edge) + reusable scratch
   // vectors (also borrowed by fireMissiles; they never run in the same frame).
   private grapplePrev = false
@@ -232,7 +266,7 @@ export class Game {
   private playground!: Playground
   private dawnShow!: DawnShow
   private robotFactory!: RobotFactory
-  private race!: RaceActivity
+  private races: RaceActivity[] = []
   private raceHud: RaceHud = { state: 'idle', cp: 0, total: 0, time: 0, best: 0, countdown: 0, result: 0, near: false }
   private danceToggle = false // 'B' key toggle for the robot dance emote
   private currentDistrict = '' // last district name shown (toasts on crossing)
@@ -456,16 +490,24 @@ export class Game {
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
     this.dawnShow = new DawnShow(this.engine.scene, this.physics)
     this.robotFactory = new RobotFactory(this.engine.scene, this.physics)
-    this.race = new RaceActivity(this.engine.scene, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
-    this.race.onSfx = (k) => this.audio.play(k === 'cp' ? 'ui' : 'objective')
-    this.race.onFinish = (credits, xp, isBest) => {
-      this.addCredits(credits)
-      this.awardXp(xp)
-      this.hud.banner = `RACE ${this.raceHud.result.toFixed(1)}s${isBest ? '  NEW BEST!' : ''}  +${credits}c`
-      this.bannerTimer = 3.2
-      vibrate(50)
+    const raceGround = (x: number, z: number) => this.physics.sampleGround(x, z, 80)?.y ?? 0
+    for (const course of RACE_COURSES) {
+      const race = new RaceActivity(this.engine.scene, raceGround, course)
+      race.onSfx = (k) => this.audio.play(k === 'cp' ? 'ui' : 'objective')
+      race.onFinish = (credits, xp, isBest) => {
+        this.addCredits(credits)
+        this.awardXp(xp)
+        this.hud.banner = `RACE ${this.raceHud.result.toFixed(1)}s${isBest ? '  NEW BEST!' : ''}  +${credits}c`
+        this.bannerTimer = 3.2
+        vibrate(50)
+      }
+      this.races.push(race)
     }
-    this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
+    // Earth surfaces are the live physics surface during construction (any
+    // off-world initialZone travels later), so build the Earth course now; the
+    // off-world courses build on first travel, when their terrain is live.
+    this.races.forEach((r) => r.setActive('earth'))
+    this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind), () => this.onBusted())
     this.citySpectacle = new CitySpectacle(this.engine.scene)
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
@@ -614,6 +656,7 @@ export class Game {
       progress: this.buildProgressHud(),
       warp: { charge01: 0, ready: false, active: null, menu: false },
       race: { ...this.raceHud },
+      heat: { stars: 0, max: config.heat.max, wanted: false },
       drop: null,
       raid: null,
     }
@@ -1339,7 +1382,6 @@ export class Game {
     this.playground.setActive(zone)
     this.dawnShow.setActive(zone)
     this.robotFactory.setActive(zone === 'earth')
-    this.race.setActive(zone)
     this.hud.zone = zone
 
     const env = this.zones.env(zone)
@@ -1353,6 +1395,9 @@ export class Game {
     // (their groups live on the scene, not the swappable world group).
     if (this.boundary) this.boundary.group.visible = zone === 'earth'
     if (this.guide) this.guide.group.visible = zone === 'earth'
+    // Activate the matching course only after the zone's terrain is the live
+    // physics surface, so its rings build/sample on the right ground.
+    this.races.forEach((r) => r.setActive(zone))
     // Mechs follow you off-world (pilot your giant robot on Mars/Moon); the cars
     // stay parked on Earth. Missiles can fire in any zone.
     this.vehicles.setZone(zone, spawn)
@@ -1364,6 +1409,9 @@ export class Game {
     this.sky.setVisible(zone !== 'moon') // ships fly over Earth and Mars
 
     this.zone = zone
+    // Leaving the city clears any wanted level (no police off-world).
+    this.heat = 0
+    this.heatCalm = 0
     this.player.exitVehicle(new THREE.Vector3(spawn.x, spawn.y, spawn.z))
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
@@ -1606,6 +1654,50 @@ export class Game {
     this.hud.banner = 'MISSILES AWAY'
     this.bannerTimer = 0.8
     this.audio.play('fire')
+    this.addHeat(config.heat.perMissile) // discharging ordnance in the city draws the law
+  }
+
+  /** Per-frame wanted-level bookkeeping (Earth only): tick the bust-immunity
+   *  window, accrue heat for reckless high-speed driving, then bleed heat off once
+   *  the player has laid low for `decayDelay`. The pursuit AI + bust detection
+   *  itself lives in Events.updatePolice, reading the level passed to events.update. */
+  private updateHeat(dt: number) {
+    if (this.bustImmunity > 0) this.bustImmunity = Math.max(0, this.bustImmunity - dt)
+    const v = this.vehicles.current
+    const reckless = !!v && (v.kind === 'hovercar' || v.kind === 'speeder') && this.vehicles.currentSpeed > config.heat.recklessSpeed
+    if (reckless) this.addHeat(config.heat.recklessPerSec * dt)
+    this.heatCalm += dt
+    if (this.heatCalm > config.heat.decayDelay && this.heat > 0) {
+      this.heat = Math.max(0, this.heat - config.heat.decayPerSec * dt)
+    }
+  }
+
+  /** Raise the wanted level and reset the cool-down clock. Earth-only crimes call
+   *  this; it's clamped to the star cap. */
+  private addHeat(n: number) {
+    if (this.zone !== 'earth') return
+    this.heat = Math.min(config.heat.max, this.heat + n)
+    this.heatCalm = 0
+  }
+
+  /** Police caught you: a credit fine + a jolt of feedback, then the heat clears.
+   *  Deliberately not a game-over — stakes without a hard fail (matches the
+   *  sandbox's no-death ethos). A short immunity window prevents instant re-bust. */
+  private onBusted() {
+    if (this.bustImmunity > 0) return
+    const fine = Math.min(this.credits, config.heat.bustCredits)
+    if (fine > 0) this.addCredits(-fine)
+    this.heat = 0
+    this.heatCalm = 0
+    this.bustImmunity = config.heat.bustImmunity
+    this.scoreMul = 1 // a bust breaks any running score multiplier
+    this.hud.banner = fine > 0 ? `BUSTED · -${fine}c` : 'BUSTED'
+    this.bannerTimer = 1.6
+    this.engine.triggerHitstop(0.12)
+    this.camera.shake(0.6)
+    this.audio.play('soak')
+    vibrate(120)
+    trackEvent('player_busted', { fine })
   }
 
   private addCredits(n: number) {
@@ -2480,8 +2572,9 @@ export class Game {
     const ambient = onEarth && !this.launchPad // skip ground crowds while up on the launch pad
     if (this.raidActive) this.updateCityRaid(dt)
     if (onEarth) this.citySpectacle.update(dt)
-    if (ambient) this.npcs.update(dt, this.player.position)
-    if (ambient) this.events.update(dt, this.player.position)
+    if (onEarth) this.updateHeat(dt)
+    if (ambient) this.npcs.update(dt, this.player.position, this.engine.camera.position, this.engine.camera.getWorldDirection(this.camFwd))
+    if (ambient) this.events.update(dt, this.player.position, this.heat)
     if (ambient) this.patrols.update(dt)
     if (ambient) this.guide.update(dt, this.player.position.x, this.player.position.z)
     this.landingFx.update(dt) // unconditional so the touchdown burst finishes after the hand-off
@@ -2509,7 +2602,10 @@ export class Game {
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
     if (onEarth) this.robotFactory.update(dt)
-    if (onEarth) this.raceHud = this.race.update(dt, this.player.position.x, this.player.position.z)
+    // Run the time-trial for whatever zone the player is in (Earth city circuit or
+    // the off-world courses). Only the active-zone course is visible/built.
+    const activeRace = this.races.find((r) => r.zone === this.zone)
+    if (activeRace) this.raceHud = activeRace.update(dt, this.player.position.x, this.player.position.z)
     this.updateBubbleShots(dt)
 
     // District crossing toast: a brief label as you pass between themed sectors,
@@ -2845,6 +2941,11 @@ export class Game {
     this.hud.shards = this.collectibles.counts()
     this.hud.combo = this.traversal.combo()
     this.hud.captureChain = this.captureCombo.hud()
+    // Wanted level: ceil so the first crime lights a star immediately. Off-world
+    // there are no police, so it always reads clear.
+    const heatOn = this.zone === 'earth'
+    this.hud.heat.stars = heatOn ? Math.min(config.heat.max, Math.ceil(this.heat)) : 0
+    this.hud.heat.wanted = heatOn && this.heat >= config.heat.pursueAt
     // Debug-only perf overlay: live draw calls + GPU memory (spot leaks on switch).
     if (this.debug) {
       const m = this.engine.memoryInfo()
@@ -2903,7 +3004,7 @@ export class Game {
     this.playground.dispose()
     this.dawnShow.dispose()
     this.robotFactory.dispose()
-    this.race.dispose()
+    this.races.forEach((r) => r.dispose())
     for (const s of this.bubbleShots) this.engine.scene.remove(s.mesh)
     this.bubbleShots = []
     this.bubbleShotGeo.dispose()
