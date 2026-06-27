@@ -828,6 +828,21 @@ export class Game {
       this.audio.play('portal')
       vibrate(120)
     }
+    // Mothership ground-strike: a big shield hit (and knockback) if it catches you;
+    // a near-miss still rattles the camera so dodging feels earned.
+    this.events.onBossStrike = (pos, hit) => {
+      this.landingFx.trigger(pos, 0xff5a2a, hit)
+      if (hit && this.raidStagger <= 0) {
+        this.raidShield = Math.max(0, this.raidShield - 0.45)
+        this.camera.shake(0.9)
+        this.engine.triggerHitstop(0.04)
+        vibrate(70)
+        if (this.raidShield <= 0) this.breakRaidShield()
+      } else {
+        this.camera.shake(0.3)
+      }
+      this.audio.play('explosion')
+    }
     this.landingFx.trigger(land, 0xff3b52, false) // red alert shockwave
     this.audio.play('portal')
     vibrate(60)
@@ -916,6 +931,8 @@ export class Game {
   private endCityRaid() {
     this.raidActive = false
     this.events.onRaidKill = null // don't kick the camera while clearing stragglers
+    this.events.onBossStrike = null
+    this.events.onBossDeath = null
     this.events.stopRaid()
     this.hud.raid = null
     const credits = 250, xp = 120
