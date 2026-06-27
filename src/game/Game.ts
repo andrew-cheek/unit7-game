@@ -167,6 +167,7 @@ export class Game {
   private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
   private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
+  private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -571,6 +572,8 @@ export class Game {
     const faceYaw = Math.atan2(tx - start.x, tz - start.z) // local +Z (the ledge) points at the city
     this.launchPad = new LaunchPad(this.engine.scene, start, faceYaw)
     this.physics.addGroundMesh(this.launchPad.collider)
+    // Make the assembly line solid so you walk around it, not through it.
+    for (const b of this.launchPad.colliderBoxes()) { this.physics.colliders.push(b); this.launchPadColliders.push(b) }
     this.player.exitVehicle(this.launchPad.spawn)
     this.player.setVisible(true)
     this.player.setBoard(false)
@@ -599,6 +602,8 @@ export class Game {
   private endLaunchPad() {
     if (!this.launchPad) return
     this.physics.removeGroundMesh(this.launchPad.collider)
+    for (const b of this.launchPadColliders) { const i = this.physics.colliders.indexOf(b); if (i >= 0) this.physics.colliders.splice(i, 1) }
+    this.launchPadColliders.length = 0
     this.launchPad.dispose()
     this.launchPad = null
     this.hud.onPlatform = false
