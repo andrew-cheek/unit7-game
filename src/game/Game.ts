@@ -501,7 +501,7 @@ export class Game {
       perf: null,
       speed: 0, altitude: 0, heading: 0, prompt: null, powerup: null, shield: false,
       fps: 60, paused: false, lookLocked: false, loading: false, loadingProgress: 1,
-      loadingMsg: '', intro: false, vehicle: null, radar: [], fade: 0, banner: null,
+      loadingMsg: '', intro: false, onPlatform: false, vehicle: null, radar: [], fade: 0, banner: null,
       objective: config.missions[0]?.title ?? null,
       muted: this.audio.isMuted,
       canCapture: false,
@@ -583,11 +583,17 @@ export class Game {
     const fog = this.engine.scene.fog
     if (fog instanceof THREE.FogExp2 && this.savedFogDensity == null) { this.savedFogDensity = fog.density; fog.density = 0.0006 }
     this.engine.setAdaptive(false, config.tier.name === 'low' ? 0.85 : 1)
-    this.hud.intro = true // surfaces the SKIP button
-    this.hud.banner = 'UNIT 7 · ASSEMBLY PLATFORM'
+    // This is the START of the skydive, NOT a separate intro: you play it with the
+    // normal on-foot controls (the touch stick MUST be visible), so DON'T set
+    // hud.intro (that hides MobileControls). onPlatform just suppresses the arcade
+    // warp while you're up here.
+    this.hud.intro = false
+    this.hud.onPlatform = true
+    this.hud.banner = 'UNIT 7 · LAUNCH PLATFORM'
     this.bannerTimer = 2.6
-    this.hud.missionPopup = { title: 'BEGIN YOUR JOURNEY', body: "You're a fresh Unit-7 on the assembly platform, high above the city. Walk (WASD / the stick) to the glowing neon arrow at the edge and step or jump off to start your skydive down. The other units are doing exactly that." }
+    this.hud.missionPopup = { title: 'BEGIN YOUR JOURNEY', body: "You're a fresh Unit-7 on the launch platform, high above the city. Walk (WASD / the stick) to the glowing neon arrow at the edge and step or jump off - that starts your skydive down. The other units are doing exactly that." }
     this.missionPopupTimer = 7
+    if (!this.multiplayerEnabled) this.emitGameStart('solo') // controls live now (solo); MP starts on the join pick
   }
 
   private endLaunchPad() {
@@ -595,6 +601,7 @@ export class Game {
     this.physics.removeGroundMesh(this.launchPad.collider)
     this.launchPad.dispose()
     this.launchPad = null
+    this.hud.onPlatform = false
   }
 
   private beginDropIn(startPos?: THREE.Vector3) {
@@ -709,7 +716,7 @@ export class Game {
    *  the neon marquee + the game doors, ready to walk in. Earth only; ignored
    *  during the drop-in, a zone change, or while a minigame is up. */
   private teleportToArcade() {
-    if (this.zone !== 'earth' || this.dropIn || this.hud.minigame || this.intro) return
+    if (this.zone !== 'earth' || this.dropIn || this.launchPad || this.hud.minigame || this.intro) return
     const x = 0, z = 24 // just south of the arcade's front opening (hall center z=46)
     const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
     this.input.yaw = 0 // face +z (north) - straight into the hall + marquee
