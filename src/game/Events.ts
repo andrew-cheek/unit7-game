@@ -673,6 +673,32 @@ export class Events {
     return n
   }
 
+  /** How many live raid invaders are within `range` (XZ) of a point - the melee
+   *  threat used to drain the mech shield. */
+  raidContacts(pos: THREE.Vector3, range: number): number {
+    const r2 = range * range
+    let n = 0
+    for (const a of this.aliens) {
+      if (!a.alive || !a.raid) continue
+      const dx = a.pos.x - pos.x, dz = a.pos.z - pos.z
+      if (dx * dx + dz * dz < r2) n++
+    }
+    return n
+  }
+
+  /** Nearest live raid invader to a point (for knockback direction), or null. */
+  nearestRaidAlien(pos: THREE.Vector3): THREE.Vector3 | null {
+    let best: THREE.Vector3 | null = null
+    let bd = Infinity
+    for (const a of this.aliens) {
+      if (!a.alive || !a.raid) continue
+      const dx = a.pos.x - pos.x, dz = a.pos.z - pos.z
+      const d = dx * dx + dz * dz
+      if (d < bd) { bd = d; best = a.pos }
+    }
+    return best
+  }
+
   private waveSize(wave: number) {
     const base = config.tier.name === 'low' ? 3 : config.tier.name === 'medium' ? 4 : 5
     return base + (wave - 1) * 2

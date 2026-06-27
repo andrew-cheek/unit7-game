@@ -227,6 +227,12 @@ export function HUD({
           <span style={{ color: hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
             {hud.raid.incoming ? 'NEXT WAVE INCOMING' : `${hud.raid.alive} HOSTILE${hud.raid.alive === 1 ? '' : 'S'} LEFT`}
           </span>
+          <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: NEON.dim, fontSize: 10 }}>SHIELD</span>
+            <div style={{ width: 120, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.round(hud.raid.shield * 100)}%`, height: '100%', background: hud.raid.shield > 0.5 ? NEON.cyan : hud.raid.shield > 0.25 ? NEON.orange : '#ff5a6a', boxShadow: `0 0 8px ${hud.raid.shield > 0.5 ? NEON.cyan : '#ff5a6a'}`, transition: 'width 0.1s linear' }} />
+            </div>
+          </div>
         </div>
       )}
 
