@@ -57,6 +57,8 @@ import { SkySearchlights } from './SkySearchlights'
 import { AirGates } from './AirGates'
 import { HostileDrones } from './HostileDrones'
 import { StuntScore } from './StuntScore'
+import { UpgradePylons } from './UpgradePylons'
+import { NeonCrates } from './NeonCrates'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -555,6 +557,21 @@ export class Game {
         this.bannerTimer = 1.8
         this.audio.play('objective')
       },
+    }))
+    // Upgrade pylons: a credit SINK - walk in to buy a timed buff (speed/shield/score/fuel).
+    this.systems.register(new UpgradePylons(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      credits: () => this.credits,
+      spend: (cost) => { if (this.credits < cost) return false; this.addCredits(-cost); return true },
+      buff: (kind) => this.applyPowerup(kind),
+      notify: (x, y, z, label, color) => this.popups.pop(x, y, z, label, color),
+    }))
+    // Neon crates: smash them by running through for a shard burst + a few credits.
+    this.systems.register(new NeonCrates(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onSmash: (x, y, z, credits) => { this.addCredits(credits); this.popups.pop(x, y, z, `+${credits}c`, '#9bff6a'); this.audio.play('ui') },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
