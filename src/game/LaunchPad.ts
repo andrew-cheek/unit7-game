@@ -45,6 +45,7 @@ export class LaunchPad {
   private holos: { o: THREE.Object3D; sp: number }[] = []
   private pylons: THREE.MeshBasicMaterial[] = []
   private cargo: { o: THREE.Object3D; ph: number; baseY: number }[] = []
+  private rockets: { g: THREE.Group; flame: THREE.Mesh; flameMat: THREE.MeshBasicMaterial; glowMat: THREE.MeshBasicMaterial; smokeMat: THREE.SpriteMaterial; bx: number; bz: number; t: number; vy: number; y: number; ph: number }[] = []
   private arrowMat!: THREE.MeshBasicMaterial
   private arrowChevs: THREE.Mesh[] = []
   private edgeGlow!: THREE.MeshBasicMaterial
@@ -72,6 +73,7 @@ export class LaunchPad {
     this.buildSign()
     this.buildProps()
     this.buildSciFi()
+    this.buildRockets()
     this.buildClouds()
     this.buildUnits()
 
@@ -246,6 +248,47 @@ export class LaunchPad {
       const core = new THREE.Mesh(coreGeo, coreMat); core.scale.setScalar(0.6); core.position.set(ax * R, 2.6, this.beltZ + az * R)
       this.group.add(core); this.cores.push(core)
       for (let k = 0; k < 2; k++) { const cage = new THREE.Mesh(cageGeo, cageMat); cage.scale.setScalar(0.6); cage.position.copy(core.position); cage.rotation.x = k * Math.PI / 2; this.group.add(cage) }
+    }
+  }
+
+  /** Two rockets on launch gantries at the sides that ignite, shake and blast off
+   *  on a staggered loop. */
+  private buildRockets() {
+    const R = this.radius
+    const smokeTex = this.smokeTexture(); this.texs.push(smokeTex)
+    const specs: { x: number; z: number; off: number; hull: number; accent: number }[] = [
+      { x: -R * 0.66, z: this.beltZ + 2, off: 0, hull: 0xd8dee8, accent: 0x27e7ff },
+      { x: R * 0.66, z: this.beltZ - 4, off: 6.5, hull: 0xc8ccd6, accent: 0xff7a2e },
+    ]
+    for (const s of specs) {
+      const g = new THREE.Group(); g.position.set(s.x, 0, s.z)
+      const hullMat = this.own(new THREE.MeshStandardMaterial({ color: s.hull, metalness: 0.5, roughness: 0.45 }))
+      const accentMat = this.own(new THREE.MeshStandardMaterial({ color: 0x10151f, emissive: s.accent, emissiveIntensity: 1.1, roughness: 0.4 }))
+      const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2233, metalness: 0.7, roughness: 0.4 }))
+      // Body, nose, engine bell, fins, accent band + window.
+      const body = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.5, 1.7, 12, 16)), hullMat); body.position.y = 7; g.add(body)
+      const nose = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.5, 3.4, 16)), hullMat); nose.position.y = 14.7; g.add(nose)
+      const band = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.72, 1.72, 0.7, 16)), accentMat); band.position.y = 10.5; g.add(band)
+      const win = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(0.5, 12)), accentMat); win.position.set(0, 12, 1.7); g.add(win)
+      const bell = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.0, 1.7, 1.6, 16)), darkMat); bell.position.y = 0.6; g.add(bell)
+      for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2; const fin = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.3, 3, 2)), darkMat); fin.position.set(Math.cos(a) * 1.6, 2, Math.sin(a) * 1.6); fin.rotation.y = -a; g.add(fin) }
+      // Engine flame (cone pointing down) + a bright glow disc, hidden until ignition.
+      const flameMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffb24a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const flame = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.3, 5, 14)), flameMat); flame.rotation.x = Math.PI; flame.position.y = -2; g.add(flame)
+      const glowMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff7a2e, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const glow = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.2, 12, 10)), glowMat); glow.position.y = -1.5; g.add(glow)
+      this.group.add(g)
+      // Static launch gantry tower beside it.
+      const towerMat = this.own(new THREE.MeshStandardMaterial({ color: 0x232c40, metalness: 0.6, roughness: 0.45, emissive: 0x0c2030, emissiveIntensity: 0.4 }))
+      const tower = new THREE.Group(); tower.position.set(s.x + 3.2, 0, s.z)
+      for (const sx of [-0.9, 0.9]) { const leg = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 16, 0.4)), towerMat); leg.position.set(sx, 8, 0); tower.add(leg) }
+      for (let i = 0; i < 4; i++) { const rung = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2.2, 0.25, 0.25)), towerMat); rung.position.set(0, 3 + i * 4, 0); tower.add(rung) }
+      const arm = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2.4, 0.3, 0.3)), towerMat); arm.position.set(-1.6, 11, 0); tower.add(arm)
+      this.group.add(tower)
+      // Ground smoke sprites at the base.
+      const smokeMat = this.own(new THREE.SpriteMaterial({ map: smokeTex, color: 0xcdd6e2, transparent: true, opacity: 0, depthWrite: false, fog: false }))
+      for (let i = 0; i < 5; i++) { const sp = new THREE.Sprite(smokeMat); sp.position.set(s.x + (Math.random() - 0.5) * 5, 0.6, s.z + (Math.random() - 0.5) * 5); sp.scale.set(6, 6, 1); this.group.add(sp) }
+      this.rockets.push({ g, flame, flameMat, glowMat, smokeMat, bx: s.x, bz: s.z, t: s.off, vy: 0, y: 0, ph: s.off })
     }
   }
 
@@ -490,6 +533,22 @@ export class LaunchPad {
       d.g.rotation.y = -d.a
       for (const r of d.rotors) r.rotation.z += dt * 40
     }
+    // Launching rockets: idle -> ignite -> blast off on a staggered loop.
+    const CYCLE = 13, IGNITE = 4.2, LIFT = 5.8
+    for (const r of this.rockets) {
+      r.t += dt
+      if (r.t > CYCLE) { r.t -= CYCLE; r.y = 0; r.vy = 0 }
+      let flame = 0, shake = 0, smoke = 0
+      if (r.t < IGNITE) { flame = 0; r.y = 0 }
+      else if (r.t < LIFT) { const f = (r.t - IGNITE) / (LIFT - IGNITE); flame = f; shake = f * 0.14; smoke = f }
+      else { r.vy += 17 * dt; r.y += r.vy * dt; flame = 1; smoke = Math.max(0, 1 - (r.t - LIFT) * 0.5) }
+      const flick = 0.7 + Math.abs(Math.sin(this.t * 38 + r.ph)) * 0.3
+      r.flameMat.opacity = flame * flick * 0.95
+      r.flame.scale.set(1, (0.85 + flame * 0.7) * flick, 1)
+      r.glowMat.opacity = flame * 0.5 * flick
+      r.smokeMat.opacity = smoke * 0.55
+      r.g.position.set(r.bx + (Math.random() - 0.5) * shake, r.y, r.bz + (Math.random() - 0.5) * shake)
+    }
     this.arrowMat.opacity = 0.5 + Math.sin(this.t * 4) * 0.35
     for (let i = 0; i < this.arrowChevs.length; i++) this.arrowChevs[i].position.y = 6 - i * 2.3 - ((this.t * 3 + i) % 1) * 0.6
 
@@ -600,6 +659,16 @@ export class LaunchPad {
     ctx.beginPath(); ctx.moveTo(110, 50); ctx.lineTo(92, 70); ctx.moveTo(146, 50); ctx.lineTo(164, 70); ctx.stroke()
     ctx.beginPath(); ctx.moveTo(120, 84); ctx.lineTo(120, 112); ctx.moveTo(136, 84); ctx.lineTo(136, 112); ctx.stroke()
     ctx.fillStyle = '#27e7ff'; ctx.font = '700 16px monospace'; ctx.fillText('UNIT BUILD', 20, 30); ctx.fillText('OK', 200, 140)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }
+
+  private smokeTexture(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128
+    const ctx = cv.getContext('2d')!
+    const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 64)
+    g.addColorStop(0, 'rgba(255,255,255,0.85)'); g.addColorStop(0.5, 'rgba(210,220,235,0.35)'); g.addColorStop(1, 'rgba(210,220,235,0)')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128)
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
     return tex
   }
