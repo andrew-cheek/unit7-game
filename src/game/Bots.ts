@@ -59,6 +59,12 @@ export class Bots implements GameSystem {
   private bots: Bot[] = []
   private visible = true
   private frame = 0
+  // Cached leaderboard rows (reused objects), rebuilt only when a bot's score
+  // changes - the HUD polls this 20x/sec, so rebuilding every poll was pure
+  // garbage. `lbVersion` lets the consumer skip work when nothing changed.
+  private lbRows: { name: string; score: number }[] = []
+  private lbDirty = true
+  private lbVersion = 0
 
   constructor(scene: THREE.Scene, physics: Physics, opts: BotsOpts = {}, count = 8) {
     this.scene = scene
@@ -103,9 +109,27 @@ export class Bots implements GameSystem {
     return this.bots.length
   }
 
-  /** Fake leaderboard rows (name + score) for the HUD, highest first. */
+  /** Bumps whenever the cached leaderboard rows change (for skip-if-unchanged). */
+  get leaderboardVersion(): number {
+    return this.lbVersion
+  }
+
+  /** Fake leaderboard rows (name + score) for the HUD, highest first. Returns a
+   *  cached, reused array - do not mutate it; it's rebuilt only when a bot scores. */
   leaderboard(): { name: string; score: number }[] {
-    return this.bots.map((b) => ({ name: b.name, score: b.score })).sort((a, b) => b.score - a.score)
+    if (this.lbDirty) {
+      const rows = this.lbRows
+      for (let i = 0; i < this.bots.length; i++) {
+        const b = this.bots[i]
+        if (rows[i]) { rows[i].name = b.name; rows[i].score = b.score }
+        else rows[i] = { name: b.name, score: b.score }
+      }
+      rows.length = this.bots.length
+      rows.sort((a, b) => b.score - a.score)
+      this.lbDirty = false
+      this.lbVersion++
+    }
+    return this.lbRows
   }
 
   setZone(zone: Zone) {
@@ -139,7 +163,7 @@ export class Bots implements GameSystem {
     for (const b of this.bots) {
       b.t += dt
       b.huntCd = Math.max(0, b.huntCd - dt)
-      if (b.t > b.nextScore) { b.score += 1 + Math.floor(Math.random() * 3); b.nextScore = b.t + 6 + Math.random() * 16 }
+      if (b.t > b.nextScore) { b.score += 1 + Math.floor(Math.random() * 3); b.nextScore = b.t + 6 + Math.random() * 16; this.lbDirty = true }
 
       // Idle: occasionally stop and look around (only when grounded + free), which
       // reads as a real player pausing. Holds the bot in place + slowly turns.
@@ -162,7 +186,7 @@ export class Bots implements GameSystem {
         const hd = Math.hypot(b.huntTarget.x - b.pos.x, b.huntTarget.z - b.pos.z)
         if (hd < 5) {
           this.opts.onHunt?.(b.pos.x, b.pos.y + 1, b.pos.z)
-          b.score += 2 + Math.floor(Math.random() * 4)
+          b.score += 2 + Math.floor(Math.random() * 4); this.lbDirty = true
           b.huntTarget = null
           b.huntCd = 6 + Math.random() * 12
           b.target.copy(this.randomPoint())
