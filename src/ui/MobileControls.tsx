@@ -107,9 +107,18 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     if (e.pointerId !== joyId.current) return
     let dx = e.clientX - joyOrigin.current.x
     let dy = e.clientY - joyOrigin.current.y
-    const len = Math.hypot(dx, dy)
-    if (len > JOY_R) { dx = (dx / len) * JOY_R; dy = (dy / len) * JOY_R }
-    setKnob({ x: dx, y: dy }) // knob still tracks the raw thumb position
+    let len = Math.hypot(dx, dy)
+    if (len > JOY_R) {
+      // Trailing stick: when your thumb drags past the ring, slide the whole base
+      // toward it so the joystick follows your finger instead of being left behind
+      // (the old fixed base made dragging up "run off the pad"). The knob then
+      // rests at the edge in the drag direction.
+      const over = len - JOY_R
+      joyOrigin.current = { x: joyOrigin.current.x + (dx / len) * over, y: joyOrigin.current.y + (dy / len) * over }
+      setJoyAt({ x: joyOrigin.current.x, y: joyOrigin.current.y })
+      dx = (dx / len) * JOY_R; dy = (dy / len) * JOY_R; len = JOY_R
+    }
+    setKnob({ x: dx, y: dy }) // knob rests at the edge in the drag direction
     // Deadzone + magnitude rescale: a resting thumb reads as zero intent and the
     // usable range ramps 0..1 from the deadzone edge, so contact no longer lurches
     // movement (the mech/glide path floors intent at 0.55 with no gate).

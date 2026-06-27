@@ -85,15 +85,21 @@ export class LaunchPad {
    *  you can see the sky through, solid grated walkways. */
   private buildDeck() {
     const R = this.radius
+    // Bright factory-floor lighting so the rig reads (it sits at altitude where the
+    // sun is shallow; without this the dark metal goes near-black).
+    const key = new THREE.PointLight(0xdcecff, 3.2, 120, 2); key.position.set(0, 26, -6); this.group.add(key)
+    const fill = new THREE.PointLight(0x6fa8ff, 1.6, 90, 2); fill.position.set(0, 10, R * 0.5); this.group.add(fill)
+    const forgeLight = new THREE.PointLight(0xff8a3c, 2.0, 40, 2); forgeLight.position.set(0, 6, this.beltStart); this.group.add(forgeLight)
+
     // Translucent glass bays (see the sky/clouds below).
     const glass = new THREE.Mesh(
       this.ownG(new THREE.CircleGeometry(R, 6),),
-      this.own(new THREE.MeshStandardMaterial({ color: 0x0b1322, metalness: 0.4, roughness: 0.2, transparent: true, opacity: 0.42, side: THREE.DoubleSide })),
+      this.own(new THREE.MeshStandardMaterial({ color: 0x1c2c4a, metalness: 0.4, roughness: 0.25, transparent: true, opacity: 0.5, side: THREE.DoubleSide, emissive: 0x0a1830, emissiveIntensity: 0.5 })),
     )
     glass.rotation.x = -Math.PI / 2
     this.group.add(glass)
     // Solid grated walkway running the length of the line and a cross-deck apron.
-    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x161d2e, metalness: 0.55, roughness: 0.5 }))
+    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x33405e, metalness: 0.5, roughness: 0.5, emissive: 0x13243c, emissiveIntensity: 0.45 }))
     const spine = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(16, 0.4, R * 2)), deckMat)
     spine.position.y = 0.02; this.group.add(spine)
     const apron = new THREE.Mesh(this.ownG(new THREE.RingGeometry(R * 0.62, R * 0.98, 6, 1)), deckMat)
@@ -125,7 +131,7 @@ export class LaunchPad {
   private buildConveyor() {
     const len = this.beltEnd - this.beltStart
     const cz = (this.beltStart + this.beltEnd) / 2
-    const beltMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0c1018, metalness: 0.6, roughness: 0.6 }))
+    const beltMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1c2740, metalness: 0.6, roughness: 0.55, emissive: 0x0c1a30, emissiveIntensity: 0.4 }))
     const belt = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(6, 0.5, len)), beltMat)
     belt.position.set(0, 0.5, cz); this.group.add(belt)
     // Moving seam stripes on the belt (animated +Z to read as motion).
@@ -332,6 +338,28 @@ export class LaunchPad {
         if (u.fallT > 2) this.respawnUnit(u, this.beltStart)
       }
     }
+  }
+
+  /** World-space AABBs for the solid structures, so the player walks AROUND the
+   *  assembly line (not through it). Pushed to Physics.colliders while on the pad. */
+  colliderBoxes(): THREE.Box3[] {
+    const lineMid = (this.beltStart - 1.5 + this.beltEnd + 1.5) / 2
+    const lineHalf = (this.beltEnd + 1.5 - (this.beltStart - 1.5)) / 2
+    return [
+      this.worldBox(0, 1.6, lineMid, 6.6, 1.8, lineHalf), // the whole assembly line (belt + arms)
+      this.worldBox(0, 4, this.beltStart, 5, 4, 1.2), // head gantry
+    ]
+  }
+
+  private worldBox(cx: number, cy: number, cz: number, hx: number, hy: number, hz: number): THREE.Box3 {
+    const box = new THREE.Box3()
+    const v = new THREE.Vector3()
+    for (let i = 0; i < 8; i++) {
+      v.set(cx + (i & 1 ? hx : -hx), cy + (i & 2 ? hy : -hy), cz + (i & 4 ? hz : -hz))
+      v.applyMatrix4(this.group.matrixWorld)
+      box.expandByPoint(v)
+    }
+    return box
   }
 
   /** Left the deck - walked/fell off the edge, or flew clearly past the rim. */
