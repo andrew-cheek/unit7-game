@@ -40,6 +40,7 @@ import { MeteorShower } from './MeteorShower'
 import { DustDevils } from './DustDevils'
 import { Aurora } from './Aurora'
 import { SkyLeviathans } from './SkyLeviathans'
+import { CompanionDrone } from './CompanionDrone'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -396,6 +397,12 @@ export class Game {
     // Sky leviathans: colossal glowing creatures that drift high over the city.
     this.systems.register(new SkyLeviathans(this.engine.scene, {
       focus: () => this.focus,
+    }))
+    // A little hover-drone buddy that trails you on foot in every zone.
+    this.systems.register(new CompanionDrone(this.engine.scene, {
+      focus: () => this.player.position,
+      yaw: () => this.player.yaw,
+      active: () => this.player.mode === 'robot' && !this.vehicles.current && !this.hud.minigame && !this.dropIn && !this.launchPad,
     }))
     // Off-world wildlife you can net: lunar drifters / Mars crawlers register as
     // Capturables so the existing net + missiles catch them. Moon/Mars-gated.
