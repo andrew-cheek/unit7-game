@@ -309,7 +309,29 @@ export class LaunchPad {
       this.lifts.push({ o: core, lo: 1, hi: floors * FH - 1, ph: sx > 0 ? 0 : Math.PI })
     }
 
-    // Crown: sign housing + a big lit "UNIT 7 ROBOTICS" panel facing the deck (+Z).
+    // Flanking buttress pillars give the HQ its strong silhouette, clad with
+    // vertical neon trim (cyan + magenta).
+    const trimCyan = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const trimMag = this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.towerStripMats.push(trimCyan, trimMag)
+    const pillarH = floors * FH + 10
+    for (const sx of [-1, 1]) {
+      const px = sx * (W / 2 + 3.5)
+      const pillar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(5, pillarH, D + 2)), frameMat); pillar.position.set(px, pillarH / 2 - 2, 0); g.add(pillar)
+      const cap = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(5.6, 2.2, D + 2.6)), darkMat); cap.position.set(px, pillarH - 2.5, 0); g.add(cap)
+      const inner = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, pillarH - 5, 0.4)), trimCyan); inner.position.set(px - sx * 2.5, pillarH / 2 - 2, D / 2 * 0.85); g.add(inner)
+      const outer = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, pillarH - 5, 0.4)), trimMag); outer.position.set(px + sx * 2.5, pillarH / 2 - 2, D / 2 * 0.85); g.add(outer)
+    }
+
+    // Iconic entrance archway at the base, facing the deck, with a lit ramp.
+    const archZ = D / 2 + 0.3
+    for (const sx of [-1, 1]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.3, 8.5, 1.4)), frameMat); post.position.set(sx * 3.2, 4.25, archZ); g.add(post) }
+    const lintel = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(8.7, 1.6, 1.4)), frameMat); lintel.position.set(0, 8.3, archZ); g.add(lintel)
+    const doorway = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(5.4, 7.4)), this.own(new THREE.MeshBasicMaterial({ color: 0x0c2236, transparent: true, opacity: 0.55, fog: false }))); doorway.position.set(0, 4.1, archZ + 0.2); g.add(doorway)
+    const doorTrim = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(6, 0.2, 0.2)), trimCyan); doorTrim.position.set(0, 7.5, archZ + 0.3); g.add(doorTrim)
+    const ramp = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(6, 7)), this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))); ramp.rotation.x = -Math.PI / 2; ramp.position.set(0, 0.12, archZ + 4); g.add(ramp)
+
+    // Crown: sign housing + a big lit "HUMANOID ROBOTS" panel facing the deck.
     const topY = floors * FH
     const housing = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W * 0.78, 7, D * 0.7)), darkMat); housing.position.set(0, topY + 3.5, 0); g.add(housing)
     const signTex = this.factorySignTex(); this.texs.push(signTex)
@@ -333,9 +355,9 @@ export class LaunchPad {
     ctx.fillStyle = 'rgba(39,231,255,0.05)'; for (let y = 0; y < 256; y += 6) ctx.fillRect(0, y, 1024, 2)
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 26; ctx.fillStyle = '#cdfaff'
-    ctx.font = '900 130px ui-monospace, Menlo, monospace'; ctx.fillText('UNIT 7', 512, 96)
+    ctx.font = '900 116px ui-monospace, Menlo, monospace'; ctx.fillText('HUMANOID', 512, 92)
     ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 18; ctx.fillStyle = '#ff8ae6'
-    ctx.font = '800 70px ui-monospace, Menlo, monospace'; ctx.fillText('R O B O T I C S', 512, 188)
+    ctx.font = '800 76px ui-monospace, Menlo, monospace'; ctx.fillText('R O B O T S', 512, 190)
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
     return tex
   }
@@ -485,12 +507,8 @@ export class LaunchPad {
     const forge = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.6, 0.5, 7)), forgeMat); forge.position.set(this.beltX0, 2.4, Z); this.group.add(forge)
     const forgeGlow = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(3, 5)), this.own(new THREE.MeshBasicMaterial({ color: 0xff7a2e, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
     forgeGlow.position.set(this.beltX0 - 0.4, 2.4, Z); forgeGlow.rotation.y = Math.PI / 2; this.group.add(forgeGlow)
-    // Status screens hung on the far girder facing the player.
-    const screenTex = this.screenTexture(); this.texs.push(screenTex)
-    for (let i = 0; i < 3; i++) {
-      const scr = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(2.8, 1.7)), this.own(new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false })))
-      scr.position.set(this.beltX0 + 6 + i * 9, 5.4, Z - 6.7); scr.rotation.y = Math.PI; this.group.add(scr)
-    }
+    // (the big girder status screens were removed - they blocked the HUMANOID
+    //  ROBOTS sign on the tower; the tower's own wall screens cover that detail)
     // Conduits running along the gantry.
     const pipeMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.75, roughness: 0.35, emissive: 0x112233, emissiveIntensity: 0.3 }))
     for (const sz of [-6.85, 6.85]) for (const yy of [2.4, 3.4]) { const pipe = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.18, 0.18, len + 4, 8)), pipeMat); pipe.rotation.z = Math.PI / 2; pipe.position.set(cx, yy, Z + sz); this.group.add(pipe) }
@@ -566,27 +584,48 @@ export class LaunchPad {
   private buildRockets() {
     const R = this.radius
     const smokeTex = this.smokeTexture(); this.texs.push(smokeTex)
-    const specs: { x: number; z: number; off: number; hull: number; accent: number }[] = [
-      { x: -R * 0.66, z: this.beltZ + 2, off: 0, hull: 0xd8dee8, accent: 0x27e7ff },
-      { x: R * 0.66, z: this.beltZ - 4, off: 6.5, hull: 0xc8ccd6, accent: 0xff7a2e },
+    const specs: { x: number; z: number; off: number }[] = [
+      { x: -R * 0.66, z: this.beltZ + 2, off: 0 },
+      { x: R * 0.66, z: this.beltZ - 4, off: 6.5 },
     ]
+    // Shared clean low-poly materials: white hull, dark nose/nozzles, glowing blue.
+    const hullMat = this.own(new THREE.MeshStandardMaterial({ color: 0xeef2f8, metalness: 0.4, roughness: 0.38 }))
+    const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x161c2a, metalness: 0.7, roughness: 0.4 }))
+    const blueMat = this.own(new THREE.MeshBasicMaterial({ color: 0x33b8ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     for (const s of specs) {
       const g = new THREE.Group(); g.position.set(s.x, 0, s.z)
-      const hullMat = this.own(new THREE.MeshStandardMaterial({ color: s.hull, metalness: 0.5, roughness: 0.45 }))
-      const accentMat = this.own(new THREE.MeshStandardMaterial({ color: 0x10151f, emissive: s.accent, emissiveIntensity: 1.1, roughness: 0.4 }))
-      const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2233, metalness: 0.7, roughness: 0.4 }))
-      // Body, nose, engine bell, fins, accent band + window.
-      const body = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.5, 1.7, 12, 16)), hullMat); body.position.y = 7; g.add(body)
-      const nose = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.5, 3.4, 16)), hullMat); nose.position.y = 14.7; g.add(nose)
-      const band = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.72, 1.72, 0.7, 16)), accentMat); band.position.y = 10.5; g.add(band)
-      const win = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(0.5, 12)), accentMat); win.position.set(0, 12, 1.7); g.add(win)
+      // Central core: tall white body, ogive nose with a dark tip.
+      const body = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.5, 1.7, 13, 18)), hullMat); body.position.y = 7.5; g.add(body)
+      const noseBase = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.7, 1.5, 2.4, 18)), hullMat); noseBase.position.y = 15.2; g.add(noseBase)
+      const noseTip = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(0.7, 2.4, 18)), darkMat); noseTip.position.y = 17.6; g.add(noseTip)
+      // Glowing blue accent bands + vertical strakes.
+      for (const by of [11.6, 4.4]) { const band = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.64, 1.66, 0.5, 18)), blueMat); band.position.y = by; g.add(band) }
+      for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2; const st = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.18, 8, 0.18)), blueMat); st.position.set(Math.cos(a) * 1.62, 8, Math.sin(a) * 1.62); g.add(st) }
+      // Two side boosters with their own noses, accents, fins and nozzles.
+      for (const bx of [-1, 1]) {
+        const boost = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.85, 0.95, 9, 14)), hullMat); boost.position.set(bx * 2.2, 5, 0); g.add(boost)
+        const bnose = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(0.85, 2, 14)), darkMat); bnose.position.set(bx * 2.2, 10.5, 0); g.add(bnose)
+        const bband = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.95, 0.97, 0.45, 14)), blueMat); bband.position.set(bx * 2.2, 8, 0); g.add(bband)
+        const bnoz = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.6, 0.95, 1, 14)), darkMat); bnoz.position.set(bx * 2.2, 0.2, 0); g.add(bnoz)
+        const bfin = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.3, 3.4, 2.4)), darkMat); bfin.position.set(bx * 3, 1.8, 0); bfin.rotation.z = bx * -0.18; g.add(bfin)
+      }
+      // Strong swept main fins.
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4
+        const fin = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.35, 4, 2.8)), darkMat)
+        fin.position.set(Math.cos(a) * 1.7, 2.4, Math.sin(a) * 1.7); fin.rotation.y = -a; fin.rotation.x = 0.12; g.add(fin)
+        const finEdge = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.2, 2.8)), blueMat); finEdge.position.set(Math.cos(a) * 1.7, 4.2, Math.sin(a) * 1.7); finEdge.rotation.y = -a; g.add(finEdge)
+      }
       const bell = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.0, 1.7, 1.6, 16)), darkMat); bell.position.y = 0.6; g.add(bell)
-      for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2; const fin = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.3, 3, 2)), darkMat); fin.position.set(Math.cos(a) * 1.6, 2, Math.sin(a) * 1.6); fin.rotation.y = -a; g.add(fin) }
+      // Glowing circular launch pad under the stack.
+      const pad = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(5, 5.4, 0.6, 24)), darkMat); pad.position.y = -0.4; g.add(pad)
+      const padRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(4.6, 0.16, 8, 32)), blueMat); padRing.rotation.x = -Math.PI / 2; padRing.position.y = 0; g.add(padRing)
+      const padGlow = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(4.4, 28)), this.own(new THREE.MeshBasicMaterial({ color: 0x33b8ff, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))); padGlow.rotation.x = -Math.PI / 2; padGlow.position.y = 0.06; g.add(padGlow)
       // Engine flame (cone pointing down) + a bright glow disc, hidden until ignition.
       const flameMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffb24a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-      const flame = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.3, 5, 14)), flameMat); flame.rotation.x = Math.PI; flame.position.y = -2; g.add(flame)
-      const glowMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff7a2e, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-      const glow = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.2, 12, 10)), glowMat); glow.position.y = -1.5; g.add(glow)
+      const flame = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(1.5, 6, 14)), flameMat); flame.rotation.x = Math.PI; flame.position.y = -2.4; g.add(flame)
+      const glowMat = this.own(new THREE.MeshBasicMaterial({ color: 0x59c0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const glow = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(2.4, 12, 10)), glowMat); glow.position.y = -1.5; g.add(glow)
       this.group.add(g)
       // Static launch gantry tower beside it.
       const towerMat = this.own(new THREE.MeshStandardMaterial({ color: 0x232c40, metalness: 0.6, roughness: 0.45, emissive: 0x0c2030, emissiveIntensity: 0.4 }))
