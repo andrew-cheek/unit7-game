@@ -636,10 +636,20 @@ export class Events {
     active: boolean; center: THREE.Vector3; wave: number; waves: number
     phase: 'incoming' | 'fight' | 'boss' | 'cleared'; timer: number; toSpawn: number; spawnGap: number
   } | null = null
-  private boss: { group: THREE.Group; coreMat: THREE.MeshBasicMaterial; hp: number; hpMax: number; t: number; targetY: number; descended: boolean; addTimer: number; flash: number } | null = null
+  private boss: {
+    group: THREE.Group; coreMat: THREE.MeshBasicMaterial; hp: number; hpMax: number; t: number
+    targetY: number; descended: boolean; addTimer: number; flash: number
+    // Telegraphed ground-strike attack: a warning ring tracks to the player, then
+    // a beam slams down. Caught inside it drains the shield.
+    ring: THREE.Mesh; pillar: THREE.Mesh; strikeMat: THREE.MeshBasicMaterial
+    strikeOn: boolean; strikeT: number; strikeStruck: boolean; strikeTimer: number; strikeR: number
+  } | null = null
   private bossGeos: THREE.BufferGeometry[] = []
+  private readonly bossStrikeR = 7 // radius of the mothership ground-strike
   /** Fires when the mothership is destroyed (big payoff shake at its position). */
   onBossDeath: ((pos: THREE.Vector3) => void) | null = null
+  /** Fires when a mothership ground-strike resolves; `hit` is true if it caught the player. */
+  onBossStrike: ((pos: THREE.Vector3, hit: boolean) => void) | null = null
   private raidBeams: { mesh: THREE.Mesh; t: number }[] = []
   private beamGeo?: THREE.CylinderGeometry
   private beamMat?: THREE.MeshBasicMaterial
@@ -668,7 +678,7 @@ export class Events {
   stopRaid() {
     if (!this.raid) return
     for (const a of this.aliens) if (a.raid && a.alive) { a.alive = false; a.cap.alive = false }
-    if (this.boss) { this.root.remove(this.boss.group); this.boss = null }
+    if (this.boss) { this.root.remove(this.boss.group, this.boss.ring, this.boss.pillar); this.boss = null }
     this.raid = null
   }
 
@@ -775,8 +785,12 @@ export class Events {
     const startY = center.y + 90
     group.position.set(center.x, startY, center.z)
     this.root.add(group)
+    // Ground-strike telegraph (a warning ring) + the beam pillar that slams down.
+    const strikeMat = new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }); this.ownedMats.push(strikeMat)
+    const ring = new THREE.Mesh(G(new THREE.RingGeometry(this.bossStrikeR - 0.6, this.bossStrikeR, 40)), strikeMat); ring.rotation.x = -Math.PI / 2; ring.visible = false; this.root.add(ring)
+    const pillar = new THREE.Mesh(G(new THREE.CylinderGeometry(this.bossStrikeR * 0.7, this.bossStrikeR * 0.4, 40, 20, 1, true)), strikeMat); pillar.visible = false; this.root.add(pillar)
     const hpMax = config.tier.name === 'low' ? 8 : 12
-    this.boss = { group, coreMat, hp: hpMax, hpMax, t: 0, targetY: center.y + 26, descended: false, addTimer: 4, flash: 0 }
+    this.boss = { group, coreMat, hp: hpMax, hpMax, t: 0, targetY: center.y + 26, descended: false, addTimer: 4, flash: 0, ring, pillar, strikeMat, strikeOn: false, strikeT: 0, strikeStruck: false, strikeTimer: 3, strikeR: this.bossStrikeR }
   }
 
   private updateBoss(dt: number) {
@@ -793,6 +807,50 @@ export class Events {
     if (b.descended) {
       b.addTimer -= dt
       if (b.addTimer <= 0) { b.addTimer = 3.6; const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 8; this.spawnAlien(R.center.x + Math.cos(a) * r, R.center.z + Math.sin(a) * r, true, true) }
+      this.updateBossStrike(b, dt)
+    }
+  }
+
+  /** The mothership's ground-strike: a warning ring locks onto the player, then a
+   *  beam slams down. Standing in it when it lands drains the shield. */
+  private updateBossStrike(b: NonNullable<typeof this.boss>, dt: number) {
+    const WARN = 1.15, FLASH = 0.3
+    if (!b.strikeOn) {
+      b.strikeTimer -= dt
+      if (b.strikeTimer > 0) return
+      // Begin: lock the ring onto the player's current ground position.
+      b.strikeOn = true; b.strikeT = 0; b.strikeStruck = false
+      const gy = (this.physics.sampleGround(this.playerPos.x, this.playerPos.z, 80)?.y ?? 0) + 0.15
+      b.ring.position.set(this.playerPos.x, gy, this.playerPos.z)
+      b.pillar.position.set(this.playerPos.x, gy + 20, this.playerPos.z)
+      b.ring.visible = true
+      return
+    }
+    b.strikeT += dt
+    if (!b.strikeStruck) {
+      // Telegraph: ring pulses faster + brighter as the strike nears.
+      const k = b.strikeT / WARN
+      b.strikeMat.opacity = (0.35 + 0.45 * k) * (0.6 + 0.4 * Math.sin(b.strikeT * (8 + k * 18)))
+      b.ring.scale.setScalar(1.25 - 0.25 * k)
+      if (b.strikeT >= WARN) {
+        // Strike! Flash the pillar, hit-test the player.
+        b.strikeStruck = true
+        b.pillar.visible = true
+        const dx = this.playerPos.x - b.ring.position.x, dz = this.playerPos.z - b.ring.position.z
+        const hit = dx * dx + dz * dz < b.strikeR * b.strikeR
+        this.onBossStrike?.(b.ring.position.clone(), hit)
+      }
+    } else {
+      // Brief beam flash, then reset and cool down.
+      const f = (b.strikeT - WARN) / FLASH
+      b.strikeMat.opacity = Math.max(0, 0.9 * (1 - f))
+      b.ring.scale.setScalar(1 + f * 0.8)
+      if (b.strikeT >= WARN + FLASH) {
+        b.strikeOn = false
+        b.ring.visible = false
+        b.pillar.visible = false
+        b.strikeTimer = 2.8 + Math.random() * 1.6
+      }
     }
   }
 
@@ -818,7 +876,7 @@ export class Events {
     const p = b.group.position.clone()
     for (let i = 0; i < 6; i++) this.spawnBurst(new THREE.Vector3(p.x + (Math.random() - 0.5) * 18, p.y + (Math.random() - 0.5) * 8, p.z + (Math.random() - 0.5) * 18))
     this.onBossDeath?.(p)
-    this.root.remove(b.group)
+    this.root.remove(b.group, b.ring, b.pillar)
     this.boss = null
     if (this.raid) { this.raid.phase = 'cleared'; this.raid.active = false }
   }
