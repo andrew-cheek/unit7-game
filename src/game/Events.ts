@@ -639,6 +639,12 @@ export class Events {
   private raidBeams: { mesh: THREE.Mesh; t: number }[] = []
   private beamGeo?: THREE.CylinderGeometry
   private beamMat?: THREE.MeshBasicMaterial
+  // Death bursts (explosion flash + shockwave ring) when a raid alien is destroyed.
+  private raidBursts: { g: THREE.Group; mat: THREE.MeshBasicMaterial; t: number }[] = []
+  private burstGeo?: THREE.SphereGeometry
+  private burstRingGeo?: THREE.TorusGeometry
+  /** Fires at the spot a raid alien is destroyed, so the game can shake + sfx. */
+  onRaidKill: ((pos: THREE.Vector3) => void) | null = null
 
   /** Kick off the raid: `waves` escalating waves of red invaders that home in on
    *  the player, spawned around `center` (the landing plaza). */
@@ -682,6 +688,16 @@ export class Events {
       b.mesh.scale.x = b.mesh.scale.z = 0.4 + (1 - k) * 1.4
       if (b.t <= 0) { this.root.remove(b.mesh); this.raidBeams.splice(i, 1) }
     }
+    // expand + fade death bursts (run even once the raid is cleared)
+    for (let i = this.raidBursts.length - 1; i >= 0; i--) {
+      const b = this.raidBursts[i]
+      b.t += dt
+      const k = b.t / 0.42
+      b.mat.opacity = Math.max(0, 1 - k)
+      ;(b.g.children[0] as THREE.Mesh).scale.setScalar(1 + k * 3)
+      ;(b.g.children[1] as THREE.Mesh).scale.setScalar(1 + k * 6)
+      if (b.t >= 0.42) { this.root.remove(b.g); this.raidBursts.splice(i, 1) }
+    }
     const R = this.raid
     if (!R || !R.active) return
     if (R.phase === 'incoming') {
@@ -706,6 +722,19 @@ export class Events {
     }
   }
 
+  /** Explosion when a raid alien dies: a flash sphere + an expanding shock ring. */
+  private spawnBurst(pos: THREE.Vector3) {
+    if (!this.burstGeo) this.burstGeo = new THREE.SphereGeometry(1, 12, 10)
+    if (!this.burstRingGeo) this.burstRingGeo = new THREE.TorusGeometry(1, 0.18, 6, 20)
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    this.ownedMats.push(mat)
+    const g = new THREE.Group(); g.position.set(pos.x, pos.y + 1.4, pos.z)
+    g.add(new THREE.Mesh(this.burstGeo, mat))
+    const ring = new THREE.Mesh(this.burstRingGeo, mat); ring.rotation.x = Math.PI / 2; g.add(ring)
+    this.root.add(g)
+    this.raidBursts.push({ g, mat, t: 0 })
+  }
+
   /** A bright red column flashing in where a raid alien teleports onto the deck. */
   private spawnBeam(pos: THREE.Vector3) {
     if (!this.beamGeo) { this.beamGeo = new THREE.CylinderGeometry(0.9, 0.9, 12, 10, 1, true); }
@@ -722,7 +751,8 @@ export class Events {
     for (let i = this.aliens.length - 1; i >= 0; i--) {
       const a = this.aliens[i]
       if (!a.alive) {
-        // Captured: remove from scene + capturables.
+        // Captured/destroyed: a raid invader goes out with an explosion + a kick.
+        if (a.raid) { this.spawnBurst(a.pos); this.onRaidKill?.(a.pos) }
         this.root.remove(a.model.group)
         a.model.dispose()
         const ci = this.capturables.indexOf(a.cap)
@@ -796,6 +826,8 @@ export class Events {
     for (const a of this.aliens) a.model.dispose()
     for (const s of this.dropships) s.model.dispose()
     this.beamGeo?.dispose()
+    this.burstGeo?.dispose()
+    this.burstRingGeo?.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }
 }
