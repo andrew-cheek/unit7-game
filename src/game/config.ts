@@ -150,9 +150,10 @@ export const config = {
     distance: 7.2, // close enough that the robot reads big (Roblox-ish framing)
     minDistance: 2.2,
     // Hard floor the wall-collision pull-in may reach (well below minDistance).
-    // Kept just above the camera near plane so a tucked-in camera still renders
-    // the world instead of clipping to black against a wall.
-    collisionMinDistance: 0.7,
+    // Kept clear of the camera near plane (0.5) PLUS the subject's body radius, so
+    // a tucked-in camera doesn't put its near plane inside the robot/wall and clip
+    // to black. 0.7 was too tight (near plane only ~0.2 from the subject).
+    collisionMinDistance: 1.15,
     height: 3.0,
     targetHeight: 1.7,
     // Behind-and-slightly-above chase angle that shows the horizon/city ahead
