@@ -6,10 +6,12 @@ import type { Zone } from './types'
 interface Deps {
   /** Ground height under a point in the current zone (for impact placement). */
   groundY: (x: number, z: number) => number
-  /** Player focus position, for the near-impact camera kick. */
+  /** Player focus position, for the near-impact camera kick + fragment pickup. */
   focus: () => THREE.Vector3
   /** Fired when a meteor lands; `strength` is 0..1 by proximity to the player. */
   onImpact?: (pos: THREE.Vector3, strength: number) => void
+  /** Fired when the player grabs a rare meteorite fragment. */
+  onPickup?: (value: number, pos: THREE.Vector3) => void
 }
 
 interface Meteor {
@@ -17,6 +19,13 @@ interface Meteor {
   trail: THREE.Mesh
   vel: THREE.Vector3
   target: THREE.Vector3 // impact point (so we know when it lands)
+  rare: boolean // drops a grab-able fragment on impact
+  active: boolean
+}
+interface Fragment {
+  group: THREE.Group
+  pos: THREE.Vector3
+  t: number
   active: boolean
 }
 interface Impact {
@@ -48,6 +57,7 @@ export class MeteorShower implements GameSystem {
   private meteors: Meteor[] = []
   private impacts: Impact[] = []
   private debris: Debris[] = []
+  private fragments: Fragment[] = []
   private zone: Zone = 'earth'
   private spawnTimer = 1.2
   private scratch = new THREE.Vector3()
@@ -71,7 +81,22 @@ export class MeteorShower implements GameSystem {
       const trail = new THREE.Mesh(trailGeo, trailMat)
       head.visible = false; trail.visible = false
       this.group.add(head, trail)
-      this.meteors.push({ head, trail, vel: new THREE.Vector3(), target: new THREE.Vector3(), active: false })
+      this.meteors.push({ head, trail, vel: new THREE.Vector3(), target: new THREE.Vector3(), rare: false, active: false })
+    }
+
+    // Rare meteorite fragments: a grab-able payoff some impacts leave behind.
+    const fragGeo = this.ownG(new THREE.OctahedronGeometry(0.7, 0))
+    const haloGeo = this.ownG(new THREE.RingGeometry(1.1, 1.5, 24))
+    const fragMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9bff6a, fog: false }))
+    const haloMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9bff6a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }))
+    for (let i = 0; i < (low ? 1 : 3); i++) {
+      const fg = new THREE.Group()
+      const crystal = new THREE.Mesh(fragGeo, fragMat); crystal.position.y = 1
+      const halo = new THREE.Mesh(haloGeo, haloMat); halo.rotation.x = -Math.PI / 2; halo.position.y = 0.15
+      fg.add(crystal, halo)
+      fg.visible = false
+      this.group.add(fg)
+      this.fragments.push({ group: fg, pos: new THREE.Vector3(), t: 0, active: false })
     }
 
     const flashGeo = this.ownG(new THREE.SphereGeometry(1, 12, 8))
@@ -107,6 +132,7 @@ export class MeteorShower implements GameSystem {
       for (const m of this.meteors) { m.active = false; m.head.visible = false; m.trail.visible = false }
       for (const im of this.impacts) { im.active = false; im.flash.visible = false; im.ring.visible = false }
       for (const d of this.debris) { d.active = false; d.mesh.visible = false }
+      for (const fr of this.fragments) { fr.active = false; fr.group.visible = false }
       this.spawnTimer = 1.2
     }
   }
@@ -133,7 +159,25 @@ export class MeteorShower implements GameSystem {
       m.trail.quaternion.setFromUnitVectors(UP, this.scratch)
       if (m.head.position.y <= m.target.y) {
         m.active = false; m.head.visible = false; m.trail.visible = false
-        this.impact(m.target)
+        this.impact(m.target, m.rare)
+      }
+    }
+
+    // Rare fragments: bob + spin, expire after a while, grab on contact.
+    const f = this.deps.focus()
+    for (const fr of this.fragments) {
+      if (!fr.active) continue
+      fr.t += dt
+      const crystal = fr.group.children[0] as THREE.Mesh
+      crystal.rotation.y += dt * 1.8
+      crystal.position.y = 1 + Math.sin(fr.t * 2.4) * 0.25
+      fr.group.children[1].rotation.z += dt * 0.6
+      const dx = fr.pos.x - f.x, dz = fr.pos.z - f.z
+      if (dx * dx + dz * dz < 9) {
+        fr.active = false; fr.group.visible = false
+        this.deps.onPickup?.(50, fr.pos.clone())
+      } else if (fr.t > 16) {
+        fr.active = false; fr.group.visible = false
       }
     }
 
@@ -172,11 +216,13 @@ export class MeteorShower implements GameSystem {
     m.head.position.set(tx + Math.cos(a) * reach * 0.5, ty + 120, tz + Math.sin(a) * reach * 0.5)
     m.vel.set(m.target.x - m.head.position.x, m.target.y - m.head.position.y, m.target.z - m.head.position.z)
     m.vel.normalize().multiplyScalar(70 + Math.random() * 30)
+    // ~1 in 4 carries a fragment, but only if a fragment slot is free to receive it.
+    m.rare = Math.random() < 0.25 && this.fragments.some((fr) => !fr.active)
     m.active = true; m.head.visible = true; m.trail.visible = true
   }
 
   /** Flash + dust ring + debris at an impact point, and a camera kick if near. */
-  private impact(pos: THREE.Vector3) {
+  private impact(pos: THREE.Vector3, rare = false) {
     const im = this.impacts.find((x) => !x.active)
     if (im) {
       im.active = true; im.t = 0
@@ -202,6 +248,16 @@ export class MeteorShower implements GameSystem {
     const dx = pos.x - f.x, dz = pos.z - f.z
     const dist = Math.hypot(dx, dz)
     if (dist < 60) this.deps.onImpact?.(pos.clone(), 1 - dist / 60)
+    // Drop a grab-able fragment for a rare meteorite.
+    if (rare) {
+      const fr = this.fragments.find((x) => !x.active)
+      if (fr) {
+        fr.active = true; fr.t = 0
+        fr.pos.copy(pos)
+        fr.group.position.copy(pos)
+        fr.group.visible = true
+      }
+    }
   }
 
   dispose() {
