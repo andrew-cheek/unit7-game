@@ -37,6 +37,7 @@ import { Bots } from './Bots'
 import { CityLife } from './CityLife'
 import { GrindRails } from './GrindRails'
 import { MeteorShower } from './MeteorShower'
+import { DustDevils } from './DustDevils'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -363,6 +364,10 @@ export class Game {
         this.landingFx.trigger(pos, 0xffb060, strength > 0.6)
         if (strength > 0.3) { this.audio.play('explosion'); vibrate(Math.round(20 + strength * 50)) }
       },
+    }))
+    // Mars dust devils: rust-coloured swirls roaming the surface. Mars-only.
+    this.systems.register(new DustDevils(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
