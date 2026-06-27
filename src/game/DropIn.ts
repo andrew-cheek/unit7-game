@@ -766,16 +766,19 @@ export class DropIn {
     this.vy = -2
     this.hVel.set(0, 0, 0)
     this.landingPos.copy(this.target)
+    this.chuteRig.visible = false // skipping mid-canopy must not leave the chute on screen
     this.phase = 'land'
   }
 
   update(dt: number) {
     if (this.done) return
-    // Safety: the opening should finish in ~25s; if anything stalls it, force a
-    // clean handoff so the player is never trapped in the drop-in forever.
+    // Safety: a normal drop finishes well under a minute; if anything stalls it,
+    // force a clean handoff so the player is never trapped in the drop-in. Hand off
+    // at the PLAZA target (not wherever the stall left you) so you still arrive by
+    // the guide + the first objectives.
     this.totalT += dt
-    if (this.totalT > 72) {
-      this.landingPos.set(this.pos.x, this.getGround(this.pos.x, this.pos.z), this.pos.z)
+    if (this.totalT > 48) {
+      this.landingPos.copy(this.target)
       this.fade = 1
       this.done = true
       return
@@ -931,6 +934,17 @@ export class DropIn {
     this.pos.x += this.hVel.x * dt
     this.pos.z += this.hVel.z * dt
     this.pos.y += this.vy * dt
+
+    // Soft horizontal boundary: the jetpack lets you climb and cruise freely, but
+    // don't let the dive wander off into empty space far from the city - clamp to a
+    // generous box around the descent corridor (and bleed the speed into it).
+    if (this.phase === 'dive' || this.phase === 'canopy') {
+      const B = 460
+      if (this.pos.x < this.target.x - B) { this.pos.x = this.target.x - B; if (this.hVel.x < 0) this.hVel.x = 0 }
+      else if (this.pos.x > this.target.x + B) { this.pos.x = this.target.x + B; if (this.hVel.x > 0) this.hVel.x = 0 }
+      if (this.pos.z < this.target.z - B) { this.pos.z = this.target.z - B; if (this.hVel.z < 0) this.hVel.z = 0 }
+      else if (this.pos.z > this.target.z + B) { this.pos.z = this.target.z + B; if (this.hVel.z > 0) this.hVel.z = 0 }
+    }
 
     // Buildings are solid: push out of any wall the diver enters (the resolver only
     // acts when the diver overlaps a building vertically, so you still sail ABOVE

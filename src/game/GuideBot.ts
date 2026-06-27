@@ -174,9 +174,11 @@ export class GuideBot {
     this.arrow.position.set(this.arrowAt.x, agy + 0.07, this.arrowAt.y)
     this.arrow.rotation.y = Math.atan2(this.px - this.arrowAt.x, this.pz - this.arrowAt.y)
 
-    // Latch everything off once you reach the arcade (front door z~28), and keep it
-    // off - otherwise it glows back every time you walk back out into the plaza.
-    if (playerZ > 32) this.done = true
+    // Latch everything off once you actually REACH the arcade (proximity to the
+    // entrance, not just a z line) and keep it off, so it doesn't glow back when you
+    // walk out - and, crucially, doesn't pre-latch if you happened to land north of
+    // it. Distance-based so any landing spot keeps the guide active until you arrive.
+    if (Math.hypot(playerX - this.dest.x, playerZ - this.dest.y) < 10) this.done = true
     const pulse = 0.6 + Math.sin(this.t * 4) * 0.25
     const target = this.done ? 0 : pulse
     this.arrowMat.opacity = THREE.MathUtils.damp(this.arrowMat.opacity, target, 5, dt)
