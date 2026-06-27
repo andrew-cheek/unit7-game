@@ -30,7 +30,12 @@ export interface Vehicle {
   pathIdx: number
   railStop: number // dwell timer at the current stop
   grounded: boolean // rover: wheels on the surface (vs airborne off a ramp)
+  zoneShown: boolean // belongs in the active zone (distance-cull may still hide it)
 }
+
+// Beyond this distance from the camera focus, scattered small cars/bikes are
+// hidden (they're a few pixels out there). Keeps draw calls down, esp. on mobile.
+const VEHICLE_CULL_SQ = 125 * 125
 
 // Where the mechs line up relative to spawn when taken to another world.
 const OFFWORLD_MECH_OFFSET: Record<string, THREE.Vector3> = {
@@ -86,12 +91,15 @@ export class Vehicles {
     this.spawn('rocket', createRocket({ scale: 3.0, hull: 0xb8c0cc, accent: config.palette.orange }), new THREE.Vector3(2, 0, -26), 0, 3.6, 'rocket', 1.5)
     this.spawn('rocket', createRocket({ scale: 1.7, hull: 0xc8ccd6, accent: 0xff4d6d }), new THREE.Vector3(16, 0, -24), 0, 2.4, 'rocket', 0.9)
     // Extra rides scattered across the (now much larger) city so exploring always
-    // turns up something to hop into. Earth-only, like the other cars.
+    // turns up something to hop into. Earth-only, like the other cars. Trimmed on
+    // the low (mobile) tier to keep the draw-call budget in check.
+    const lowTier = config.tier.name === 'low'
     const hh = config.vehicle.hovercar.hoverHeight, sh = config.vehicle.speeder.hoverHeight
-    const extras: Array<['hovercar' | 'speeder', number, number]> = [
+    const extrasAll: Array<['hovercar' | 'speeder', number, number]> = [
       ['hovercar', -118, 64], ['speeder', 96, -92], ['hovercar', 150, 118],
       ['speeder', -150, -44], ['hovercar', -64, -150], ['speeder', 132, 34],
     ]
+    const extras = lowTier ? extrasAll.slice(0, 2) : extrasAll
     for (const [kind, x, z] of extras) {
       const model = kind === 'speeder' ? createSpeederBike() : createHovercar()
       this.spawn(kind, model, new THREE.Vector3(x, 0, z), kind === 'speeder' ? sh : hh, kind === 'speeder' ? 1.1 : 1.7, 'hover')
@@ -107,9 +115,11 @@ export class Vehicles {
     tram.path = loop
     tram.home.copy(loop[0])
     // Drivable cars sitting up on the elevated highway (deck at z=-36, y~9).
-    // sampleGround in spawn() lands them on the deck surface.
-    this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
-    this.spawn('hovercar', createHovercar(), new THREE.Vector3(20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    // sampleGround in spawn() lands them on the deck surface. Desktop-only filler.
+    if (!lowTier) {
+      this.spawn('hovercar', createHovercar(), new THREE.Vector3(-20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+      this.spawn('hovercar', createHovercar(), new THREE.Vector3(20, 0, -36), config.vehicle.hovercar.hoverHeight, 1.7, 'hover')
+    }
     // Three battle-mechs lined up by the arcade portals so they're obvious at
     // spawn: medium (blue), large (crimson), extra-large building-sized (green).
     const mm = config.vehicle.mechM
@@ -126,10 +136,13 @@ export class Vehicles {
     const tt = config.vehicle.titan
     const arcade = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x1b2336, trim: config.palette.cyan, core: 0x6fd8ff }), new THREE.Vector3(30, 0, 36), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
     arcade.yaw = Math.PI // face -Z, toward the player / arcade
+    // The two roaming titans are big animated models; keep just one on mobile.
     const roam1 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x394b2a, trim: config.palette.lime, core: 0x9bff4d }), new THREE.Vector3(-95, 0, -78), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
-    const roam2 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x4a2330, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(100, 0, 86), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
     roam1.wander = true
-    roam2.wander = true
+    if (!lowTier) {
+      const roam2 = this.spawn('titan', createMechSuit({ scale: tt.size, armor: 0x4a2330, trim: config.palette.orange, core: 0xffae5c }), new THREE.Vector3(100, 0, 86), tt.hoverHeight, 2.0 * tt.size, 'fly', tt.size)
+      roam2.wander = true
+    }
 
     // Off-world exploration rovers. They live hidden on Earth and surface on
     // Mars / the Moon (positioned beside the spawn by setZone), where the big
@@ -177,6 +190,7 @@ export class Vehicles {
       pathIdx: 0,
       railStop: 0,
       grounded: true,
+      zoneShown: model.group.visible,
     }
     this.list.push(v)
     return v
@@ -203,6 +217,7 @@ export class Vehicles {
       const isRover = v.kind === 'rover'
       const visible = isRover ? !earth : (earth || isMech(v.kind) || isRocket)
       v.model.group.visible = visible
+      v.zoneShown = visible
       if (!visible) continue
       if (earth) {
         v.position.copy(v.home)
@@ -320,11 +335,20 @@ export class Vehicles {
   }
   /** Earth-only vehicles: hide when off-world. */
   setVisible(v: boolean) {
-    for (const veh of this.list) veh.model.group.visible = v
+    for (const veh of this.list) { veh.model.group.visible = v; veh.zoneShown = v }
   }
 
-  update(dt: number, input: Input, gravity = -24) {
+  update(dt: number, input: Input, gravity = -24, focus?: THREE.Vector3) {
     for (const v of this.list) {
+      // Distance-cull the scattered small cars/bikes when far from the camera: they
+      // are only a few pixels out there, so hiding them is invisible but cuts a big
+      // slice of draw calls (mobile especially). Landmark mechs/rockets and the
+      // moving tram/roaming titans are never culled this way.
+      if (focus && v !== this.current && (v.kind === 'hovercar' || v.kind === 'speeder') && v.drive !== 'rail') {
+        const dx = v.position.x - focus.x, dz = v.position.z - focus.z
+        const near = dx * dx + dz * dz < VEHICLE_CULL_SQ
+        if (v.model.group.visible !== near && v.zoneShown) v.model.group.visible = near
+      }
       // Skip vehicles hidden in the current zone (e.g. the dozens of rockets/cars
       // that aren't on this world). The one you're piloting is always visible, so
       // its physics still runs. Big win when most of the fleet is off-zone.

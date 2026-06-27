@@ -2073,7 +2073,7 @@ export class Game {
     const gravity = config.zones[this.zone].gravity
     // Vehicles update in every zone now (mechs are pilotable off-world); gravity
     // feeds the rover's ramp launches (weaker off-world = bigger hops).
-    this.vehicles.update(dt, this.input, gravity)
+    this.vehicles.update(dt, this.input, gravity, this.player.position)
 
     // Drove a vehicle off the launch-pad edge: the car becomes the diver and falls.
     if (this.launchPad && this.vehicles.current) {
