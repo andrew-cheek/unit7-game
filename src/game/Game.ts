@@ -49,6 +49,7 @@ import { StepRipples } from './StepRipples'
 import { SpeedRibbons } from './SpeedRibbons'
 import { HoloBillboards } from './HoloBillboards'
 import { NightFireworks } from './NightFireworks'
+import { GravityLifts } from './GravityLifts'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -476,6 +477,16 @@ export class Game {
     this.systems.register(new NightFireworks(this.engine.scene, {
       focus: () => this.focus,
       dayFactor: () => this.world.dayFactor,
+    }))
+    // Gravity-lift columns: step in for a smooth sustained rise to the rooftops.
+    this.systems.register(new GravityLifts(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      lift: (vy) => {
+        if (this.player.mode !== 'robot' || this.vehicles.current) return
+        if (this.player.velocity.y < vy) this.player.velocity.y = vy
+        this.player.grounded = false
+      },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
