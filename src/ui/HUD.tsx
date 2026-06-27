@@ -78,8 +78,9 @@ export function HUD({
       <div style={topLeftRow}>
         <button style={pillBtn} onClick={onRestart}>RESTART ↺</button>
         <button style={{ ...pillBtn, borderColor: 'rgba(138,92,255,0.5)', boxShadow: '0 0 14px rgba(138,92,255,0.2)' }} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
-        {/* Quick-warp to the arcade entrance. Earth only (the arcade lives there). */}
-        {onArcade && !hud.minigame && !hud.intro && hud.zone === 'earth' && (
+        {/* Quick-warp to the arcade entrance. Desktop only - mobile has it down in
+            the touch button cluster (and the top bar gets covered by panels there). */}
+        {onArcade && !touch && !hud.minigame && !hud.intro && hud.zone === 'earth' && (
           <button
             style={{ ...pillBtn, borderColor: 'rgba(255,43,208,0.7)', color: NEON.magenta, boxShadow: '0 0 16px rgba(255,43,208,0.35)', fontWeight: 800 }}
             onClick={onArcade}

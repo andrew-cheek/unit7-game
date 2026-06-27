@@ -104,6 +104,7 @@ export class Engine {
   private renderScale = 1
   private adaptTimer = 0
   private adaptiveOn = true // when false, adapt() is frozen (e.g. during the drop-in)
+  private contextLost = false // true between webglcontextlost and ...restored
   private static readonly SCALE_FLOOR = 0.6
   // Hitstop: a brief sim-time slowdown for impact weight. We scale the wall-clock
   // time fed into the fixed-step accumulator (NOT the fixed dt itself), so every
@@ -159,6 +160,23 @@ export class Engine {
     this.renderer.domElement.style.height = '100%'
     this.renderer.domElement.style.touchAction = 'none'
     container.appendChild(this.renderer.domElement)
+
+    // WebGL context loss recovery. Phones drop the GL context under memory
+    // pressure (or when backgrounded); without this the canvas just stays black.
+    // preventDefault() asks the browser to restore it, and we pause rendering in
+    // between so we don't thrash a dead context.
+    this.renderer.domElement.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault()
+      this.contextLost = true
+      console.warn('[Unit7] WebGL context lost - pausing render until restored')
+    }, false)
+    this.renderer.domElement.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false
+      // Three.js reinitialises its GL state on the restored context; nudge the
+      // size so all render targets are reallocated cleanly.
+      this.applyResolution()
+      console.warn('[Unit7] WebGL context restored')
+    }, false)
 
     this.scene = new THREE.Scene()
     // IBL so PBR metals reflect cohesive neon instead of rendering black at night.
@@ -381,6 +399,7 @@ export class Engine {
         console.error('[Unit7] render error:', err)
       }
     }
+    if (this.contextLost) return // GL context is gone; skip rendering until it's restored
     this.renderer.info.reset()
     this.composer.render()
     // Snapshot the accumulated per-frame totals (scene draw + post passes).

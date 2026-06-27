@@ -171,7 +171,7 @@ export class DropIn {
   // Vertical speed (m/s) above which a no-chute ground hit (or a head-on wall
   // smack) breaks you apart. Below it you survive a hard landing - so flaring or
   // a jetpack tap is always enough to save yourself. The HUD warns past ~52.
-  private static readonly CRASH_VSPEED = 60
+  private static readonly CRASH_VSPEED = 74
 
   // Push the diver out of building walls (and cancel into-wall speed). Optional so
   // the drop still works without a physics world; set from Game.
@@ -280,7 +280,7 @@ export class DropIn {
     // head-down tuck, some already gliding under a canopy. Reads as a busy jump.
     const aiBody = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3650, metalness: 0.55, roughness: 0.45 }))
     const tints = [0xff2bd0, 0x8a5cff, 0xff8a1e, 0x9dff5a, 0x27e7ff, 0xffd24a]
-    const N_AI = 9
+    const N_AI = config.tier.name === 'low' ? 4 : 9 // fewer rival skydivers on mobile (memory + draw)
     for (let i = 0; i < N_AI; i++) {
       const g = new THREE.Group()
       const torso = new THREE.Mesh(this.ownG(new THREE.CapsuleGeometry(0.5, 1.1, 4, 8)), aiBody)
@@ -506,7 +506,7 @@ export class DropIn {
     const balloonGeo = this.ownG(new THREE.SphereGeometry(2.2, 14, 12))
     const stringGeo = this.ownG(new THREE.CylinderGeometry(0.05, 0.05, 3, 5))
     const colors = [0xff5ba8, 0x5bdcff, 0xffd24a, 0x9dff5a, 0xb98cff]
-    const n = config.tier.name === 'low' ? 9 : config.tier.name === 'medium' ? 14 : 20
+    const n = config.tier.name === 'low' ? 5 : config.tier.name === 'medium' ? 14 : 20
     for (let i = 0; i < n; i++) {
       const f = (i + 0.5) / n
       const y = THREE.MathUtils.lerp(START_Y - 70, this.target.y + 70, f) + (Math.random() - 0.5) * 36
@@ -676,6 +676,10 @@ export class DropIn {
 
   /** Holographic billboards drifting past at the sides of the descent (flavor). */
   private buildHolograms() {
+    // Skip on mobile: each is a 512x256 canvas texture, and the drop already peaks
+    // mobile GPU memory (the whole city + the entire drop scene coexist) - shedding
+    // textures here helps avoid a context-loss black-out on phones.
+    if (config.tier.name === 'low') return
     const lines: [string, string][] = [['WELCOME TO', 'UNIT 7'], ['NEON', 'CITY'], ['DROP', 'ZONE']]
     for (let i = 0; i < lines.length; i++) {
       const f = (i + 0.6) / (lines.length + 0.3)
@@ -972,13 +976,12 @@ export class DropIn {
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
     this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
-    // Coach the jetpack early on (it's the key to flying/hovering around the sky):
-    // show until they first use it, then it stays gone.
-    this.hud.showJetTip = this.phase === 'dive' && !this.hasJetted && this.totalT < 18
     // Going too fast to survive a ground hit: warn so you flare / deploy / jet in
-    // time. Only while diving (a canopy already arrests you) and not super-high,
-    // so it reads as an approaching-ground danger, not a constant nag.
-    this.hud.danger = this.phase === 'dive' && -this.vy > DropIn.CRASH_VSPEED - 8 && alt < 480
+    // time. Only while diving and not super-high, so it reads as approaching danger.
+    this.hud.danger = this.phase === 'dive' && -this.vy > DropIn.CRASH_VSPEED - 18 && alt < 480
+    // Hide the jetpack coaching tip while the PULL UP warning is up, so the two
+    // prompts don't stack on top of each other.
+    this.hud.showJetTip = this.phase === 'dive' && !this.hasJetted && this.totalT < 18 && !this.hud.danger
     this.hud.hint = this.phase === 'canopy'
       ? (alt < 70 ? (-this.vy < 7 ? 'FLARED - SOFT LANDING' : 'PULL BACK TO FLARE') : 'STEER TO A PORTAL OR THE BEACON')
       : this.phase === 'land' ? 'TOUCHDOWN'

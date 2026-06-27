@@ -79,6 +79,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     else secondary.push(GRAPPLE)
     if (hud.warp.ready || hud.warp.active) secondary.push(WARP)
   }
+  // GAMES warp lives right in the cluster on foot (Earth) - the clear, always-there
+  // shortcut to the arcade the player asked for.
+  const showGames = !inVehicle && !airborne && hud.zone === 'earth' && !hud.minigame && !hud.intro
 
   const helper = inMech
     ? 'JET TO FLY · FIRE'
@@ -188,6 +191,14 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
       <div style={cluster}>
         {helper && <div style={helperPill}>{helper}</div>}
         <div style={secWrap}>
+          {showGames && (
+            <div
+              style={{ ...secBtn, borderColor: '#ff2bd0', color: '#ff2bd0', background: 'rgba(8,12,24,0.62)', boxShadow: '0 0 14px #ff2bd066', fontWeight: 800 }}
+              onPointerDown={(e) => { e.stopPropagation(); controls.openArcade() }}
+            >
+              🕹 GAMES
+            </div>
+          )}
           {secondary.map((b) => {
             const active = b.type === 'sprint' && sprintOn
             return (
