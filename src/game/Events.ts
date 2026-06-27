@@ -634,8 +634,12 @@ export class Events {
 
   private raid: {
     active: boolean; center: THREE.Vector3; wave: number; waves: number
-    phase: 'incoming' | 'fight' | 'cleared'; timer: number; toSpawn: number; spawnGap: number
+    phase: 'incoming' | 'fight' | 'boss' | 'cleared'; timer: number; toSpawn: number; spawnGap: number
   } | null = null
+  private boss: { group: THREE.Group; coreMat: THREE.MeshBasicMaterial; hp: number; hpMax: number; t: number; targetY: number; descended: boolean; addTimer: number; flash: number } | null = null
+  private bossGeos: THREE.BufferGeometry[] = []
+  /** Fires when the mothership is destroyed (big payoff shake at its position). */
+  onBossDeath: ((pos: THREE.Vector3) => void) | null = null
   private raidBeams: { mesh: THREE.Mesh; t: number }[] = []
   private beamGeo?: THREE.CylinderGeometry
   private beamMat?: THREE.MeshBasicMaterial
@@ -654,16 +658,17 @@ export class Events {
   }
 
   /** Live raid state for the HUD, or null when no raid is running. */
-  get raidState(): { active: boolean; wave: number; waves: number; alive: number; phase: 'incoming' | 'fight' | 'cleared'; cleared: boolean } | null {
+  get raidState(): { active: boolean; wave: number; waves: number; alive: number; phase: 'incoming' | 'fight' | 'boss' | 'cleared'; cleared: boolean; boss: { hp: number; hpMax: number } | null } | null {
     const R = this.raid
     if (!R) return null
-    return { active: R.active, wave: R.wave, waves: R.waves, alive: this.raidAlive(), phase: R.phase, cleared: R.phase === 'cleared' }
+    return { active: R.active, wave: R.wave, waves: R.waves, alive: this.raidAlive(), phase: R.phase, cleared: R.phase === 'cleared', boss: this.boss ? { hp: this.boss.hp, hpMax: this.boss.hpMax } : null }
   }
 
   /** Tear down the raid, removing any stragglers. */
   stopRaid() {
     if (!this.raid) return
     for (const a of this.aliens) if (a.raid && a.alive) { a.alive = false; a.cap.alive = false }
+    if (this.boss) { this.root.remove(this.boss.group); this.boss = null }
     this.raid = null
   }
 
@@ -742,10 +747,80 @@ export class Events {
           R.spawnGap = 0.45
         }
       } else if (this.raidAlive() === 0) {
-        if (R.wave >= R.waves) { R.phase = 'cleared'; R.active = false }
+        if (R.wave >= R.waves) { R.phase = 'boss'; this.spawnBoss(R.center) } // final wave -> mothership
         else { R.phase = 'incoming'; R.timer = 2.8 }
       }
+    } else if (R.phase === 'boss') {
+      this.updateBoss(dt)
     }
+  }
+
+  // --- Mothership mini-boss: the raid's climax -------------------------------
+
+  private spawnBoss(center: THREE.Vector3) {
+    const G = (g: THREE.BufferGeometry) => { this.bossGeos.push(g); return g }
+    const hullMat = new THREE.MeshStandardMaterial({ color: 0x1a2236, metalness: 0.7, roughness: 0.4, emissive: 0x3a0d1a, emissiveIntensity: 0.6 }); this.ownedMats.push(hullMat)
+    const rimMat = new THREE.MeshBasicMaterial({ color: 0xff3b52, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }); this.ownedMats.push(rimMat)
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }); this.ownedMats.push(coreMat)
+    const group = new THREE.Group()
+    const hull = new THREE.Mesh(G(new THREE.SphereGeometry(15, 28, 16)), hullMat); hull.scale.y = 0.32; hull.position.y = 0; group.add(hull)
+    const dome = new THREE.Mesh(G(new THREE.SphereGeometry(7, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2)), hullMat); dome.position.y = 2.2; group.add(dome)
+    const rim = new THREE.Mesh(G(new THREE.TorusGeometry(15, 0.5, 8, 48)), rimMat); rim.rotation.x = Math.PI / 2; group.add(rim)
+    // under-lights
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const l = new THREE.Mesh(G(new THREE.SphereGeometry(0.7, 8, 6)), rimMat); l.position.set(Math.cos(a) * 11, -2.4, Math.sin(a) * 11); group.add(l) }
+    // the exposed core (weak point) hanging beneath
+    const core = new THREE.Mesh(G(new THREE.SphereGeometry(4, 16, 12)), coreMat); core.position.y = -4.5; group.add(core)
+    const cage = new THREE.Mesh(G(new THREE.IcosahedronGeometry(5, 0)), new THREE.MeshBasicMaterial({ color: 0xff8a3c, wireframe: true, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); cage.position.y = -4.5; group.add(cage)
+    this.ownedMats.push(cage.material as THREE.Material)
+    const startY = center.y + 90
+    group.position.set(center.x, startY, center.z)
+    this.root.add(group)
+    const hpMax = config.tier.name === 'low' ? 8 : 12
+    this.boss = { group, coreMat, hp: hpMax, hpMax, t: 0, targetY: center.y + 26, descended: false, addTimer: 4, flash: 0 }
+  }
+
+  private updateBoss(dt: number) {
+    const b = this.boss, R = this.raid
+    if (!b || !R) return
+    b.t += dt
+    if (b.group.position.y > b.targetY) b.group.position.y = Math.max(b.targetY, b.group.position.y - 22 * dt)
+    else b.descended = true
+    b.group.rotation.y += dt * 0.35
+    b.flash = Math.max(0, b.flash - dt * 3)
+    b.coreMat.opacity = 0.55 + Math.sin(b.t * 4) * 0.18 + b.flash
+    b.coreMat.color.setHex(b.flash > 0.2 ? 0xffffff : 0xffd24a)
+    // Once it's down, it periodically drops reinforcements around the plaza.
+    if (b.descended) {
+      b.addTimer -= dt
+      if (b.addTimer <= 0) { b.addTimer = 3.6; const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 8; this.spawnAlien(R.center.x + Math.cos(a) * r, R.center.z + Math.sin(a) * r, true, true) }
+    }
+  }
+
+  /** The boss weak-point world position (for the game's missile hit test), or null. */
+  bossWeakPoint(): THREE.Vector3 | null {
+    if (!this.boss || !this.boss.descended) return null
+    return new THREE.Vector3(this.boss.group.position.x, this.boss.group.position.y - 4.5, this.boss.group.position.z)
+  }
+
+  /** Damage the mothership core (called when a missile blast reaches it). */
+  damageBoss(n = 1) {
+    const b = this.boss
+    if (!b || !this.raid || this.raid.phase !== 'boss' || !b.descended) return
+    b.hp = Math.max(0, b.hp - n)
+    b.flash = 0.7
+    this.spawnBurst(new THREE.Vector3(b.group.position.x, b.group.position.y - 4.5, b.group.position.z))
+    if (b.hp <= 0) this.killBoss()
+  }
+
+  private killBoss() {
+    const b = this.boss
+    if (!b) return
+    const p = b.group.position.clone()
+    for (let i = 0; i < 6; i++) this.spawnBurst(new THREE.Vector3(p.x + (Math.random() - 0.5) * 18, p.y + (Math.random() - 0.5) * 8, p.z + (Math.random() - 0.5) * 18))
+    this.onBossDeath?.(p)
+    this.root.remove(b.group)
+    this.boss = null
+    if (this.raid) { this.raid.phase = 'cleared'; this.raid.active = false }
   }
 
   /** Explosion when a raid alien dies: a flash sphere + an expanding shock ring. */
@@ -854,6 +929,7 @@ export class Events {
     this.beamGeo?.dispose()
     this.burstGeo?.dispose()
     this.burstRingGeo?.dispose()
+    for (const g of this.bossGeos) g.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }
 }

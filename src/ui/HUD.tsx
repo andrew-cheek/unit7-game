@@ -223,10 +223,22 @@ export function HUD({
       {hud.raid && !hud.minigame && !hideTopCenter && (
         <div style={{ ...raidStyle, top: touch ? 'calc(env(safe-area-inset-top) + 120px)' : '54px' }}>
           <span style={{ color: '#ff5a6a' }}>⚠ CITY RAID</span>
-          <span style={{ margin: '0 10px', color: NEON.dim }}>WAVE {Math.max(1, hud.raid.wave)}/{hud.raid.waves}</span>
-          <span style={{ color: hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
-            {hud.raid.incoming ? 'NEXT WAVE INCOMING' : `${hud.raid.alive} HOSTILE${hud.raid.alive === 1 ? '' : 'S'} LEFT`}
+          {hud.raid.boss ? (
+            <span style={{ margin: '0 10px', color: '#ffd24a', fontWeight: 700 }}>MOTHERSHIP</span>
+          ) : (
+            <span style={{ margin: '0 10px', color: NEON.dim }}>WAVE {Math.max(1, hud.raid.wave)}/{hud.raid.waves}</span>
+          )}
+          <span style={{ color: hud.raid.boss ? '#ffd24a' : hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
+            {hud.raid.boss ? 'HIT THE CORE' : hud.raid.incoming ? 'NEXT WAVE INCOMING' : `${hud.raid.alive} HOSTILE${hud.raid.alive === 1 ? '' : 'S'} LEFT`}
           </span>
+          {hud.raid.boss && (
+            <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: NEON.dim, fontSize: 10 }}>CORE</span>
+              <div style={{ width: 120, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
+                <div style={{ width: `${Math.round((hud.raid.boss.hp / hud.raid.boss.hpMax) * 100)}%`, height: '100%', background: '#ffd24a', boxShadow: '0 0 8px #ff8a3c', transition: 'width 0.15s linear' }} />
+              </div>
+            </div>
+          )}
           <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: NEON.dim, fontSize: 10 }}>SHIELD</span>
             <div style={{ width: 120, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
