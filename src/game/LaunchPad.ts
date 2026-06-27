@@ -146,8 +146,8 @@ export class LaunchPad {
     const spireMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4 }))
     // [x, z, footprint, height] - kept to the back hemisphere so the dive view stays open.
     const specs: [number, number, number, number][] = [
-      // Flank the hero factory tower (in front) for framing...
-      [-60, 74, 17, 124], [58, 80, 18, 142],
+      // Frame the front-left factory: one behind it, one across to the right.
+      [-94, 60, 17, 124], [56, 70, 18, 142],
       // ...with a deeper skyline spread around the rest of the sky.
       [-40, -94, 22, 132], [40, -100, 18, 168], [-62, -52, 17, 104],
       [60, -58, 19, 120], [-82, -10, 14, 82], [80, -16, 15, 90],
@@ -227,11 +227,11 @@ export class LaunchPad {
     const low = config.tier.name === 'low'
     const W = 32, D = 18, FH = 12
     const floors = low ? 2 : 4
-    // In FRONT of the deck (the way you face at spawn), beyond the rim, rotated to
-    // face you - so the towering glass plant is the first thing you see and you dive
-    // down past its face. Front face ~ z 57 (> rim 50) so it never overlaps the deck.
-    const cz = 66
-    const g = new THREE.Group(); g.position.set(0, 0, cz); g.rotation.y = Math.PI
+    // Off to the FRONT-LEFT and beyond the rim, angled to face the deck - so the
+    // centred player robot doesn't block it and you can take in the whole glass
+    // plant beside you. Far enough out that it never overlaps the deck.
+    const cx = -52, cz = 54
+    const g = new THREE.Group(); g.position.set(cx, 0, cz); g.rotation.y = Math.atan2(-cx, -cz) // face the deck centre
 
     const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0xe6ebf4, metalness: 0.5, roughness: 0.4 }))
     const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x141d30, metalness: 0.75, roughness: 0.35, emissive: 0x0a2236, emissiveIntensity: 0.4 }))
