@@ -278,6 +278,36 @@ export class Vehicles {
     return out
   }
 
+  // Vehicles temporarily lent up to the floating launch pad (so you can drive one
+  // off the edge). Restored to where they were parked when the pad ends.
+  private padLent: { v: Vehicle; pos: THREE.Vector3 }[] = []
+
+  /** Move a hovercar + speeder up onto the launch pad at the given spots. */
+  lendToPad(spots: { kind: VehicleKind; pos: THREE.Vector3; yaw: number }[]) {
+    for (const s of spots) {
+      const v = this.list.find((x) => x.kind === s.kind && !this.padLent.some((p) => p.v === x))
+      if (!v) continue
+      this.padLent.push({ v, pos: v.position.clone() })
+      v.position.copy(s.pos)
+      v.yaw = s.yaw
+      v.velocity.set(0, 0, 0)
+      v.model.group.position.copy(v.position)
+      v.model.group.visible = true
+    }
+  }
+
+  /** Return lent vehicles to where they were (skip one still in use, e.g. the one
+   *  you drove off the edge - it's handled by the dive). */
+  returnFromPad(except?: Vehicle | null) {
+    for (const { v, pos } of this.padLent) {
+      if (v === except) continue
+      v.position.copy(pos)
+      v.velocity.set(0, 0, 0)
+      v.model.group.position.copy(pos)
+    }
+    this.padLent.length = 0
+  }
+
   /** The piloted vehicle's world position (camera focus). */
   get focus(): THREE.Vector3 | null {
     return this.current?.position ?? null
