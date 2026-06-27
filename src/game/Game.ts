@@ -365,6 +365,15 @@ export class Game {
         this.landingFx.trigger(pos, 0xffb060, strength > 0.6)
         if (strength > 0.3) { this.audio.play('explosion'); vibrate(Math.round(20 + strength * 50)) }
       },
+      onPickup: (value, pos) => {
+        this.addCredits(value)
+        this.hud.banner = `METEORITE  +${value}c`
+        this.bannerTimer = 1.6
+        this.audio.play('capture')
+        this.missiles.shockwave({ x: pos.x, y: pos.y + 1, z: pos.z }, 0x9bff6a, 2.4, 0.4)
+        this.fxPool.puff(pos.x, pos.y + 1, pos.z, { color: 0x9bff6a, count: 5, spread: 1, rise: 2.5, ttl: 0.8, scale: 0.6, opacity: 0.7, additive: true })
+        vibrate(20)
+      },
     }))
     // Mars dust devils: rust-coloured swirls roaming the surface. Mars-only.
     // Walk into one and its updraft flings you up (handy for the high shards).
