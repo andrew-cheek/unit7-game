@@ -46,6 +46,9 @@ import { NeonFlora } from './NeonFlora'
 import { GlowMotes } from './GlowMotes'
 import { SkyFlock } from './SkyFlock'
 import { StepRipples } from './StepRipples'
+import { SpeedRibbons } from './SpeedRibbons'
+import { HoloBillboards } from './HoloBillboards'
+import { NightFireworks } from './NightFireworks'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -458,6 +461,21 @@ export class Game {
       grounded: () => this.player.grounded,
       speed: () => this.player.speed,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // Neon speed-trail ribbons that stream off you when moving fast (all zones).
+    this.systems.register(new SpeedRibbons(this.engine.scene, {
+      focus: () => this.player.position,
+      speed: () => this.player.speed,
+      yaw: () => this.player.yaw,
+    }))
+    // Holographic ad panels hovering high over the neon city.
+    this.systems.register(new HoloBillboards(this.engine.scene, {
+      focus: () => this.focus,
+    }))
+    // Firework bursts over the city at night.
+    this.systems.register(new NightFireworks(this.engine.scene, {
+      focus: () => this.focus,
+      dayFactor: () => this.world.dayFactor,
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
