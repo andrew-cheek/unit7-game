@@ -39,6 +39,7 @@ import { GrindRails } from './GrindRails'
 import { MeteorShower } from './MeteorShower'
 import { DustDevils } from './DustDevils'
 import { Aurora } from './Aurora'
+import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -390,6 +391,11 @@ export class Game {
     // out at dawn. Earth-only ambient set dressing.
     this.systems.register(new Aurora(this.engine.scene, {
       dayFactor: () => this.world.dayFactor,
+    }))
+    // Off-world wildlife you can net: lunar drifters / Mars crawlers register as
+    // Capturables so the existing net + missiles catch them. Moon/Mars-gated.
+    this.systems.register(new OffworldCritters(this.engine.scene, this.capturables, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
