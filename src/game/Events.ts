@@ -25,6 +25,7 @@ interface Alien {
   cap: Capturable
   boarding: boolean // walking back to a departing ship to "board" and vanish
   invader: boolean // part of the sunrise invasion: chases + lobs water balloons
+  raid: boolean // part of the scripted city-raid waves you repel after the skydive
   throwTimer: number
 }
 interface Dropship {
@@ -307,6 +308,7 @@ export class Events {
     this.updateCommuters(dt)
     this.updateShip(dt)
     this.updateInvasion(dt)
+    this.updateRaid(dt)
     this.updateAliens(dt)
   }
 
@@ -596,20 +598,23 @@ export class Events {
     return n
   }
 
-  private spawnAlien(x: number, z: number, invader = false) {
-    const model = invader ? createAlien({ color: 0x6a3bd0, eye: 0xff4d4d }) : createAlien()
+  private spawnAlien(x: number, z: number, invader = false, raid = false) {
+    const model = raid ? createAlien({ color: 0xc8203a, eye: 0xffd24a }) : invader ? createAlien({ color: 0x6a3bd0, eye: 0xff4d4d }) : createAlien()
+    if (raid) model.group.scale.setScalar(1.15)
     const pos = new THREE.Vector3(x, this.physics.sampleGround(x, z, 40)?.y ?? 0, z)
     model.group.position.copy(pos)
     this.root.add(model.group)
+    if (raid) this.spawnBeam(pos)
     const alien: Alien = {
       pos,
       vel: new THREE.Vector3(),
       yaw: 0,
-      target: invader ? this.playerPos.clone() : this.clearPoint(70),
+      target: invader || raid ? this.playerPos.clone() : this.clearPoint(70),
       model,
       alive: true,
       boarding: false,
-      invader,
+      invader: invader || raid,
+      raid,
       throwTimer: randRange(6, 14),
       cap: {
         position: pos,
@@ -617,12 +622,99 @@ export class Events {
         capture: () => {
           alien.alive = false
           alien.cap.alive = false
-          return invader ? 200 : 120
+          return raid ? 150 : invader ? 200 : 120
         },
       },
     }
     this.aliens.push(alien)
     this.capturables.push(alien.cap)
+  }
+
+  // --- City raid: an escalating wave assault you repel after the skydive --------
+
+  private raid: {
+    active: boolean; center: THREE.Vector3; wave: number; waves: number
+    phase: 'incoming' | 'fight' | 'cleared'; timer: number; toSpawn: number; spawnGap: number
+  } | null = null
+  private raidBeams: { mesh: THREE.Mesh; t: number }[] = []
+  private beamGeo?: THREE.CylinderGeometry
+  private beamMat?: THREE.MeshBasicMaterial
+
+  /** Kick off the raid: `waves` escalating waves of red invaders that home in on
+   *  the player, spawned around `center` (the landing plaza). */
+  startRaid(center: THREE.Vector3, waves = 3) {
+    if (this.raid) return
+    this.raid = { active: true, center: center.clone(), wave: 0, waves, phase: 'incoming', timer: 1.4, toSpawn: 0, spawnGap: 0 }
+  }
+
+  /** Live raid state for the HUD, or null when no raid is running. */
+  get raidState(): { active: boolean; wave: number; waves: number; alive: number; phase: 'incoming' | 'fight' | 'cleared'; cleared: boolean } | null {
+    const R = this.raid
+    if (!R) return null
+    return { active: R.active, wave: R.wave, waves: R.waves, alive: this.raidAlive(), phase: R.phase, cleared: R.phase === 'cleared' }
+  }
+
+  /** Tear down the raid, removing any stragglers. */
+  stopRaid() {
+    if (!this.raid) return
+    for (const a of this.aliens) if (a.raid && a.alive) { a.alive = false; a.cap.alive = false }
+    this.raid = null
+  }
+
+  private raidAlive() {
+    let n = 0
+    for (const a of this.aliens) if (a.alive && a.raid) n++
+    return n
+  }
+
+  private waveSize(wave: number) {
+    const base = config.tier.name === 'low' ? 3 : config.tier.name === 'medium' ? 4 : 5
+    return base + (wave - 1) * 2
+  }
+
+  private updateRaid(dt: number) {
+    // fade out spawn beams
+    for (let i = this.raidBeams.length - 1; i >= 0; i--) {
+      const b = this.raidBeams[i]
+      b.t -= dt
+      const k = Math.max(0, b.t / 0.5)
+      ;(b.mesh.material as THREE.MeshBasicMaterial).opacity = k * 0.8
+      b.mesh.scale.x = b.mesh.scale.z = 0.4 + (1 - k) * 1.4
+      if (b.t <= 0) { this.root.remove(b.mesh); this.raidBeams.splice(i, 1) }
+    }
+    const R = this.raid
+    if (!R || !R.active) return
+    if (R.phase === 'incoming') {
+      R.timer -= dt
+      if (R.timer <= 0) { R.wave++; R.phase = 'fight'; R.toSpawn = this.waveSize(R.wave); R.spawnGap = 0 }
+      return
+    }
+    if (R.phase === 'fight') {
+      if (R.toSpawn > 0) {
+        R.spawnGap -= dt
+        if (R.spawnGap <= 0) {
+          const a = Math.random() * Math.PI * 2
+          const r = 16 + Math.random() * 16
+          this.spawnAlien(R.center.x + Math.cos(a) * r, R.center.z + Math.sin(a) * r, true, true)
+          R.toSpawn--
+          R.spawnGap = 0.45
+        }
+      } else if (this.raidAlive() === 0) {
+        if (R.wave >= R.waves) { R.phase = 'cleared'; R.active = false }
+        else { R.phase = 'incoming'; R.timer = 2.8 }
+      }
+    }
+  }
+
+  /** A bright red column flashing in where a raid alien teleports onto the deck. */
+  private spawnBeam(pos: THREE.Vector3) {
+    if (!this.beamGeo) { this.beamGeo = new THREE.CylinderGeometry(0.9, 0.9, 12, 10, 1, true); }
+    if (!this.beamMat) { this.beamMat = new THREE.MeshBasicMaterial({ color: 0xff3b52, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }); this.ownedMats.push(this.beamMat) }
+    const m = this.beamMat.clone(); this.ownedMats.push(m)
+    const mesh = new THREE.Mesh(this.beamGeo, m)
+    mesh.position.set(pos.x, pos.y + 6, pos.z)
+    this.root.add(mesh)
+    this.raidBeams.push({ mesh, t: 0.5 })
   }
 
   private updateAliens(dt: number) {
@@ -703,6 +795,7 @@ export class Events {
     for (const c of this.commuters) c.model.dispose()
     for (const a of this.aliens) a.model.dispose()
     for (const s of this.dropships) s.model.dispose()
+    this.beamGeo?.dispose()
     this.ownedMats.forEach((m) => m.dispose())
   }
 }

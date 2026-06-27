@@ -218,6 +218,17 @@ export function HUD({
         </div>
       )}
 
+      {/* city-raid wave tracker (post-skydive assault) */}
+      {hud.raid && !hud.minigame && !hideTopCenter && (
+        <div style={{ ...raidStyle, top: touch ? '86px' : '54px' }}>
+          <span style={{ color: '#ff5a6a' }}>⚠ CITY RAID</span>
+          <span style={{ margin: '0 10px', color: NEON.dim }}>WAVE {Math.max(1, hud.raid.wave)}/{hud.raid.waves}</span>
+          <span style={{ color: hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
+            {hud.raid.incoming ? 'NEXT WAVE INCOMING' : `${hud.raid.alive} HOSTILE${hud.raid.alive === 1 ? '' : 'S'} LEFT`}
+          </span>
+        </div>
+      )}
+
       {/* contextual prompt */}
       {hud.prompt && (
         <div style={promptStyle}>
@@ -651,6 +662,21 @@ const promptStyle: CSSProperties = {
   letterSpacing: '0.08em',
   boxShadow: '0 0 20px rgba(39,231,255,0.25)',
 }
+const raidStyle: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  padding: '5px 16px',
+  whiteSpace: 'nowrap',
+  background: 'rgba(20,4,8,0.72)',
+  border: '1px solid rgba(255,90,106,0.55)',
+  borderRadius: 999,
+  font: '800 12px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.12em',
+  boxShadow: '0 0 18px rgba(255,60,82,0.32)',
+  zIndex: 6,
+}
+
 const objectiveStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
