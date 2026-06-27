@@ -39,6 +39,7 @@ import { GrindRails } from './GrindRails'
 import { MeteorShower } from './MeteorShower'
 import { DustDevils } from './DustDevils'
 import { Aurora } from './Aurora'
+import { SkyLeviathans } from './SkyLeviathans'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -391,6 +392,10 @@ export class Game {
     // out at dawn. Earth-only ambient set dressing.
     this.systems.register(new Aurora(this.engine.scene, {
       dayFactor: () => this.world.dayFactor,
+    }))
+    // Sky leviathans: colossal glowing creatures that drift high over the city.
+    this.systems.register(new SkyLeviathans(this.engine.scene, {
+      focus: () => this.focus,
     }))
     // Off-world wildlife you can net: lunar drifters / Mars crawlers register as
     // Capturables so the existing net + missiles catch them. Moon/Mars-gated.
