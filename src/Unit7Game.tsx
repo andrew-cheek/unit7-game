@@ -184,8 +184,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           }}
         />
       )}
-      {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && <OnlinePill n={hud.online} />}
-      {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && <Leaderboard rows={hud.leaderboard} />}
+      {mpJoined && hud && hud.online > 1 && !hud.intro && !hud.minigame && !hud.onPlatform && <OnlinePill n={hud.online} />}
+      {mpJoined && hud && hud.leaderboard.length > 0 && !hud.intro && !hud.minigame && !hud.onPlatform && <Leaderboard rows={hud.leaderboard} />}
       {hud?.intro && hud.drop && (
         <DropOverlay
           drop={hud.drop}

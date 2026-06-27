@@ -91,7 +91,7 @@ export function HUD({
         {touch && !hud.paused && (
           <button style={{ ...pillBtn, borderColor: 'rgba(255,43,208,0.5)', boxShadow: '0 0 14px rgba(255,43,208,0.2)' }} onClick={onPause}>PAUSE ❚❚</button>
         )}
-        {!hud.minigame && (
+        {!hud.minigame && !hud.onPlatform && (
           <button
             style={{ ...pillBtn, borderColor: statsOpen ? 'rgba(155,255,77,0.6)' : 'rgba(39,231,255,0.5)', color: statsOpen ? NEON.lime : 'rgba(223,238,255,0.92)' }}
             onClick={() => setStatsOpen((s) => !s)}
@@ -101,8 +101,9 @@ export function HUD({
         )}
       </div>
 
-      {/* top-left meters: always-on action/alert chips; full meters behind STATS */}
-      <div style={{ ...panel, ...metersPos }}>
+      {/* top-left meters: always-on action/alert chips; full meters behind STATS.
+          Hidden during the launch-pad opening to keep it clean. */}
+      {!hud.onPlatform && <div style={{ ...panel, ...metersPos }}>
         {hud.powerup && (
           <div style={{ ...chip, color: NEON.cyan, borderColor: NEON.cyan }}>
             {hud.powerup.kind.toUpperCase()} {Math.ceil(hud.powerup.remaining)}s
@@ -118,10 +119,10 @@ export function HUD({
             <Bar label="FUEL" value={hud.fuel} color={NEON.cyan} />
           </>
         )}
-      </div>
+      </div>}
 
-      {/* top-right: the map is always shown; the stat readouts collapse behind STATS */}
-      <div style={{ ...panel, ...statsPos, alignItems: 'flex-end' }}>
+      {/* top-right: map + stat readouts. Hidden during the launch-pad opening. */}
+      {!hud.onPlatform && <div style={{ ...panel, ...statsPos, alignItems: 'flex-end' }}>
         <Radar hud={hud} />
         {statsOpen && (
           <>
@@ -140,7 +141,7 @@ export function HUD({
             </div>
           </>
         )}
-      </div>
+      </div>}
 
       {/* street-race status (top-center, above the objective) */}
       {hud.race && hud.race.state !== 'idle' && !hud.minigame && (
@@ -245,15 +246,17 @@ export function HUD({
         <div style={clickHint}>CLICK TO CAPTURE MOUSE · OR DRAG TO LOOK</div>
       )}
 
-      {/* control hints (desktop) */}
+      {/* control hints (desktop). On the launch pad, just the essentials. */}
       {!touch && (
         <div style={hints}>
-          WASD move · SPACE fly (tap again = boost) · SHIFT sprint · Q grapple · O chute (tap again = CUT) · C board · G enter/ride · H capture · F boost · T transform · J arcade · ESC = pause + all controls
+          {hud.onPlatform
+            ? 'WASD move · drag to look · walk to the edge and step off'
+            : 'WASD move · SPACE fly (tap again = boost) · SHIFT sprint · Q grapple · O chute (tap again = CUT) · C board · G enter/ride · H capture · F boost · T transform · J arcade · ESC = pause + all controls'}
         </div>
       )}
 
       {/* control hints (touch) — desktop hides its legend on touch, so mirror a short one */}
-      {touch && !hud.paused && (
+      {touch && !hud.paused && !hud.onPlatform && (
         <div style={hints}>
           left stick move · drag right to look · tap actions · PAUSE top-left
         </div>
@@ -262,17 +265,17 @@ export function HUD({
       {/* pilots roster: open profiles + stats for yourself and everyone online.
           On touch they move to the bottom-center so they clear the thumb-stick
           (bottom-left) and the action cluster (bottom-right) in any orientation. */}
-      {!hud.minigame && !hud.intro && (
+      {!hud.minigame && !hud.intro && !hud.onPlatform && (
         <button
-          style={touch ? { ...pilotsBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-104%)' } : pilotsBtn}
+          style={touch ? { ...pilotsBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-112%)' } : pilotsBtn}
           onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}
         >
           PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
         </button>
       )}
-      {!hud.minigame && !hud.intro && (
+      {!hud.minigame && !hud.intro && !hud.onPlatform && (
         <button
-          style={touch ? { ...storeBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(4%)' } : storeBtn}
+          style={touch ? { ...storeBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(12%)' } : storeBtn}
           onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}
         >
           STORE
@@ -807,7 +810,7 @@ const pilotsBtn: CSSProperties = {
 }
 const storeBtn: CSSProperties = {
   position: 'absolute',
-  right: 110,
+  right: 128, // clear of PILOTS (which widens to "PILOTS · N" online)
   bottom: 14,
   pointerEvents: 'auto',
   cursor: 'pointer',

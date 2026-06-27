@@ -592,10 +592,12 @@ export class Game {
     // warp while you're up here.
     this.hud.intro = false
     this.hud.onPlatform = true
-    this.hud.banner = 'ROBOT FACTORY · DROP ZONE'
-    this.bannerTimer = 2.6
-    this.hud.missionPopup = { title: 'TO THE DROP ZONE', body: 'You\'re a freshly-built unit on the factory launch platform, high above the city. Walk (WASD / the stick) past the assembly line to the glowing neon arrow at the edge and step or jump off - that starts your skydive down. Every unit coming off the line is doing exactly that.' }
-    this.missionPopupTimer = 7
+    // Keep the opening clean: the in-world DROP ZONE sign + the one-line objective
+    // carry it. No center banner (it just doubled the sign) and no story card.
+    this.hud.banner = null
+    this.bannerTimer = 0
+    this.hud.missionPopup = null
+    this.missionPopupTimer = 0
     if (!this.multiplayerEnabled) this.emitGameStart('solo') // controls live now (solo); MP starts on the join pick
   }
 
@@ -2032,7 +2034,7 @@ export class Game {
       this.heroLight.intensity = 22
       this.heroLight.color.setHex(0x9fd8ff)
     }
-    this.hud.objective = this.launchPad ? 'Walk to the arrow and step off the edge to dive in' : this.missions.update({
+    this.hud.objective = this.launchPad ? 'Step off the edge to skydive' : this.missions.update({
       zone: this.zone,
       playerPos: this.player.position,
       captured: this.hud.captured,
