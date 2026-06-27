@@ -80,6 +80,8 @@ export interface HudState {
   // non-null during the playable drop-in opening: altimeter, speed, phase + a
   // contextual hint, and whether the chute can be deployed yet.
   drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land' | 'crash'; hint: string | null; canDeploy: boolean; canTrick: boolean; result: string | null; place: string | null; boomCharge: number; combo: number; comboFade: number; showJetTip: boolean; danger: boolean } | null
+  // City-raid wave tracker, shown after the skydive while repelling the assault.
+  raid: { wave: number; waves: number; alive: number; incoming: boolean } | null
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */

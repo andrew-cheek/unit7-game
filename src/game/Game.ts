@@ -169,6 +169,9 @@ export class Game {
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
   private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
   private dropVehicle: Vehicle | null = null // the car/bike you rode off the pad edge, falling with the dive
+  private raidActive = false // the post-skydive city raid is live
+  private raidDone = false // the opening raid only ever happens once
+  private raidWaveShown = 0 // last wave number announced via banner
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -519,6 +522,7 @@ export class Game {
       warp: { charge01: 0, ready: false, active: null, menu: false },
       race: { ...this.raceHud },
       drop: null,
+      raid: null,
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -769,11 +773,83 @@ export class Game {
       this.travelCooldown = 3
       this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Follow the green beacon to your objective - the OBJECTIVE readout shows the distance.' }
       this.missionPopupTimer = 6
+      // FIRST time you touch down on Earth, you land straight into a city raid:
+      // board the mech and repel the waves. Overrides the calm "ONLINE" popup.
+      if (!this.raidDone && this.zone === 'earth') this.beginCityRaid(land)
     }
     // On a restart replay the solo/multiplayer choice was already made, so
     // re-announce game_start; on a first solo run with no join prompt, begin now.
     if (this.startedMode) this.emitGameStart(this.startedMode)
     else if (!this.multiplayerEnabled) this.emitGameStart('solo')
+  }
+
+  /** The hot landing: you touch down into an active alien raid on the plaza. A free
+   *  mech is set down right beside you - board it and wipe out the escalating waves. */
+  private beginCityRaid(land: THREE.Vector3) {
+    this.raidDone = true
+    this.raidActive = true
+    this.raidWaveShown = 0
+    // Set the free starter mech down a few steps away so it's an obvious grab.
+    const mech = this.vehicles.list.find((v) => v.kind === 'mechM')
+    if (mech) {
+      const mx = land.x + 11, mz = land.z + 3
+      const gy = this.physics.sampleGround(mx, mz, 80)?.y ?? land.y
+      mech.position.set(mx, gy + mech.hoverHeight, mz)
+      mech.home.copy(mech.position)
+      mech.yaw = Math.atan2(land.x - mx, land.z - mz)
+      mech.model.group.position.copy(mech.position)
+      mech.model.group.visible = true
+    }
+    this.events.startRaid(land, 3)
+    this.landingFx.trigger(land, 0xff3b52, false) // red alert shockwave
+    this.audio.play('portal')
+    vibrate(60)
+    this.hud.banner = 'CITY UNDER RAID'
+    this.bannerTimer = 2.5
+    this.hud.missionPopup = { title: 'CITY UNDER RAID', body: 'Invaders are swarming the plaza! Board the MECH (G) and wipe out every wave - fire missiles with the CAPTURE button.' }
+    this.missionPopupTimer = 6
+  }
+
+  private raidObjective(): string {
+    const s = this.events.raidState
+    if (!s) return 'Repel the raid'
+    const inMech = !!this.vehicles.current && isWalker(this.vehicles.current.kind)
+    if (!inMech) return 'Board the MECH and repel the raid'
+    if (s.phase === 'incoming') return `Wave ${s.wave + 1} incoming...`
+    return `Repel WAVE ${s.wave}/${s.waves} - ${s.alive} hostiles`
+  }
+
+  private updateCityRaid() {
+    if (!this.raidActive) return
+    const s = this.events.raidState
+    if (!s) { this.raidActive = false; this.hud.raid = null; return }
+    this.hud.raid = { wave: s.wave, waves: s.waves, alive: s.alive, incoming: s.phase === 'incoming' }
+    // Announce each new wave with a banner + sting.
+    if (s.phase === 'fight' && s.wave !== this.raidWaveShown) {
+      this.raidWaveShown = s.wave
+      this.hud.banner = `WAVE ${s.wave} / ${s.waves}`
+      this.bannerTimer = 1.8
+      this.audio.play('objective')
+      vibrate(30)
+    }
+    if (s.cleared) this.endCityRaid()
+  }
+
+  private endCityRaid() {
+    this.raidActive = false
+    this.events.stopRaid()
+    this.hud.raid = null
+    const credits = 250, xp = 120
+    this.addCredits(credits)
+    this.awardXp(xp)
+    this.hud.banner = 'CITY SAVED'
+    this.bannerTimer = 3.5
+    this.hud.missionPopup = { title: 'CITY SAVED', body: `You held the line, Unit 7. +${credits} credits. The city is yours - follow the beacon to your first objective.` }
+    this.missionPopupTimer = 6
+    this.audio.play('objective')
+    vibrate(80)
+    this.landingFx.trigger(this.player.position, 0x9dff5a, true)
+    this.world.pushHeadline('UNIT 7 REPELS RAID — CITY SAFE')
   }
 
   /** GAMES button / key: warp the player to right in front of the arcade, facing
@@ -2122,7 +2198,7 @@ export class Game {
       this.heroLight.intensity = 22
       this.heroLight.color.setHex(0x9fd8ff)
     }
-    this.hud.objective = this.launchPad ? 'Step off the edge to skydive' : this.missions.update({
+    this.hud.objective = this.launchPad ? 'Step off the edge to skydive' : this.raidActive ? this.raidObjective() : this.missions.update({
       zone: this.zone,
       playerPos: this.player.position,
       captured: this.hud.captured,
@@ -2148,6 +2224,7 @@ export class Game {
     })
 
     const ambient = onEarth && !this.launchPad // skip ground crowds while up on the launch pad
+    if (this.raidActive) this.updateCityRaid()
     if (ambient) this.npcs.update(dt, this.player.position)
     if (ambient) this.events.update(dt, this.player.position)
     if (ambient) this.patrols.update(dt)
