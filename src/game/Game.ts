@@ -647,7 +647,7 @@ export class Game {
       ])
     }
     this.input.yaw = this.launchPad.spawnYaw
-    this.input.pitch = 0.2 // a higher, more elevated establishing angle over the deck
+    this.input.pitch = 0.15 // raised from the old cramped 0.06, but still framing the tower ahead
     this.player.resetInterp()
     this.camera.snap(this.player.position)
     this.input.setLockEnabled(true)

@@ -84,7 +84,8 @@ export class LaunchPad {
     this.buildDeck()
     this.buildConveyor()
     this.buildForgeMachine()
-    this.buildGantry()
+    // (the overhead gantry was retired - the glass tower's bays now show the
+    //  assembly, and the gantry only cluttered the sightline to it)
     this.buildArms()
     this.buildSign()
     this.buildProps()
@@ -145,8 +146,11 @@ export class LaunchPad {
     const spireMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4 }))
     // [x, z, footprint, height] - kept to the back hemisphere so the dive view stays open.
     const specs: [number, number, number, number][] = [
-      [-36, -94, 22, 132], [36, -100, 18, 168], [-60, -60, 17, 104],
-      [58, -66, 19, 120], [-80, -18, 14, 82], [78, -24, 15, 90],
+      // Flank the hero factory tower (in front) for framing...
+      [-60, 74, 17, 124], [58, 80, 18, 142],
+      // ...with a deeper skyline spread around the rest of the sky.
+      [-40, -94, 22, 132], [40, -100, 18, 168], [-62, -52, 17, 104],
+      [60, -58, 19, 120], [-82, -10, 14, 82], [80, -16, 15, 90],
     ]
     const list = low ? specs.slice(0, 4) : specs
     const baseY = -54
@@ -221,20 +225,24 @@ export class LaunchPad {
    *  "UNIT 7 ROBOTICS" sign crowns it, and neon bands ring every floor. */
   private buildFactoryTower() {
     const low = config.tier.name === 'low'
-    const W = 30, D = 17, FH = 13
-    const floors = low ? 2 : 3
-    const cz = -64 // behind the deck rim (back edge ~ -50), so it never blocks the deck
-    const g = new THREE.Group(); g.position.set(0, 0, cz)
+    const W = 32, D = 18, FH = 12
+    const floors = low ? 2 : 4
+    // In FRONT of the deck (the way you face at spawn), beyond the rim, rotated to
+    // face you - so the towering glass plant is the first thing you see and you dive
+    // down past its face. Front face ~ z 57 (> rim 50) so it never overlaps the deck.
+    const cz = 66
+    const g = new THREE.Group(); g.position.set(0, 0, cz); g.rotation.y = Math.PI
 
     const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0xe6ebf4, metalness: 0.5, roughness: 0.4 }))
     const darkMat = this.own(new THREE.MeshStandardMaterial({ color: 0x141d30, metalness: 0.75, roughness: 0.35, emissive: 0x0a2236, emissiveIntensity: 0.4 }))
-    const glassMat = this.own(new THREE.MeshStandardMaterial({ color: 0x8fd6ff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.16, side: THREE.DoubleSide, emissive: 0x2a6ea0, emissiveIntensity: 0.25 }))
+    const glassMat = this.own(new THREE.MeshStandardMaterial({ color: 0x8fd6ff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.15, side: THREE.DoubleSide, emissive: 0x2a6ea0, emissiveIntensity: 0.25 }))
     const floorMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2740, metalness: 0.6, roughness: 0.4, emissive: 0x0c2236, emissiveIntensity: 0.4 }))
-    const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a]
+    const crateMat = this.own(new THREE.MeshStandardMaterial({ color: 0x24314c, metalness: 0.6, roughness: 0.45, emissive: 0x16324f, emissiveIntensity: 0.5 }))
+    const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a]
 
-    // Podium base.
+    // Podium + structural base rising from far below the deck.
     const podium = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W + 6, 4, D + 6)), darkMat); podium.position.set(0, -56, 0); g.add(podium)
-    const shaft = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W + 2, 52, D + 2)), darkMat); shaft.position.set(0, -28, 0); g.add(shaft) // structural base rising from below
+    const shaft = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W + 2, 52, D + 2)), darkMat); shaft.position.set(0, -28, 0); g.add(shaft)
 
     // Corner pillars running the full visible height.
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -246,38 +254,48 @@ export class LaunchPad {
     for (let f = 0; f < floors; f++) {
       const y0 = f * FH
       const tint = tints[f % tints.length]
-      // Floor + ceiling slabs.
       const slab = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W, 0.7, D)), floorMat); slab.position.y = y0 + 0.35; g.add(slab)
-      // Glass shell (you see through it into the bay).
       const glass = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W - 0.6, FH - 1, D - 0.6)), glassMat); glass.position.y = y0 + FH / 2; g.add(glass)
       // Neon band ringing the floor.
       const bandMat = this.own(new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
       this.towerStripMats.push(bandMat)
       for (const ey of [y0 + 0.9, y0 + FH - 0.6]) {
-        for (const [w, d, ox, oz, rot] of [[W, 0.001, 0, D / 2, 0], [W, 0.001, 0, -D / 2, 0], [D, 0.001, W / 2, 0, Math.PI / 2], [D, 0.001, -W / 2, 0, Math.PI / 2]] as [number, number, number, number, number][]) {
+        for (const [w, , ox, oz, rot] of [[W, 0.001, 0, D / 2, 0], [W, 0.001, 0, -D / 2, 0], [D, 0.001, W / 2, 0, Math.PI / 2], [D, 0.001, -W / 2, 0, Math.PI / 2]] as [number, number, number, number, number][]) {
           const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w, 0.22, 0.22)), bandMat); bar.position.set(ox, ey, oz); bar.rotation.y = rot; g.add(bar)
         }
       }
-      // Ceiling light strips inside.
-      for (const sx of [-W * 0.28, 0, W * 0.28]) {
+      // Ceiling light strips.
+      for (const sx of [-W * 0.3, 0, W * 0.3]) {
         const strip = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.1, D - 3)), this.own(new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0.8, fog: false })))
         strip.position.set(sx, y0 + FH - 1.2, 0); g.add(strip)
       }
-      // Back-wall holo screen.
-      const scr = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(5, 3)), this.own(new THREE.MeshBasicMaterial({ map: this.screenTexture(), toneMapped: false, transparent: true })))
-      scr.position.set(-W * 0.3, y0 + FH * 0.55, -D / 2 + 0.5); g.add(scr)
-      this.texs.push((scr.material as THREE.MeshBasicMaterial).map!)
+      // Wall holo screens.
+      for (const sx of [-W * 0.34, W * 0.34]) {
+        const scr = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(4.5, 2.8)), this.own(new THREE.MeshBasicMaterial({ map: this.screenTexture(), toneMapped: false, transparent: true })))
+        scr.position.set(sx, y0 + FH * 0.6, -D / 2 + 0.4); g.add(scr)
+        this.texs.push((scr.material as THREE.MeshBasicMaterial).map!)
+      }
+      // Floor conveyor with part crates riding it.
+      const beltMat = this.own(new THREE.MeshStandardMaterial({ color: 0x10182a, metalness: 0.6, roughness: 0.5, emissive: tint, emissiveIntensity: 0.25 }))
+      const belt = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(W - 4, 0.4, 2)), beltMat); belt.position.set(0, y0 + 1, D * 0.24); g.add(belt)
+      for (let c = 0; c < 4; c++) { const crate = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1.2, 1.2, 1.2)), crateMat); crate.position.set(-W / 2 + 4 + c * (W - 8) / 3, y0 + 1.85, D * 0.24); g.add(crate) }
+      // Parts bins stacked in a corner.
+      for (let s = 0; s < 3; s++) { const bin = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2, 1, 1.6)), crateMat); bin.position.set(-W / 2 + 2.4, y0 + 1 + s * 1.05, -D / 2 + 2); g.add(bin) }
+      // A rotating holographic blueprint of the unit.
+      const bpMat = this.own(new THREE.MeshBasicMaterial({ color: tint, wireframe: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const bp = new THREE.Group()
+      bp.add(new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.9, 1.2, 0.6)), bpMat))
+      const bpHead = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.6, 0.6, 0.6)), bpMat); bpHead.position.y = 1; bp.add(bpHead)
+      bp.scale.setScalar(1.4); bp.position.set(W * 0.36, y0 + FH * 0.45, -D * 0.18); g.add(bp); this.holos.push({ o: bp, sp: 0.6 })
 
-      // The robots being built: suspended units + welding arms, in 2 bays per floor.
-      const bays = low ? 1 : 2
+      // Robots being built: suspended units + welding arms across the bays.
+      const bays = low ? 1 : 3
       for (let bidx = 0; bidx < bays; bidx++) {
-        const bx = bays === 1 ? W * 0.12 : (bidx === 0 ? -W * 0.24 : W * 0.22)
-        const bot = this.makeSuspendedBot(tint); bot.scale.setScalar(1.15); bot.position.set(bx, y0 + FH * 0.5, 0.5); g.add(bot)
-        // A cable holding it from the ceiling.
-        const cable = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.06, 0.06, FH * 0.32, 5)), frameMat); cable.position.set(bx, y0 + FH * 0.82, 0.5); g.add(cable)
-        // Two welding arms flanking it.
-        g.add(this.makeBayArm(bx - 3, y0 + 0.7, 2.6, -1))
-        if (!low) g.add(this.makeBayArm(bx + 3, y0 + 0.7, -2.6, 1))
+        const bx = bays === 1 ? 0 : (bidx - 1) * W * 0.26
+        const bot = this.makeSuspendedBot(tint); bot.scale.setScalar(1.1); bot.position.set(bx, y0 + FH * 0.52, -0.6); g.add(bot)
+        const cable = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.06, 0.06, FH * 0.3, 5)), frameMat); cable.position.set(bx, y0 + FH * 0.84, -0.6); g.add(cable)
+        g.add(this.makeBayArm(bx - 2.6, y0 + 0.7, 2.4, -1))
+        if (!low) g.add(this.makeBayArm(bx + 2.6, y0 + 0.7, -2.4, 1))
       }
     }
 
@@ -508,13 +526,16 @@ export class LaunchPad {
   /** Neon DROP ZONE billboard + a big animated down-arrow at the ledge. */
   private buildSign() {
     const R = this.radius
+    // Sign sits just INSIDE the ledge (the glass tower now rises beyond it), a
+    // foreground "step off here" banner that doesn't fight the tower behind it.
+    const sz = R - 7
     const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.6, roughness: 0.4 }))
-    for (const sx of [-11, 11]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.8, 15, 0.8)), postMat); post.position.set(sx, 7.5, R + 5); this.group.add(post) }
+    for (const sx of [-10, 10]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.8, 12, 0.8)), postMat); post.position.set(sx, 6, sz); this.group.add(post) }
     const tex = this.signTex(); this.texs.push(tex)
-    const panel = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(26, 9)), this.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide })))
-    panel.position.set(0, 12.5, R + 5); panel.rotation.y = Math.PI; this.group.add(panel)
+    const panel = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(22, 7.5)), this.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide })))
+    panel.position.set(0, 9.5, sz); panel.rotation.y = Math.PI; this.group.add(panel)
     const frameMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, fog: false }))
-    for (const y of [17.4, 7.6]) { const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(27, 0.45, 0.45)), frameMat); bar.position.set(0, y, R + 5); this.group.add(bar) }
+    for (const y of [13.4, 5.8]) { const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(23, 0.4, 0.4)), frameMat); bar.position.set(0, y, sz); this.group.add(bar) }
     // Down-arrow chevrons flowing toward the drop.
     this.arrowMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
     const chevGeo = this.ownG(new THREE.ConeGeometry(2.6, 2.8, 4))
