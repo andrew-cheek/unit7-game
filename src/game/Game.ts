@@ -202,6 +202,7 @@ export class Game {
   // Data-shard discovery layer (instanced pickups across the city).
   private collectibles!: Collectibles
   private dustDevils!: DustDevils
+  private meteorShower!: MeteorShower
   // Style-combo scoring for expressive traversal (air / board / jet / glide).
   private traversal!: TraversalScore
   // Capture chain multiplier (rapid captures scale score + credits).
@@ -357,7 +358,7 @@ export class Game {
     this.player.setGrindSnap((x, y, z) => grindRails.querySnap(x, y, z))
     // Moon meteor shower: ambient spectacle that rains rock out of the lunar sky.
     // A near strike kicks the camera so it reads as physical. Moon-only.
-    this.systems.register(new MeteorShower(this.engine.scene, {
+    this.meteorShower = this.systems.register(new MeteorShower(this.engine.scene, {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       focus: () => this.focus,
       onImpact: (pos, strength) => {
@@ -2596,6 +2597,8 @@ export class Game {
     // Nearby uncollected data shards (capped) so the radar guides exploration in
     // every zone (Earth's city field and the Moon/Mars fields alike).
     this.collectibles.forEachNearby(px, pz, range, 8, (x, z) => add(x, z, 'powerup'))
+    // Rare meteorite fragments are time-limited, so flag them on the Moon radar.
+    if (this.zone === 'moon') this.meteorShower.forEachFragment((x, z) => add(x, z, 'powerup'))
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') for (const p of this.arcadePortals) add(p.pos.x, p.pos.z, 'portal')

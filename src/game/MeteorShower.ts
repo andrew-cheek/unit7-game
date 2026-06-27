@@ -124,6 +124,11 @@ export class MeteorShower implements GameSystem {
     scene.add(this.group)
   }
 
+  /** Visit each live meteorite fragment's XZ (for the radar). */
+  forEachFragment(cb: (x: number, z: number) => void) {
+    for (const fr of this.fragments) if (fr.active) cb(fr.pos.x, fr.pos.z)
+  }
+
   setZone(zone: Zone) {
     this.zone = zone
     this.group.visible = zone === 'moon'
