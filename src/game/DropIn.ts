@@ -42,6 +42,9 @@ export class DropIn {
   readonly group = new THREE.Group()
   done = false
   fade = 0
+  /** A vehicle model that rides the dive in place of the diver robot (set when you
+   *  drive off the launch pad). It tracks the diver's position/orientation. */
+  private rider: THREE.Object3D | null = null
   /** 0..1 how much altitude you had on canopy deploy (drives the reward). */
   chuteQuality = 0
   /** Optional target orbs threaded on the way down (small bonus). */
@@ -769,6 +772,20 @@ export class DropIn {
     this.onSfx?.('ring')
   }
 
+  /** Ride the dive in a vehicle: hide the diver robot and let `obj` track it. */
+  setRider(obj: THREE.Object3D | null) {
+    this.rider = obj
+    this.rb.group.visible = !obj
+  }
+
+  get riding() { return !!this.rider }
+
+  /** Bail out of the vehicle mid-dive: drop the rider, show the diver, keep falling. */
+  bail() {
+    this.rider = null
+    this.rb.group.visible = true
+  }
+
   private cutCanopy() {
     this.phase = 'dive'
     this.chuteRig.visible = false
@@ -991,6 +1008,12 @@ export class DropIn {
     // Bank into the turn (roll with moveX) while diving for a steered feel.
     const roll = diving ? clamp(this.steerX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
     this.diver.rotation.set(bodyPitch + flip, this.camHeading, roll)
+    // A vehicle rider tracks the diver: same position, a softened version of the
+    // dive tilt (a car shouldn't go fully nose-down), so it reads as plummeting.
+    if (this.rider) {
+      this.rider.position.copy(this.diver.position)
+      this.rider.rotation.set((bodyPitch + flip) * 0.45, this.camHeading, roll * 0.6)
+    }
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
     this.rb.setSteer?.(this.input.moveX, this.input.moveY)

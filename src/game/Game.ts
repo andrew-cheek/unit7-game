@@ -168,6 +168,7 @@ export class Game {
   private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
   private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
+  private dropVehicle: Vehicle | null = null // the car/bike you rode off the pad edge, falling with the dive
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -577,6 +578,18 @@ export class Game {
     this.player.exitVehicle(this.launchPad.spawn)
     this.player.setVisible(true)
     this.player.setBoard(false)
+    // Park a couple of drivable rides up here too: hop in (G) and drive off the
+    // edge to dive in the vehicle (bail or pop the chute on the way down).
+    {
+      const c = start
+      const fwd = new THREE.Vector3(Math.sin(faceYaw), 0, Math.cos(faceYaw))
+      const right = new THREE.Vector3(Math.cos(faceYaw), 0, -Math.sin(faceYaw))
+      const spot = (rx: number, fz: number) => c.clone().addScaledVector(right, rx).addScaledVector(fwd, fz)
+      this.vehicles.lendToPad([
+        { kind: 'hovercar', pos: spot(10, -6), yaw: faceYaw },
+        { kind: 'speeder', pos: spot(-10, -6), yaw: faceYaw },
+      ])
+    }
     this.input.yaw = this.launchPad.spawnYaw
     this.input.pitch = 0.06
     this.player.resetInterp()
@@ -606,6 +619,8 @@ export class Game {
     this.physics.removeGroundMesh(this.launchPad.collider)
     for (const b of this.launchPadColliders) { const i = this.physics.colliders.indexOf(b); if (i >= 0) this.physics.colliders.splice(i, 1) }
     this.launchPadColliders.length = 0
+    // Send the lent rides back to the city - except one you're riding off the edge.
+    this.vehicles.returnFromPad(this.dropVehicle)
     this.launchPad.dispose()
     this.launchPad = null
     this.hud.onPlatform = false
@@ -655,6 +670,23 @@ export class Game {
     this.missionPopupTimer = easeIn ? 4 : 8
   }
 
+  /** Drove off the pad in a vehicle: keep the player in it and let the SKYDIVE drive
+   *  the fall, with the car as the diver. Press the chute to land it safe, or bail. */
+  private beginVehicleDrop(off: THREE.Vector3) {
+    const v = this.vehicles.current
+    if (!v) return
+    this.dropVehicle = v
+    this.endLaunchPad() // returns the OTHER lent ride; keeps this one (it's dropVehicle)
+    this.beginDropIn(off, true)
+    this.dropIn?.setRider(v.model.group)
+    this.audio.play('portal')
+    vibrate(40)
+    this.hud.banner = `${v.name} OFF THE EDGE`
+    this.bannerTimer = 2
+    this.hud.missionPopup = { title: 'VEHICLE DIVE', body: 'You rode off in the ' + v.name + '! Press O for the chute to ride it down safe - or press G to bail out and skydive.' }
+    this.missionPopupTimer = 6
+  }
+
   private finishDrop() {
     // Reward the drop: how cleanly (how high) you popped the canopy, plus any
     // target orbs threaded. A crash pays little (but the repair drone saves you).
@@ -685,15 +717,38 @@ export class Game {
     this.bannerTimer = 3.4
     this.hud.intro = false
     this.hud.drop = null
-    // Hand off standing exactly where you came down - no relocation.
-    this.player.exitVehicle(land)
-    this.player.setVisible(true)
-    // Land on foot, not on the board - the hoverboard is opt-in via the BOARD
-    // button (C / mobile) once you're roaming, so the world opens with the robot
-    // standing and free to walk up to the guide.
-    this.player.setBoard(false)
-    this.camera.snap(this.player.position)
-    this.input.setLockEnabled(true)
+    // Rode a vehicle the whole way down (and didn't portal off-world): set it on the
+    // ground at the landing spot and keep driving it.
+    const keepDriving = this.dropVehicle && dest !== 'mars' && dest !== 'moon'
+    if (keepDriving) {
+      const v = this.dropVehicle!
+      this.dropVehicle = null
+      const gy = this.physics.sampleGround(land.x, land.z, 80)?.y ?? 0
+      v.position.set(land.x, gy + v.hoverHeight, land.z)
+      v.velocity.set(0, 0, 0)
+      v.model.group.position.copy(v.position)
+      this.vehicles.current = v
+      this.player.enterVehicle() // stay in the car (hidden robot); camera frames it
+      this.player.object.position.copy(v.position)
+      this.camera.snap(v.position)
+      this.input.setLockEnabled(true)
+      this.hud.banner = `${v.name} TOUCHDOWN  +${credits}c`
+    } else {
+      if (this.dropVehicle) {
+        // Portaled off-world mid-drop: send the car home and step out on foot.
+        const v = this.dropVehicle; this.dropVehicle = null
+        v.position.copy(v.home); v.model.group.position.copy(v.home); this.vehicles.current = null
+      }
+      // Hand off standing exactly where you came down - no relocation.
+      this.player.exitVehicle(land)
+      this.player.setVisible(true)
+      // Land on foot, not on the board - the hoverboard is opt-in via the BOARD
+      // button (C / mobile) once you're roaming, so the world opens with the robot
+      // standing and free to walk up to the guide.
+      this.player.setBoard(false)
+      this.camera.snap(this.player.position)
+      this.input.setLockEnabled(true)
+    }
     const fog = this.engine.scene.fog
     if (fog instanceof THREE.FogExp2 && this.savedFogDensity != null) { fog.density = this.savedFogDensity; this.savedFogDensity = null }
     this.hud.fade = 1
@@ -1817,6 +1872,20 @@ export class Game {
     // and the sky brightens beneath you during the descent.
     if (this.dropIn) {
       this.dropIn.update(dt)
+      // Riding a vehicle down: G bails you out (drop the car, keep skydiving on foot).
+      if (this.dropVehicle && this.dropIn.riding && this.input.consumeEdge('enter')) {
+        this.dropIn.bail()
+        const v = this.dropVehicle
+        v.position.copy(v.home); v.velocity.set(0, 0, 0); v.model.group.position.copy(v.home)
+        this.vehicles.current = null
+        this.dropVehicle = null
+        // DropIn's own diver robot is shown by bail(); the player robot stays hidden
+        // for the rest of the dive, same as any skydive.
+        this.hud.banner = 'BAILED OUT'
+        this.bannerTimer = 1.6
+        this.audio.play('ui')
+        vibrate(30)
+      }
       this.world.update(dt, this.world.spawn)
       this.dawnShow.update(dt, this.world.dayFactor)
       this.updateMorningSunrise()
@@ -1871,7 +1940,9 @@ export class Game {
     if (this.launchPad) {
       this.launchPad.update(dt, this.player.position.x, this.player.position.z)
       const p = this.player.position
-      if (this.launchPad.steppedOff(p.x, p.y, p.z)) {
+      // On foot: walk off the ledge -> normal skydive. (Driving off in a vehicle is
+      // handled after vehicles.update, below, so the car becomes the diver.)
+      if (!this.vehicles.current && this.launchPad.steppedOff(p.x, p.y, p.z)) {
         const off = p.clone()
         this.endLaunchPad()
         this.beginDropIn(off, true) // dive begins where you stepped off, camera eases in
@@ -1924,10 +1995,25 @@ export class Game {
     // feeds the rover's ramp launches (weaker off-world = bigger hops).
     this.vehicles.update(dt, this.input, gravity)
 
+    // Drove a vehicle off the launch-pad edge: the car becomes the diver and falls.
+    if (this.launchPad && this.vehicles.current) {
+      const v = this.vehicles.current
+      const c = this.launchPad.group.position
+      if (Math.hypot(v.position.x - c.x, v.position.z - c.z) > this.launchPad.radius - 1) {
+        // Undo any ground-snap toward the city far below; start the dive from pad height.
+        v.position.y = this.launchPad.topY + v.hoverHeight
+        v.model.group.position.copy(v.position)
+        this.beginVehicleDrop(v.position.clone())
+        this.pushHud(dt)
+        return
+      }
+    }
+
     if (this.vehicles.current) {
       // Keep vehicles inside the same blob ring (no launch - a fling makes no sense
       // when piloting) and keep the blobs jiggling while you drive near the rim.
-      if (this.zone === 'earth') {
+      // Not while up on the launch pad - there the edge is the whole point.
+      if (this.zone === 'earth' && !this.launchPad) {
         const b = this.boundary.update(dt, this.vehicles.current.position.x, this.vehicles.current.position.z, false)
         if (b) {
           this.vehicles.current.position.x = b.x; this.vehicles.current.position.z = b.z
