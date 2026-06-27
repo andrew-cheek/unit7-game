@@ -51,6 +51,9 @@ import { HoloBillboards } from './HoloBillboards'
 import { NightFireworks } from './NightFireworks'
 import { GravityLifts } from './GravityLifts'
 import { SkyShards } from './SkyShards'
+import { CourierDrones } from './CourierDrones'
+import { NeonRain } from './NeonRain'
+import { SkySearchlights } from './SkySearchlights'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -499,6 +502,19 @@ export class Game {
         this.popups.pop(x, y + 1, z, `+${credits}c`, '#9bff6a')
         this.audio.play('ui')
       },
+    }))
+    // Autonomous courier drones buzzing along routes over the city streets.
+    this.systems.register(new CourierDrones(this.engine.scene, {
+      focus: () => this.focus,
+    }))
+    // Intermittent neon rain weather that drifts through the roam.
+    this.systems.register(new NeonRain(this.engine.scene, {
+      focus: () => this.focus,
+    }))
+    // Rooftop searchlights sweeping the night sky for a noir skyline.
+    this.systems.register(new SkySearchlights(this.engine.scene, {
+      focus: () => this.focus,
+      dayFactor: () => this.world.dayFactor,
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
