@@ -94,13 +94,16 @@ export interface RobotColors {
 export function createRobot(colors: RobotColors = {}): RobotModel {
   const body = colors.body ?? config.palette.robot
   const trim = colors.trim ?? config.palette.robotTrim
-  const accent = colors.accent ?? config.palette.purple
+  const accent = colors.accent ?? 0x2f9fe8 // bright blue accent (shoulders / hands / feet)
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: body, metalness: 0.85, roughness: 0.32 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.6, roughness: 0.5 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.7, roughness: 0.35 })
+  // Brushed-metal body, deep-navy underframe, glossy painted-blue accent, and a
+  // bright emissive glow for the visor / chest core / antenna.
+  const bodyMat = new THREE.MeshStandardMaterial({ color: body, metalness: 0.9, roughness: 0.34 })
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a2540, metalness: 0.55, roughness: 0.5 })
+  const accentMat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.5, roughness: 0.26 })
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: trim, emissiveIntensity: 3.4, roughness: 0.4 })
-  const mats: THREE.Material[] = [bodyMat, darkMat, accentMat, trimMat]
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0x0a1a2e, emissive: trim, emissiveIntensity: 1.4, roughness: 0.5 })
+  const mats: THREE.Material[] = [bodyMat, darkMat, accentMat, trimMat, panelMat]
 
   const group = new THREE.Group()
 
@@ -108,85 +111,109 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const core = new THREE.Group()
   group.add(core)
 
-  const pelvis = box(0.44, 0.24, 0.3, darkMat)
-  pelvis.position.set(0, 1.0, 0)
+  const pelvis = box(0.46, 0.26, 0.32, darkMat)
+  pelvis.position.set(0, 1.02, 0)
   core.add(pelvis)
 
-  const torso = box(0.52, 0.62, 0.34, bodyMat)
-  torso.position.set(0, 1.34, 0)
+  // Lower torso (navy) + the big square brushed-metal chest block.
+  const torsoLow = box(0.5, 0.34, 0.34, darkMat)
+  torsoLow.position.set(0, 1.2, 0)
+  core.add(torsoLow)
+  const torso = box(0.64, 0.54, 0.42, bodyMat)
+  torso.position.set(0, 1.52, 0)
   core.add(torso)
 
-  const chestPlate = box(0.4, 0.34, 0.06, accentMat)
-  chestPlate.position.set(0, 1.4, 0.17)
-  core.add(chestPlate)
-
-  const chestCore = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 16), trimMat)
+  // Signature chest: a recessed glowing square framed in metal, with a bright
+  // octagonal core dead-centre.
+  const chestFrame = box(0.48, 0.48, 0.05, bodyMat)
+  chestFrame.position.set(0, 1.54, 0.2)
+  core.add(chestFrame)
+  const chestPanel = box(0.36, 0.36, 0.03, panelMat)
+  chestPanel.position.set(0, 1.54, 0.23)
+  core.add(chestPanel)
+  const chestCore = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 8), trimMat)
   chestCore.rotation.x = Math.PI / 2
-  chestCore.position.set(0, 1.4, 0.21)
+  chestCore.position.set(0, 1.54, 0.25)
   core.add(chestCore)
+  // Vent slots under the chest.
+  for (const sx of [-0.16, 0, 0.16]) { const v = box(0.1, 0.03, 0.02, panelMat); v.position.set(sx, 1.28, 0.21); core.add(v) }
 
-  const pack = box(0.34, 0.4, 0.18, darkMat)
-  pack.position.set(0, 1.34, -0.24)
+  const pack = box(0.38, 0.44, 0.18, darkMat)
+  pack.position.set(0, 1.46, -0.26)
   core.add(pack)
-  for (const sx of [-0.09, 0.09]) {
-    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.12, 12), trimMat)
-    nozzle.position.set(sx, 1.1, -0.26)
+  for (const sx of [-0.1, 0.1]) {
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 0.12, 12), trimMat)
+    nozzle.position.set(sx, 1.18, -0.28)
     core.add(nozzle)
   }
 
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.1, 12), darkMat)
-  neck.position.set(0, 1.66, 0)
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.08, 12), darkMat)
+  neck.position.set(0, 1.84, 0)
   core.add(neck)
 
-  const head = box(0.34, 0.32, 0.34, bodyMat)
-  head.position.set(0, 1.82, 0)
+  // Brushed-metal cube head with a wide glowing visor band and side ear knobs.
+  const head = box(0.4, 0.38, 0.4, bodyMat)
+  head.position.set(0, 2.06, 0)
   core.add(head)
-
-  const visor = box(0.3, 0.11, 0.06, trimMat)
-  visor.position.set(0, 1.84, 0.17)
+  const visorRecess = box(0.36, 0.16, 0.03, panelMat)
+  visorRecess.position.set(0, 2.08, 0.2)
+  core.add(visorRecess)
+  const visor = box(0.32, 0.1, 0.05, trimMat)
+  visor.position.set(0, 2.08, 0.22)
   core.add(visor)
+  for (const sx of [-0.22, 0.22]) {
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 10), accentMat)
+    ear.position.set(sx, 2.04, 0)
+    core.add(ear)
+  }
 
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 8), darkMat)
-  antenna.position.set(0.1, 2.05, 0)
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.2, 8), darkMat)
+  antenna.position.set(0, 2.34, 0)
   core.add(antenna)
-  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 10), trimMat)
-  antennaTip.position.set(0.1, 2.15, 0)
+  const antennaTip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), trimMat)
+  antennaTip.position.set(0, 2.46, 0)
   core.add(antennaTip)
 
-  // Slim legs: thigh / shin / foot hung off a hip pivot that swings.
+  // Chunky legs: navy thigh / metal shin / glowing-toed blue foot off a hip pivot.
   const makeLeg = (sx: number) => {
     const hip = new THREE.Group()
     hip.position.set(sx, 0.98, 0)
-    const thigh = box(0.16, 0.4, 0.18, darkMat)
+    const thigh = box(0.2, 0.4, 0.22, darkMat)
     thigh.position.set(0, -0.2, 0)
-    const shin = box(0.14, 0.42, 0.16, bodyMat)
-    shin.position.set(0, -0.6, 0)
-    const foot = box(0.18, 0.12, 0.32, accentMat)
-    foot.position.set(0, -0.84, 0.06)
-    hip.add(thigh, shin, foot)
+    const knee = box(0.18, 0.12, 0.2, accentMat)
+    knee.position.set(0, -0.42, 0.02)
+    const shin = box(0.18, 0.38, 0.2, bodyMat)
+    shin.position.set(0, -0.62, 0)
+    const foot = box(0.24, 0.16, 0.38, accentMat)
+    foot.position.set(0, -0.84, 0.08)
+    const toe = box(0.2, 0.07, 0.08, trimMat)
+    toe.position.set(0, -0.86, 0.27)
+    hip.add(thigh, knee, shin, foot, toe)
     core.add(hip)
     return hip
   }
-  // Slim arms: ball shoulder, upper, forearm, hand. Shoulder pivot swings.
+  // Chunky arms: glossy blue ball shoulder, metal upper, navy forearm, blocky blue hand.
   const makeArm = (sx: number) => {
     const shoulder = new THREE.Group()
-    shoulder.position.set(sx, 1.56, 0)
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), accentMat)
-    const upper = box(0.14, 0.34, 0.16, bodyMat)
-    upper.position.set(0, -0.22, 0)
-    const fore = box(0.12, 0.32, 0.14, darkMat)
-    fore.position.set(0, -0.5, 0)
-    const hand = box(0.14, 0.14, 0.16, accentMat)
-    hand.position.set(0, -0.7, 0)
-    shoulder.add(ball, upper, fore, hand)
+    shoulder.position.set(sx, 1.62, 0)
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 14), accentMat)
+    const upper = box(0.17, 0.34, 0.19, bodyMat)
+    upper.position.set(0, -0.24, 0)
+    const fore = box(0.16, 0.32, 0.17, darkMat)
+    fore.position.set(0, -0.54, 0)
+    const hand = box(0.19, 0.18, 0.2, accentMat)
+    hand.position.set(0, -0.76, 0)
+    const knuckle = box(0.2, 0.06, 0.08, trimMat)
+    knuckle.position.set(0, -0.74, 0.12)
+    shoulder.add(ball, upper, fore, hand, knuckle)
     core.add(shoulder)
     return shoulder
   }
 
-  const legL = makeLeg(-0.15)
-  const legR = makeLeg(0.15)
-  const armL = makeArm(-0.36)
-  const armR = makeArm(0.36)
+  const legL = makeLeg(-0.17)
+  const legR = makeLeg(0.17)
+  const armL = makeArm(-0.42)
+  const armR = makeArm(0.42)
 
   // Foldable wings for the plane morph: a pivot at the shoulder, geometry hung
   // outward so scaling the pivot extends the wing from the body.
@@ -311,6 +338,7 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   const setAccent = (color: number) => {
     accentMat.color.setHex(color)
     trimMat.emissive.setHex(color)
+    panelMat.emissive.setHex(color)
     wingEdgeMat.emissive.setHex(color)
   }
 
