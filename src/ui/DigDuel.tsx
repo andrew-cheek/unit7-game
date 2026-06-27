@@ -57,6 +57,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
   const botBrain = useRef(0)
   const botStrafe = useRef<Vec | null>(null)
   const last = useRef(0)
+  const shownHp = useRef('') // last HP pair pushed to the React HP pips
 
   const di = (x: number, y: number) => y * COLS + x
   const inb = (x: number, y: number) => x >= 0 && x < COLS && y >= 0 && y < ROWS
@@ -103,6 +104,7 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
     bot.current = { pos: { ...bs }, dir: DIRS.down, hp: MAX_HP, cooldown: 0, flash: 0 }
     held.current = null
     botStrafe.current = null
+    shownHp.current = ''
   }, [])
 
   const finish = (ph: Phase) => { phaseRef.current = ph; setPhase(ph); miniSfx(ph === 'won' ? 'lap' : 'gameover') }
@@ -212,7 +214,10 @@ export function DigDuel({ onExit, touch }: { onExit: () => void; touch: boolean 
 
     if (p.hp <= 0) return finish('dead')
     if (b.hp <= 0) return finish('won')
-    force((n) => n + 1)
+    // Only re-render React when the HP pips actually change (a few times a game),
+    // not every frame - the arena itself is drawn imperatively on the canvas.
+    const hk = p.hp + '/' + b.hp
+    if (hk !== shownHp.current) { shownHp.current = hk; force((n) => n + 1) }
   }
 
   // Aggressive bot: closes on the player, strafes to dodge, and fires whenever
