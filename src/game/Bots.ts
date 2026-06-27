@@ -180,7 +180,7 @@ export class Bots implements GameSystem {
       const huntChance = b.style === 'hunter' ? 0.03 : 0.008
       if (b.idleT <= 0 && !b.flying && !b.huntTarget && b.huntCd <= 0 && this.opts.nearestAlien && Math.random() < huntChance) {
         const a = this.opts.nearestAlien(b.pos.x, b.pos.z)
-        if (a && (a.x - b.pos.x) ** 2 + (a.z - b.pos.z) ** 2 < 50 * 50) { b.huntTarget = a.clone(); b.target.copy(a) }
+        if (a && (a.x - b.pos.x) ** 2 + (a.z - b.pos.z) ** 2 < 50 * 50) { b.huntTarget = a; b.target.copy(a) } // `a` is already a fresh clone from nearestAlien - no need to clone again
       }
       if (b.huntTarget) {
         const hd = Math.hypot(b.huntTarget.x - b.pos.x, b.huntTarget.z - b.pos.z)

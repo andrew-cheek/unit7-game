@@ -9,6 +9,7 @@ interface Missile {
 interface Blast {
   mesh: THREE.Mesh
   mat: THREE.MeshBasicMaterial
+  active: boolean
   t: number
   life: number
   radius: number
@@ -55,6 +56,15 @@ export class Missiles {
       mesh.visible = false
       this.group.add(mesh)
       this.rings.push({ mesh, mat, active: false, t: 0, life: 0.5, maxR: 4 })
+    }
+    // Pre-build a blast pool (detonations reuse these instead of allocating +
+    // disposing a material per hit - matters when the raid fills the air with missiles).
+    for (let i = 0; i < 12; i++) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffb24d, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+      const mesh = new THREE.Mesh(this.blastGeo, mat)
+      mesh.visible = false
+      this.group.add(mesh)
+      this.blasts.push({ mesh, mat, active: false, t: 0, life: 0.5, radius: 9 })
     }
   }
 
@@ -105,18 +115,14 @@ export class Missiles {
         this.list.splice(i, 1)
       }
     }
-    for (let i = this.blasts.length - 1; i >= 0; i--) {
-      const b = this.blasts[i]
+    for (const b of this.blasts) {
+      if (!b.active) continue
       b.t += dt
       const k = b.t / b.life
       const s = b.radius * (0.2 + k * 0.9)
       b.mesh.scale.setScalar(s)
       b.mat.opacity = Math.max(0, 0.8 * (1 - k))
-      if (b.t >= b.life) {
-        this.group.remove(b.mesh)
-        b.mat.dispose()
-        this.blasts.splice(i, 1)
-      }
+      if (b.t >= b.life) { b.active = false; b.mesh.visible = false }
     }
     for (const r of this.rings) {
       if (!r.active) continue
@@ -129,11 +135,16 @@ export class Missiles {
   }
 
   private detonate(pos: THREE.Vector3, radius: number) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffb24d, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    const mesh = new THREE.Mesh(this.blastGeo, mat)
-    mesh.position.copy(pos)
-    this.group.add(mesh)
-    this.blasts.push({ mesh, mat, t: 0, life: 0.5, radius })
+    const b = this.blasts.find((x) => !x.active)
+    if (!b) return // pool exhausted (12 simultaneous blasts) - drop the visual
+    b.active = true
+    b.t = 0
+    b.life = 0.5
+    b.radius = radius
+    b.mat.opacity = 0.8
+    b.mesh.position.copy(pos)
+    b.mesh.scale.setScalar(radius * 0.2)
+    b.mesh.visible = true
   }
 
   setVisible(v: boolean) {
