@@ -2,19 +2,21 @@ import * as THREE from 'three'
 import { config } from './config'
 
 /**
- * The opening you stand on, not fall into: a floating robot FACTORY high above the
- * city. An assembly line stamps and builds fresh units stage by stage - worker
- * arms welding as chassis ride the conveyor - and each finished unit stands up,
- * marches to the ledge under a neon "DROP ZONE" sign, and steps off into its
- * skydive. Walk to the glowing arrow and step off to start yours.
+ * The opening you stand on, not fall into: a big floating robot FACTORY high above
+ * the city. An assembly line builds fresh units stage by stage; finished units step
+ * off the line, mill around the deck, then walk to the ledge under a neon DROP ZONE
+ * sign and dive off. Walk to the glowing arrow and step off to start yours.
  *
- * Local space: +Z is the ledge / dive direction, -Z is the head of the assembly
- * line. The whole group is yaw-rotated so +Z points at the city you dive toward.
+ * The deck collider, the visual floor and the step-off test all share ONE radius,
+ * so there's no invisible lip to "walk on the sky" past the visible edge.
+ *
+ * Local space: +Z is the ledge / dive direction, -Z is the head of the line. The
+ * whole group is yaw-rotated so +Z points at the city you dive toward.
  */
 export class LaunchPad {
   readonly group = new THREE.Group()
   readonly topY: number
-  readonly radius = 32
+  readonly radius = 42
   readonly collider: THREE.Mesh
   readonly spawn = new THREE.Vector3()
   readonly spawnYaw: number
@@ -25,22 +27,22 @@ export class LaunchPad {
   private t = 0
   private yaw: number
   private center: THREE.Vector3
-  // Assembly-line units: ride the conveyor being built stage by stage, then stand
-  // up at the end, walk to the ledge, and step off into the dive (recycled).
+
   private units: {
-    g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Mesh; legR: THREE.Mesh; head: THREE.Mesh
+    g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Mesh; legR: THREE.Mesh
     bodyMat: THREE.MeshStandardMaterial; headMat: THREE.MeshStandardMaterial
-    z: number; state: 'build' | 'walk' | 'fall'; v: number; ph: number; fallT: number; lane: number
+    x: number; z: number; tx: number; tz: number; state: 'build' | 'wander' | 'edge' | 'fall'
+    v: number; ph: number; fallT: number; wait: number; lane: number
   }[] = []
   private arms: { pivot: THREE.Group; elbow: THREE.Group; spark: THREE.Mesh; sparkMat: THREE.MeshBasicMaterial; ph: number }[] = []
   private cores: THREE.Mesh[] = []
   private beltSeams: THREE.Mesh[] = []
   private arrowMat!: THREE.MeshBasicMaterial
   private arrowChevs: THREE.Mesh[] = []
-  private signGlow!: THREE.MeshBasicMaterial
+  private edgeGlow!: THREE.MeshBasicMaterial
 
-  private readonly beltStart = -24
-  private readonly beltEnd = 3
+  private readonly beltStart = -30
+  private readonly beltEnd = -4
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
@@ -60,20 +62,20 @@ export class LaunchPad {
     this.buildClouds()
     this.buildUnits()
 
+    // Circular collider with enough segments to read as a true circle, matching the
+    // visual floor radius exactly - so you fall off right at the visible edge.
     this.collider = new THREE.Mesh(
-      this.ownG(new THREE.CylinderGeometry(this.radius, this.radius, 1, 6)),
+      this.ownG(new THREE.CylinderGeometry(this.radius, this.radius, 1, 48)),
       this.own(new THREE.MeshBasicMaterial({ visible: false })),
     )
-    this.collider.rotation.y = faceYaw
     this.collider.position.set(this.center.x, this.topY - 0.5, this.center.z)
     scene.add(this.collider)
     this.collider.updateMatrixWorld(true)
 
-    // Spawn on the right-hand walkway near the line's head, facing the ledge, so
-    // you watch the units get built and march past you to the edge.
+    // Spawn on the right walkway near the line's head, facing the ledge.
     const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw))
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
-    this.spawn.copy(this.center).addScaledVector(right, 8).addScaledVector(fwd, this.beltStart + 4)
+    this.spawn.copy(this.center).addScaledVector(right, 11).addScaledVector(fwd, this.beltStart + 6)
     this.spawn.y = this.topY + 0.1
     this.spawnYaw = this.yaw
 
@@ -81,151 +83,147 @@ export class LaunchPad {
     this.group.updateMatrixWorld(true)
   }
 
-  /** Hexagonal industrial deck: dark metal, glowing seams, translucent side bays
-   *  you can see the sky through, solid grated walkways. */
+  /** Detailed circular deck: paneled floor with a neon grid, a raised rim wall with
+   *  a glowing lip, warning chevrons at the edge, a central core. */
   private buildDeck() {
     const R = this.radius
-    // Bright factory-floor lighting so the rig reads (it sits at altitude where the
-    // sun is shallow; without this the dark metal goes near-black).
-    const key = new THREE.PointLight(0xdcecff, 3.2, 120, 2); key.position.set(0, 26, -6); this.group.add(key)
-    const fill = new THREE.PointLight(0x6fa8ff, 1.6, 90, 2); fill.position.set(0, 10, R * 0.5); this.group.add(fill)
-    const forgeLight = new THREE.PointLight(0xff8a3c, 2.0, 40, 2); forgeLight.position.set(0, 6, this.beltStart); this.group.add(forgeLight)
-
-    // Translucent glass bays (see the sky/clouds below).
-    const glass = new THREE.Mesh(
-      this.ownG(new THREE.CircleGeometry(R, 6),),
-      this.own(new THREE.MeshStandardMaterial({ color: 0x1c2c4a, metalness: 0.4, roughness: 0.25, transparent: true, opacity: 0.5, side: THREE.DoubleSide, emissive: 0x0a1830, emissiveIntensity: 0.5 })),
+    // Paneled metal floor (neon-grid canvas texture), solid so it reads rich.
+    const floorTex = this.deckTexture(); this.texs.push(floorTex)
+    const floor = new THREE.Mesh(
+      this.ownG(new THREE.CircleGeometry(R, 48)),
+      this.own(new THREE.MeshStandardMaterial({ map: floorTex, metalness: 0.5, roughness: 0.55, emissive: 0x0c1a30, emissiveIntensity: 0.35 })),
     )
-    glass.rotation.x = -Math.PI / 2
-    this.group.add(glass)
-    // Solid grated walkway running the length of the line and a cross-deck apron.
-    const deckMat = this.own(new THREE.MeshStandardMaterial({ color: 0x33405e, metalness: 0.5, roughness: 0.5, emissive: 0x13243c, emissiveIntensity: 0.45 }))
-    const spine = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(16, 0.4, R * 2)), deckMat)
-    spine.position.y = 0.02; this.group.add(spine)
-    const apron = new THREE.Mesh(this.ownG(new THREE.RingGeometry(R * 0.62, R * 0.98, 6, 1)), deckMat)
-    apron.rotation.x = -Math.PI / 2; apron.position.y = 0.01; this.group.add(apron)
-    // Glowing seams along the hex edges + a couple of cross seams.
-    const seamMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, fog: false }))
-    const ring = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(R - 0.3, 0.28, 8, 6)), seamMat)
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.25; this.group.add(ring)
-    for (const z of [-R * 0.45, R * 0.2]) {
-      const seam = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(R * 1.6, 0.12, 0.3)), seamMat)
-      seam.position.set(0, 0.24, z); this.group.add(seam)
+    floor.rotation.x = -Math.PI / 2; floor.position.y = 0.02
+    this.group.add(floor)
+    // Lighting so it isn't dark up at altitude.
+    const key = new THREE.PointLight(0xdcecff, 3.4, 160, 2); key.position.set(0, 30, -4); this.group.add(key)
+    const fill = new THREE.PointLight(0x6fa8ff, 1.7, 120, 2); fill.position.set(0, 12, R * 0.5); this.group.add(fill)
+    const forge = new THREE.PointLight(0xff8a3c, 2.2, 50, 2); forge.position.set(0, 7, this.beltStart); this.group.add(forge)
+
+    // Raised rim wall + glowing top lip (so the edge is unmistakable).
+    const wall = new THREE.Mesh(
+      this.ownG(new THREE.CylinderGeometry(R, R, 1.8, 48, 1, true)),
+      this.own(new THREE.MeshStandardMaterial({ color: 0x141d30, metalness: 0.6, roughness: 0.45, side: THREE.DoubleSide, emissive: 0x0a1830, emissiveIntensity: 0.4 })),
+    )
+    wall.position.y = 0.9; this.group.add(wall)
+    this.edgeGlow = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, fog: false }))
+    const lip = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(R, 0.32, 10, 64)), this.edgeGlow)
+    lip.rotation.x = -Math.PI / 2; lip.position.y = 1.7; this.group.add(lip)
+    // Warning chevrons painted just inside the rim, all the way around.
+    const warnMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const chevGeo = this.ownG(new THREE.RingGeometry(R - 3.2, R - 1.2, 2, 1, 0, 0.32))
+    for (let i = 0; i < 24; i++) {
+      const ch = new THREE.Mesh(chevGeo, warnMat); ch.rotation.x = -Math.PI / 2
+      ch.rotation.z = (i / 24) * Math.PI * 2; ch.position.y = 0.06; this.group.add(ch)
     }
-    // Safety lip + under-glow so it reads as a hovering rig from below.
-    const lip = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(R, R, 1.1, 6, 1, true)), this.own(new THREE.MeshStandardMaterial({ color: 0x0c1424, metalness: 0.6, roughness: 0.5, side: THREE.DoubleSide })))
-    lip.rotation.y = Math.PI / 6; lip.position.y = -0.45; this.group.add(lip)
-    const glow = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(R * 1.06, 6)), this.own(new THREE.MeshBasicMaterial({ color: 0x1a5cff, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })))
-    glow.rotation.x = -Math.PI / 2; glow.position.y = -1.6; this.group.add(glow)
-    // Under-struts / engine pods so it isn't a flat disc.
+    // Central core hub.
+    const hub = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(4, 5, 0.7, 24)), this.own(new THREE.MeshStandardMaterial({ color: 0x121a2c, metalness: 0.7, roughness: 0.4, emissive: 0x0a2a3a, emissiveIntensity: 0.7 })))
+    hub.position.y = 0.12; this.group.add(hub)
+    const coreRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(4.6, 0.16, 8, 40)), this.own(new THREE.MeshBasicMaterial({ color: 0x9b6bff, fog: false })))
+    coreRing.rotation.x = -Math.PI / 2; coreRing.position.y = 0.5; this.group.add(coreRing)
+    // Under-glow + engine pods so it reads as a hovering rig.
+    const glow = new THREE.Mesh(this.ownG(new THREE.CircleGeometry(R * 1.05, 48)), this.own(new THREE.MeshBasicMaterial({ color: 0x1a5cff, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })))
+    glow.rotation.x = -Math.PI / 2; glow.position.y = -1.8; this.group.add(glow)
     const podMat = this.own(new THREE.MeshStandardMaterial({ color: 0x10182a, metalness: 0.7, roughness: 0.4, emissive: 0x1a5cff, emissiveIntensity: 0.5 }))
     for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + Math.PI / 6
-      const pod = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.2, 0.5, 4, 8)), podMat)
-      pod.position.set(Math.cos(a) * R * 0.8, -2.2, Math.sin(a) * R * 0.8)
-      this.group.add(pod)
+      const a = (i / 6) * Math.PI * 2
+      const pod = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(1.5, 0.7, 5, 8)), podMat)
+      pod.position.set(Math.cos(a) * R * 0.82, -2.8, Math.sin(a) * R * 0.82); this.group.add(pod)
     }
   }
 
-  /** The conveyor belt + a frame gantry over the head of the line. */
+  /** A long conveyor + a big overhead gantry at the head of the line. */
   private buildConveyor() {
     const len = this.beltEnd - this.beltStart
     const cz = (this.beltStart + this.beltEnd) / 2
     const beltMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1c2740, metalness: 0.6, roughness: 0.55, emissive: 0x0c1a30, emissiveIntensity: 0.4 }))
-    const belt = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(6, 0.5, len)), beltMat)
-    belt.position.set(0, 0.5, cz); this.group.add(belt)
-    // Moving seam stripes on the belt (animated +Z to read as motion).
-    const stripeMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    for (let i = 0; i < 8; i++) {
-      const st = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(5.4, 0.02, 0.5)), stripeMat)
-      st.position.set(0, 0.78, this.beltStart + (i / 8) * len)
-      this.group.add(st); this.beltSeams.push(st)
+    const belt = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(7, 0.6, len)), beltMat)
+    belt.position.set(0, 0.6, cz); this.group.add(belt)
+    const stripeMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    for (let i = 0; i < 10; i++) {
+      const st = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(6.4, 0.02, 0.6)), stripeMat)
+      st.position.set(0, 0.92, this.beltStart + (i / 10) * len); this.group.add(st); this.beltSeams.push(st)
     }
-    // Side rails.
     const railMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2438, metalness: 0.7, roughness: 0.4 }))
-    for (const sx of [-3.4, 3.4]) {
-      const rail = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 1.1, len)), railMat)
-      rail.position.set(sx, 0.7, cz); this.group.add(rail)
-    }
-    // Head gantry where raw chassis drop in, with a hot forge bar.
-    const gantry = new THREE.Group(); gantry.position.set(0, 0, this.beltStart)
+    for (const sx of [-4, 4]) { const rail = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 1.3, len)), railMat); rail.position.set(sx, 0.85, cz); this.group.add(rail) }
+    // Big overhead gantry spanning the whole line (girders + cross-beams + forge).
     const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.65, roughness: 0.4 }))
-    for (const sx of [-4, 4]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.9, 8, 0.9)), frameMat); post.position.set(sx, 4, 0); gantry.add(post) }
-    const top = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(9.5, 1, 1.6)), frameMat); top.position.set(0, 8, 0); gantry.add(top)
-    const forge = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(7, 0.5, 0.5)), this.own(new THREE.MeshStandardMaterial({ color: 0x0c1018, emissive: 0xff6a1e, emissiveIntensity: 1.6, roughness: 0.3 }))); forge.position.set(0, 7.2, 0); gantry.add(forge)
-    this.group.add(gantry)
+    for (const sx of [-6, 6]) {
+      const girder = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(1, 11, len + 4)), frameMat); girder.position.set(sx, 5.5, cz); this.group.add(girder)
+    }
+    for (let i = 0; i <= 4; i++) {
+      const beam = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(13, 1, 0.8)), frameMat)
+      beam.position.set(0, 11, this.beltStart + (i / 4) * len); this.group.add(beam)
+    }
+    // Hot forge bar at the head where raw chassis drop in.
+    const forge = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(8, 0.6, 0.6)), this.own(new THREE.MeshStandardMaterial({ color: 0x0c1018, emissive: 0xff6a1e, emissiveIntensity: 1.8, roughness: 0.3 }))); forge.position.set(0, 7.4, this.beltStart); this.group.add(forge)
+    // Status screens on the gantry (robot schematics).
+    const screenTex = this.screenTexture(); this.texs.push(screenTex)
+    for (let i = 0; i < 3; i++) {
+      const scr = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(3.4, 2)), this.own(new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false })))
+      scr.position.set(6 - 0.05, 7, this.beltStart + 4 + i * 8); scr.rotation.y = -Math.PI / 2; this.group.add(scr)
+    }
+    // Pipes/conduits running along the gantry.
+    const pipeMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.75, roughness: 0.35, emissive: 0x123, emissiveIntensity: 0.3 }))
+    for (const sx of [-6.6, 6.6]) for (const yy of [3, 4]) { const pipe = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.22, 0.22, len + 4, 8)), pipeMat); pipe.rotation.x = Math.PI / 2; pipe.position.set(sx, yy, cz); this.group.add(pipe) }
   }
 
-  /** Industrial worker arms beside the belt that pivot/weld as chassis pass. */
+  /** Industrial worker arms at each station along the belt. */
   private buildArms() {
     const baseMat = this.own(new THREE.MeshStandardMaterial({ color: 0x222c44, metalness: 0.7, roughness: 0.35 }))
     const segMat = this.own(new THREE.MeshStandardMaterial({ color: 0x33405e, metalness: 0.7, roughness: 0.35 }))
-    const armGeo = this.ownG(new THREE.BoxGeometry(0.5, 0.5, 3.4))
-    const stations = [this.beltStart + 5, this.beltStart + 12, this.beltStart + 19]
+    const armGeo = this.ownG(new THREE.BoxGeometry(0.5, 0.5, 3.6))
+    const len = this.beltEnd - this.beltStart
+    const stations = 4
     let s = 0
-    for (const z of stations) for (const sx of [-1, 1]) {
-      const root = new THREE.Group(); root.position.set(sx * 4.6, 0, z)
-      const base = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.8, 1, 1.6, 10)), baseMat); base.position.y = 0.8; root.add(base)
-      const pivot = new THREE.Group(); pivot.position.set(0, 1.6, 0); root.add(pivot)
-      const upper = new THREE.Mesh(armGeo, segMat); upper.position.set(0, 0, -sx * 1.5); pivot.add(upper)
-      const elbow = new THREE.Group(); elbow.position.set(0, 0, -sx * 3); pivot.add(elbow)
-      const fore = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.4, 2.4)), segMat); fore.position.set(0, -0.4, -sx * 1.0); elbow.add(fore)
-      const sparkMat = this.own(new THREE.MeshBasicMaterial({ color: 0xfff1c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-      const spark = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.22, 8, 6)), sparkMat); spark.position.set(0, -0.8, -sx * 2.1); elbow.add(spark)
-      this.group.add(root)
-      this.arms.push({ pivot, elbow, spark, sparkMat, ph: s * 1.3 }); s++
+    for (let i = 0; i < stations; i++) {
+      const z = this.beltStart + 4 + (i / (stations - 1)) * (len - 8)
+      for (const sx of [-1, 1]) {
+        const root = new THREE.Group(); root.position.set(sx * 5, 0, z)
+        const base = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.9, 1.1, 1.8, 10)), baseMat); base.position.y = 0.9; root.add(base)
+        const pivot = new THREE.Group(); pivot.position.set(0, 1.8, 0); root.add(pivot)
+        const upper = new THREE.Mesh(armGeo, segMat); upper.position.set(0, 0, -sx * 1.6); pivot.add(upper)
+        const elbow = new THREE.Group(); elbow.position.set(0, 0, -sx * 3.2); pivot.add(elbow)
+        const fore = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.4, 2.6)), segMat); fore.position.set(0, -0.4, -sx * 1.1); elbow.add(fore)
+        const sparkMat = this.own(new THREE.MeshBasicMaterial({ color: 0xfff1c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+        const spark = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.22, 8, 6)), sparkMat); spark.position.set(0, -0.8, -sx * 2.2); elbow.add(spark)
+        this.group.add(root)
+        this.arms.push({ pivot, elbow, spark, sparkMat, ph: s * 1.3 }); s++
+      }
     }
   }
 
-  /** A neon "DROP ZONE" billboard over the ledge + a big animated down-arrow. */
+  /** Neon DROP ZONE billboard + a big animated down-arrow at the ledge. */
   private buildSign() {
     const R = this.radius
-    // Billboard panel on two posts, facing back up the line (toward the player).
     const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.6, roughness: 0.4 }))
-    for (const sx of [-9, 9]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.7, 13, 0.7)), postMat); post.position.set(sx, 6.5, R + 4); this.group.add(post) }
+    for (const sx of [-11, 11]) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.8, 15, 0.8)), postMat); post.position.set(sx, 7.5, R + 5); this.group.add(post) }
     const tex = this.signTex(); this.texs.push(tex)
-    const panelMat = this.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide }))
-    const panel = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(22, 8)), panelMat)
-    panel.position.set(0, 11, R + 4); panel.rotation.y = Math.PI // face -Z (the player)
-    this.group.add(panel)
-    // Glowing frame around the billboard.
-    this.signGlow = this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, fog: false }))
-    const frame = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(0.1, 0.1, 4, 4)), this.signGlow) // placeholder, replaced by border boxes
-    frame.visible = false; this.group.add(frame)
-    for (const [w, h, y] of [[23, 0.4, 15.2], [23, 0.4, 6.8]] as [number, number, number][]) {
-      const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w, h, 0.4)), this.signGlow); bar.position.set(0, y, R + 4); this.group.add(bar)
-    }
-
-    // Big retro neon down-arrow at the ledge, chevrons flowing down toward the drop.
+    const panel = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(26, 9)), this.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide })))
+    panel.position.set(0, 12.5, R + 5); panel.rotation.y = Math.PI; this.group.add(panel)
+    const frameMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, fog: false }))
+    for (const y of [17.4, 7.6]) { const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(27, 0.45, 0.45)), frameMat); bar.position.set(0, y, R + 5); this.group.add(bar) }
+    // Down-arrow chevrons flowing toward the drop.
     this.arrowMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
-    const chevGeo = this.ownG(new THREE.ConeGeometry(2.4, 2.6, 4))
+    const chevGeo = this.ownG(new THREE.ConeGeometry(2.6, 2.8, 4))
     for (let i = 0; i < 4; i++) {
       const chev = new THREE.Mesh(chevGeo, this.arrowMat)
       chev.rotation.x = Math.PI; chev.rotation.y = Math.PI / 4
-      chev.position.set(0, 5.5 - i * 2.2, R - 2)
-      this.group.add(chev); this.arrowChevs.push(chev)
+      chev.position.set(0, 6 - i * 2.3, R - 3); this.group.add(chev); this.arrowChevs.push(chev)
     }
   }
 
-  /** Energy cores, beacon lights, pipes. */
   private buildProps() {
     const R = this.radius
     const coreMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9b6bff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const coreGeo = this.ownG(new THREE.IcosahedronGeometry(1.4, 0))
+    const coreGeo = this.ownG(new THREE.IcosahedronGeometry(1.6, 0))
     const cageMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.7, roughness: 0.4, emissive: 0x27e7ff, emissiveIntensity: 0.4 }))
-    const cageGeo = this.ownG(new THREE.TorusGeometry(1.9, 0.12, 6, 16))
+    const cageGeo = this.ownG(new THREE.TorusGeometry(2.1, 0.12, 6, 16))
     for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4
-      const r = R * 0.78
-      const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(Math.cos(a) * r, 3.2, Math.sin(a) * r)
+      const a = (i / 4) * Math.PI * 2 + 0.6; const r = R * 0.82
+      const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(Math.cos(a) * r, 3.4, Math.sin(a) * r)
       this.group.add(core); this.cores.push(core)
       for (let k = 0; k < 2; k++) { const cage = new THREE.Mesh(cageGeo, cageMat); cage.position.copy(core.position); cage.rotation.x = k * Math.PI / 2; this.group.add(cage) }
-    }
-    // Beacon spires at the rear corners.
-    const spireMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.7, roughness: 0.35, emissive: 0xff2bd0, emissiveIntensity: 0.4 }))
-    for (const sx of [-1, 1]) {
-      const spire = new THREE.Mesh(this.ownG(new THREE.ConeGeometry(0.7, 10, 8)), spireMat); spire.position.set(sx * R * 0.7, 5, this.beltStart - 2); this.group.add(spire)
-      const tip = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.4, 10, 8)), this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, fog: false }))); tip.position.set(sx * R * 0.7, 10, this.beltStart - 2); this.group.add(tip)
     }
   }
 
@@ -237,18 +235,13 @@ export class LaunchPad {
     ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128)
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; this.texs.push(tex)
     const mat = this.own(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.5, depthWrite: false, fog: false }))
-    const n = config.tier.name === 'low' ? 5 : 10
+    const n = config.tier.name === 'low' ? 6 : 12
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2
-      const r = 44 + (i % 3) * 30
-      const puff = new THREE.Sprite(mat)
-      puff.position.set(Math.cos(a) * r, -32 - (i % 4) * 16, Math.sin(a) * r)
-      puff.scale.set(80, 48, 1)
-      this.group.add(puff)
+      const a = (i / n) * Math.PI * 2; const r = 56 + (i % 3) * 34
+      const puff = new THREE.Sprite(mat); puff.position.set(Math.cos(a) * r, -34 - (i % 4) * 18, Math.sin(a) * r); puff.scale.set(90, 54, 1); this.group.add(puff)
     }
   }
 
-  /** Units assembled on the belt -> walk to the ledge -> step off. */
   private buildUnits() {
     const torsoGeo = this.ownG(new THREE.BoxGeometry(0.95, 1.1, 0.6))
     const headGeo = this.ownG(new THREE.BoxGeometry(0.55, 0.55, 0.55))
@@ -256,7 +249,7 @@ export class LaunchPad {
     const armGeo = this.ownG(new THREE.BoxGeometry(0.22, 0.9, 0.22))
     const baseGeo = this.ownG(new THREE.BoxGeometry(0.9, 0.3, 0.7))
     const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a, 0xb98cff, 0xff8a1e]
-    const n = config.tier.name === 'low' ? 4 : 7
+    const n = config.tier.name === 'low' ? 5 : 9
     for (let i = 0; i < n; i++) {
       const g = new THREE.Group()
       const col = tints[i % tints.length]
@@ -272,67 +265,79 @@ export class LaunchPad {
       const parts = [base, legL, legR, torso, armL, armR, head]
       for (const p of parts) g.add(p)
       this.group.add(g)
-      const u = { g, parts, legL, legR, head, bodyMat, headMat, z: 0, state: 'build' as const, v: 3.2 + Math.random() * 1.2, ph: Math.random() * 6.28, fallT: 0, lane: (Math.random() - 0.5) * 2.2 }
-      this.respawnUnit(u, this.beltStart - i * ((this.beltEnd - this.beltStart) / n))
+      const u = { g, parts, legL, legR, bodyMat, headMat, x: 0, z: 0, tx: 0, tz: 0, state: 'build' as const, v: 3 + Math.random() * 1.4, ph: Math.random() * 6.28, fallT: 0, wait: 0, lane: (Math.random() - 0.5) * 2.2 }
+      // Spread the starting line ALONG the belt (never behind the deck edge) so the
+      // line reads full at once and the lead units are already near finished.
+      this.respawnUnit(u, this.beltStart + (i / n) * (this.beltEnd - this.beltStart) * 0.95)
       this.units.push(u)
     }
   }
 
   private respawnUnit(u: LaunchPad['units'][number], z: number) {
-    u.z = z; u.state = 'build'; u.fallT = 0
-    u.g.position.set(u.lane, this.topY + 0.55, z) // riding on top of the belt
+    u.x = u.lane; u.z = z; u.state = 'build'; u.fallT = 0; u.wait = 0
+    u.g.position.set(u.x, this.topY + 0.6, z)
     u.g.rotation.set(0, 0, 0)
-    u.bodyMat.opacity = 1; u.headMat.opacity = 1
-    u.headMat.emissiveIntensity = 0.2
+    u.bodyMat.opacity = 1; u.headMat.opacity = 1; u.headMat.emissiveIntensity = 0.2
+  }
+
+  /** A random point on the deck for a unit to wander to (kept off the line + edge). */
+  private wanderPoint(): { x: number; z: number } {
+    const a = Math.random() * Math.PI * 2
+    const r = 6 + Math.random() * (this.radius - 14)
+    return { x: Math.cos(a) * r, z: Math.max(this.beltEnd + 4, Math.sin(a) * r) }
   }
 
   update(dt: number, _x: number, _z: number) {
     this.t += dt
     const len = this.beltEnd - this.beltStart
-    // Belt stripes flow toward the ledge.
-    for (const st of this.beltSeams) {
-      st.position.z += 6 * dt
-      if (st.position.z > this.beltEnd) st.position.z = this.beltStart
-    }
-    // Worker arms pivot and weld (spark flashes near a passing chassis).
+    for (const st of this.beltSeams) { st.position.z += 6 * dt; if (st.position.z > this.beltEnd) st.position.z = this.beltStart }
     for (const a of this.arms) {
       a.pivot.rotation.x = Math.sin(this.t * 2 + a.ph) * 0.5 - 0.3
       a.elbow.rotation.x = Math.sin(this.t * 3 + a.ph) * 0.6
       a.sparkMat.opacity = Math.max(0, Math.sin(this.t * 18 + a.ph)) * 0.85
-      const s = 1 + a.sparkMat.opacity * 0.9; a.spark.scale.setScalar(s)
+      a.spark.scale.setScalar(1 + a.sparkMat.opacity * 0.9)
     }
-    // Energy cores + sign + arrow.
-    for (let i = 0; i < this.cores.length; i++) { const c = this.cores[i]; c.rotation.x += dt * 1.1; c.rotation.y += dt * 0.8; c.position.y = 3.2 + Math.sin(this.t * 1.4 + i) * 0.5 }
-    if (this.signGlow) (this.signGlow.color as THREE.Color).setHex(0xff2bd0)
+    for (let i = 0; i < this.cores.length; i++) { const c = this.cores[i]; c.rotation.x += dt * 1.1; c.rotation.y += dt * 0.8; c.position.y = 3.4 + Math.sin(this.t * 1.4 + i) * 0.5 }
     this.arrowMat.opacity = 0.5 + Math.sin(this.t * 4) * 0.35
-    for (let i = 0; i < this.arrowChevs.length; i++) this.arrowChevs[i].position.y = 5.5 - i * 2.2 - ((this.t * 3 + i) % 1) * 0.6
+    for (let i = 0; i < this.arrowChevs.length; i++) this.arrowChevs[i].position.y = 6 - i * 2.3 - ((this.t * 3 + i) % 1) * 0.6
 
-    // Units: build along the belt, then walk to the ledge and off.
-    const ledge = this.radius - 1
+    const ledgeZ = this.radius - 2
     for (const u of this.units) {
       if (u.state === 'build') {
-        u.z += (len / 6) * dt // ride the belt
+        u.z += (len / 6) * dt
         const f = THREE.MathUtils.clamp((u.z - this.beltStart) / len, 0, 1)
-        // Reveal parts stage by stage: base -> legs -> torso -> arms -> head lights.
         u.parts[0].visible = true
         u.parts[1].visible = u.parts[2].visible = f > 0.18
         u.parts[3].visible = f > 0.42
         u.parts[4].visible = u.parts[5].visible = f > 0.64
         u.parts[6].visible = f > 0.82
         u.headMat.emissiveIntensity = f > 0.82 ? 1.7 : 0.2
-        u.g.position.set(u.lane, this.topY + 0.55, u.z)
-        if (u.z >= this.beltEnd) { u.state = 'walk'; for (const p of u.parts) p.visible = true; u.headMat.emissiveIntensity = 1.7 }
-      } else if (u.state === 'walk') {
-        u.z += u.v * dt
-        const sw = Math.sin(this.t * 8 + u.ph) * 0.5
-        u.legL.rotation.x = sw; u.legR.rotation.x = -sw
-        u.g.position.set(u.lane * (1 - (u.z - this.beltEnd) / (ledge - this.beltEnd)), this.topY + Math.abs(Math.sin(this.t * 8 + u.ph)) * 0.06, u.z)
-        if (u.z >= ledge) { u.state = 'fall'; u.fallT = 0 }
+        u.g.position.set(u.lane, this.topY + 0.6, u.z)
+        if (u.z >= this.beltEnd) { for (const p of u.parts) p.visible = true; u.headMat.emissiveIntensity = 1.7; const w = this.wanderPoint(); u.tx = w.x; u.tz = w.z; u.state = 'wander'; u.x = u.lane; u.wait = 1 + Math.random() * 2 }
+      } else if (u.state === 'wander' || u.state === 'edge') {
+        const tx = u.state === 'edge' ? 0 : u.tx
+        const tz = u.state === 'edge' ? ledgeZ : u.tz
+        const dx = tx - u.x, dz = tz - u.z, d = Math.hypot(dx, dz) || 1
+        if (d > 0.4) {
+          u.x += (dx / d) * u.v * dt; u.z += (dz / d) * u.v * dt
+          u.g.rotation.y = Math.atan2(dx, dz)
+          const sw = Math.sin(this.t * 8 + u.ph) * 0.5; u.legL.rotation.x = sw; u.legR.rotation.x = -sw
+          u.g.position.set(u.x, this.topY + Math.abs(Math.sin(this.t * 8 + u.ph)) * 0.06, u.z)
+        } else if (u.state === 'edge') {
+          u.state = 'fall'; u.fallT = 0
+        } else {
+          u.wait -= dt
+          u.g.position.set(u.x, this.topY, u.z)
+          if (u.wait <= 0) {
+            // 60% head to the edge and dive, else wander again.
+            if (Math.random() < 0.6) u.state = 'edge'
+            else { const w = this.wanderPoint(); u.tx = w.x; u.tz = w.z; u.wait = 1 + Math.random() * 2 }
+          }
+        }
       } else {
         u.fallT += dt
         u.z += u.v * dt
-        u.g.position.y = this.topY - 0.5 * 9.8 * u.fallT * u.fallT * 0.6
-        u.g.position.z = u.z
+        u.g.position.set(u.x, this.topY - 0.5 * 9.8 * u.fallT * u.fallT * 0.6, u.z)
         u.g.rotation.x = Math.min(Math.PI / 2, u.fallT * 2.2)
         const o = Math.max(0, 1 - u.fallT * 0.8); u.bodyMat.opacity = o; u.headMat.opacity = o
         if (u.fallT > 2) this.respawnUnit(u, this.beltStart)
@@ -340,50 +345,72 @@ export class LaunchPad {
     }
   }
 
-  /** World-space AABBs for the solid structures, so the player walks AROUND the
-   *  assembly line (not through it). Pushed to Physics.colliders while on the pad. */
   colliderBoxes(): THREE.Box3[] {
     const lineMid = (this.beltStart - 1.5 + this.beltEnd + 1.5) / 2
     const lineHalf = (this.beltEnd + 1.5 - (this.beltStart - 1.5)) / 2
     return [
-      this.worldBox(0, 1.6, lineMid, 6.6, 1.8, lineHalf), // the whole assembly line (belt + arms)
-      this.worldBox(0, 4, this.beltStart, 5, 4, 1.2), // head gantry
+      this.worldBox(0, 1.6, lineMid, 7, 1.8, lineHalf), // the assembly line (belt + arms)
     ]
   }
 
   private worldBox(cx: number, cy: number, cz: number, hx: number, hy: number, hz: number): THREE.Box3 {
-    const box = new THREE.Box3()
-    const v = new THREE.Vector3()
-    for (let i = 0; i < 8; i++) {
-      v.set(cx + (i & 1 ? hx : -hx), cy + (i & 2 ? hy : -hy), cz + (i & 4 ? hz : -hz))
-      v.applyMatrix4(this.group.matrixWorld)
-      box.expandByPoint(v)
-    }
+    const box = new THREE.Box3(); const v = new THREE.Vector3()
+    for (let i = 0; i < 8; i++) { v.set(cx + (i & 1 ? hx : -hx), cy + (i & 2 ? hy : -hy), cz + (i & 4 ? hz : -hz)); v.applyMatrix4(this.group.matrixWorld); box.expandByPoint(v) }
     return box
   }
 
-  /** Left the deck - walked/fell off the edge, or flew clearly past the rim. */
+  /** Left the deck - off the edge of the (circular) floor, which the collider and
+   *  this test now share a radius with, so there's no invisible lip to walk on. */
   steppedOff(x: number, y: number, z: number): boolean {
     const d = Math.hypot(x - this.center.x, z - this.center.z)
-    if (d <= this.radius - 4) return false
-    return y < this.topY - 1.5 || d > this.radius + 12
+    if (d <= this.radius - 3) return false
+    return y < this.topY - 1.5 || d > this.radius + 6
+  }
+
+  private deckTexture(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#0e1626'; ctx.fillRect(0, 0, 256, 256)
+    // panel seams
+    ctx.strokeStyle = 'rgba(20,40,70,0.9)'; ctx.lineWidth = 4
+    for (let i = 0; i <= 256; i += 64) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 256); ctx.moveTo(0, i); ctx.lineTo(256, i); ctx.stroke() }
+    // neon grid
+    ctx.strokeStyle = 'rgba(39,231,255,0.22)'; ctx.lineWidth = 1.5
+    for (let i = 0; i <= 256; i += 32) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 256); ctx.moveTo(0, i); ctx.lineTo(256, i); ctx.stroke() }
+    // a few lit panels
+    ctx.fillStyle = 'rgba(39,231,255,0.06)'
+    for (const [px, py] of [[32, 96], [160, 32], [192, 192], [64, 192]]) ctx.fillRect(px, py, 60, 60)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(5, 5)
+    return tex
+  }
+
+  private screenTexture(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 160
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#04101a'; ctx.fillRect(0, 0, 256, 160)
+    ctx.strokeStyle = '#27e7ff'; ctx.lineWidth = 2; ctx.strokeRect(8, 8, 240, 144)
+    // a little robot schematic
+    ctx.strokeStyle = '#9dff5a'; ctx.lineWidth = 3
+    ctx.strokeRect(110, 40, 36, 44) // torso
+    ctx.strokeRect(116, 18, 24, 20) // head
+    ctx.beginPath(); ctx.moveTo(110, 50); ctx.lineTo(92, 70); ctx.moveTo(146, 50); ctx.lineTo(164, 70); ctx.stroke() // arms
+    ctx.beginPath(); ctx.moveTo(120, 84); ctx.lineTo(120, 112); ctx.moveTo(136, 84); ctx.lineTo(136, 112); ctx.stroke() // legs
+    ctx.fillStyle = '#27e7ff'; ctx.font = '700 16px monospace'; ctx.fillText('UNIT BUILD', 20, 30); ctx.fillText('OK', 200, 140)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   private signTex(): THREE.CanvasTexture {
     const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 384
     const ctx = cv.getContext('2d')!
-    // Dark panel with a subtle scanline texture.
     ctx.fillStyle = '#070b14'; ctx.fillRect(0, 0, 1024, 384)
     ctx.fillStyle = 'rgba(39,231,255,0.05)'; for (let y = 0; y < 384; y += 6) ctx.fillRect(0, y, 1024, 2)
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 30
-    ctx.fillStyle = '#ff2bd0'
-    ctx.font = '900 150px ui-monospace, Menlo, monospace'
-    ctx.fillText('DROP ZONE', 512, 150)
-    ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 18
-    ctx.fillStyle = '#bfefff'
-    ctx.font = '800 62px ui-monospace, Menlo, monospace'
-    ctx.fillText('STEP OFF TO SKYDIVE  ▼', 512, 285)
+    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 30; ctx.fillStyle = '#ff2bd0'
+    ctx.font = '900 150px ui-monospace, Menlo, monospace'; ctx.fillText('DROP ZONE', 512, 150)
+    ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 18; ctx.fillStyle = '#bfefff'
+    ctx.font = '800 62px ui-monospace, Menlo, monospace'; ctx.fillText('STEP OFF TO SKYDIVE  ▼', 512, 285)
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
     return tex
   }
