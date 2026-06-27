@@ -18,6 +18,7 @@ export class LandingFx {
   private sparkMat: THREE.PointsMaterial
   private sparkPos: Float32Array
   private sparkVel: Float32Array
+  private sparkCol: Float32Array
   private n: number
   private t = 999 // >= dur = idle
   private readonly dur = 1.6
@@ -48,9 +49,11 @@ export class LandingFx {
     this.n = lowTier ? 44 : 96
     this.sparkPos = new Float32Array(this.n * 3)
     this.sparkVel = new Float32Array(this.n * 3)
+    this.sparkCol = new Float32Array(this.n * 3)
     const sg = ownG(new THREE.BufferGeometry())
     sg.setAttribute('position', new THREE.BufferAttribute(this.sparkPos, 3))
-    this.sparkMat = own(new THREE.PointsMaterial({ color: 0xffffff, size: 0.55, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }))
+    sg.setAttribute('color', new THREE.BufferAttribute(this.sparkCol, 3))
+    this.sparkMat = own(new THREE.PointsMaterial({ vertexColors: true, size: 0.55, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }))
     this.sparks = new THREE.Points(sg, this.sparkMat)
     this.sparks.frustumCulled = false
     this.group.add(this.sparks)
@@ -59,23 +62,31 @@ export class LandingFx {
     scene.add(this.group)
   }
 
-  /** Replay the burst at a ground position, tinted to taste. */
-  trigger(pos: THREE.Vector3, color: number) {
+  /** Confetti palette for a celebratory (clean) landing. */
+  private static readonly PARTY = [0xff3b6b, 0x27e7ff, 0x9dff5a, 0xffd24a, 0xb98cff, 0xffffff]
+
+  /** Replay the burst at a ground position, tinted to taste. `celebrate` makes it
+   *  a taller multi-colour confetti fountain (for a clean landing). */
+  trigger(pos: THREE.Vector3, color: number, celebrate = false) {
     this.group.position.set(pos.x, pos.y + 0.1, pos.z)
     this.t = 0
     this.group.visible = true
     this.ringMat.color.setHex(color)
     this.discMat.color.setHex(color)
     this.pillarMat.color.setHex(color)
+    const c = new THREE.Color()
     for (let i = 0; i < this.n; i++) {
       const a = Math.random() * Math.PI * 2
-      const out = 4 + Math.random() * 15
+      const out = (celebrate ? 5 : 4) + Math.random() * (celebrate ? 18 : 15)
       this.sparkPos[i * 3] = 0; this.sparkPos[i * 3 + 1] = 0.2; this.sparkPos[i * 3 + 2] = 0
       this.sparkVel[i * 3] = Math.cos(a) * out
-      this.sparkVel[i * 3 + 1] = 8 + Math.random() * 17
+      this.sparkVel[i * 3 + 1] = (celebrate ? 14 : 8) + Math.random() * (celebrate ? 24 : 17)
       this.sparkVel[i * 3 + 2] = Math.sin(a) * out
+      c.setHex(celebrate ? LandingFx.PARTY[i % LandingFx.PARTY.length] : color)
+      this.sparkCol[i * 3] = c.r; this.sparkCol[i * 3 + 1] = c.g; this.sparkCol[i * 3 + 2] = c.b
     }
     ;(this.sparks.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
+    ;(this.sparks.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true
   }
 
   update(dt: number) {

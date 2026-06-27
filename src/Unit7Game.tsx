@@ -501,6 +501,19 @@ function DropOverlay({ drop, touch, onDeploy, onTrick, onJet, onBoost, onSteer }
         </div>
       )}
 
+      {/* Too fast to survive a ground hit: a flashing PULL UP warning so you flare,
+          deploy the chute, or hit the jetpack before you splatter. */}
+      {drop.danger && (
+        <div style={{ position: 'absolute', left: '50%', top: '15%', transform: 'translateX(-50%)', zIndex: 18, pointerEvents: 'none', textAlign: 'center', animation: 'unit7pulse 0.55s ease-in-out infinite' }}>
+          <div style={{ display: 'inline-block', padding: '8px 18px', borderRadius: 12, border: '2px solid #ff4d6d', background: 'rgba(40,6,12,0.6)', color: '#ffd0d8', fontSize: 20, fontWeight: 800, letterSpacing: '0.08em', textShadow: '0 0 14px #ff4d6d', boxShadow: '0 0 26px rgba(255,77,109,0.6)', whiteSpace: 'nowrap' }}>
+            ⚠ PULL UP — TOO FAST
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.16em', color: '#ffe3e8', marginTop: 4 }}>
+              {touch ? 'FLARE · DEPLOY CHUTE · OR HOLD JET' : 'S FLARE · SPACE JETPACK · OR DEPLOY CHUTE'}
+            </div>
+          </div>
+        </div>
+      )}
+
       {drop.result && (
         <div style={{ position: 'absolute', left: '50%', top: '40%', transform: 'translateX(-50%)' }}>
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '0.12em', textAlign: 'center', color: drop.result.startsWith('CLEAN') ? '#9dff5a' : drop.result.startsWith('CANOPY') ? '#27e7ff' : '#ff8a1e', textShadow: '0 0 18px currentColor' }}>{drop.result}</div>

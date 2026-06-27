@@ -641,7 +641,7 @@ export class Game {
       this.trans = { phase: 'in', t: 0, target: this.zone }
       // Make every arrival a moment: a shockwave + spark burst at the touchdown
       // spot, tinted by how it went (crash = ember, clean = green, else cyan).
-      this.landingFx.trigger(land, crashed ? 0xff5a3c : q >= 0.78 ? 0x9dff5a : 0x27e7ff)
+      this.landingFx.trigger(land, crashed ? 0xff5a3c : q >= 0.78 ? 0x9dff5a : 0x27e7ff, !crashed && q >= 0.5)
       // Grace period so the player can orient before the Mars gate (which sits on
       // the route out) can fire — stops an accidental yank to Mars on hand-off.
       this.travelCooldown = 3
@@ -1736,7 +1736,7 @@ export class Game {
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
       const d = this.dropIn.hud
-      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade, showJetTip: d.showJetTip }
+      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade, showJetTip: d.showJetTip, danger: d.danger }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return
