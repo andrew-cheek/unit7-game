@@ -23,6 +23,7 @@ import { MissionSystem } from './MissionSystem'
 import { ArcadeSystem } from './ArcadeSystem'
 import { Boundary } from './Boundary'
 import { GuideBot } from './GuideBot'
+import { LandingFx } from './LandingFx'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -163,6 +164,7 @@ export class Game {
   private arcade!: ArcadeSystem
   private boundary!: Boundary // bouncy alien-blob world edge (Earth)
   private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
+  private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -414,6 +416,7 @@ export class Game {
       (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0,
       { start: new THREE.Vector2(0, 27), arcade: new THREE.Vector2(0, 40), arrowAt: new THREE.Vector2(0, 19) },
     )
+    this.landingFx = new LandingFx(this.engine.scene, tier.name === 'low')
 
     // Unlock WebAudio on the first user gesture (mobile browsers require it).
     const unlockAudio = () => {
@@ -469,6 +472,7 @@ export class Game {
       setCursorLockEnabled: (on: boolean) => { this.input.setLockEnabled(on); if (!on) this.input.exitLock() },
       adjustZoom: (factor: number) => this.camera.adjustZoom(factor),
       exitMinigame: () => this.exitMinigame(),
+      openArcade: () => this.teleportToArcade(),
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
@@ -559,8 +563,19 @@ export class Game {
     const tx = 0, tz = 20
     this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
 
-    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, (x, z) => this.physics.sampleGround(x, z, 80)?.y ?? 0)
+    // Ground that includes building rooftops, so you can land ON a roof instead of
+    // sinking through it; and a wall resolver so the diver can't pass through
+    // buildings. Both reuse the live physics colliders.
+    const dropGround = (x: number, z: number) => {
+      const g = this.physics.sampleGround(x, z, 80)?.y ?? 0
+      const roof = this.physics.topSupport(x, z, 1e6)
+      return roof != null && roof > g ? roof : g
+    }
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3))
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
+    // Pin the render resolution for the whole drop so no mid-skydive buffer
+    // resize can flash black on mobile; a touch lower on the low tier for headroom.
+    this.engine.setAdaptive(false, config.tier.name === 'low' ? 0.85 : 1)
     this.hud.intro = true // surfaces the SKIP button
     this.player.setVisible(false)
     // Keep the cursor FREE during the drop (drag to look) so the DEPLOY / CUT
@@ -593,13 +608,16 @@ export class Game {
     const placeBonus = di ? Math.max(0, di.raceTotal - di.racePlace) * 25 : 0
     const dest = di?.chosenDest ?? null
     // Where you come down. Flying through a destination portal overrides it:
-    // arcade -> the plaza; mars/moon -> a zone jump kicked off below.
-    const land = dest === 'arcade' ? this.dropLand.clone() : di ? di.landingPos.clone() : this.dropLand.clone()
+    // arcade -> the plaza; mars/moon -> a zone jump kicked off below. A CRASH also
+    // comes down at the plaza (the repair drone sets you on the onboarding spot)
+    // so you always land right by the guide robot instead of stranded mid-city.
+    const land = dest === 'arcade' || crashed ? this.dropLand.clone() : di ? di.landingPos.clone() : this.dropLand.clone()
     const chuteBonus = crashed ? 0 : q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
     const credits = (crashed ? 40 : 120) + chuteBonus + orbBonus + trickBonus + placeBonus
     const xp = (crashed ? 20 : 50) + (q >= 0.78 ? 40 : 0)
     this.dropIn?.dispose()
     this.dropIn = null
+    this.engine.setAdaptive(true) // resume adaptive resolution for normal play
     this.addCredits(credits)
     this.awardXp(xp)
     const grade = crashed ? 'REASSEMBLED' : q >= 0.78 ? 'CLEAN LANDING' : q >= 0.5 ? 'GOOD LANDING' : 'TOUCHDOWN'
@@ -628,6 +646,9 @@ export class Game {
       // The drop ended on a brief fade; fade back in on the gameplay side so the
       // hand-off to the follow camera reads as one continuous shot.
       this.trans = { phase: 'in', t: 0, target: this.zone }
+      // Make every arrival a moment: a shockwave + spark burst at the touchdown
+      // spot, tinted by how it went (crash = ember, clean = green, else cyan).
+      this.landingFx.trigger(land, crashed ? 0xff5a3c : q >= 0.78 ? 0x9dff5a : 0x27e7ff, !crashed && q >= 0.5)
       // Grace period so the player can orient before the Mars gate (which sits on
       // the route out) can fire — stops an accidental yank to Mars on hand-off.
       this.travelCooldown = 3
@@ -638,6 +659,25 @@ export class Game {
     // re-announce game_start; on a first solo run with no join prompt, begin now.
     if (this.startedMode) this.emitGameStart(this.startedMode)
     else if (!this.multiplayerEnabled) this.emitGameStart('solo')
+  }
+
+  /** GAMES button / key: warp the player to right in front of the arcade, facing
+   *  the neon marquee + the game doors, ready to walk in. Earth only; ignored
+   *  during the drop-in, a zone change, or while a minigame is up. */
+  private teleportToArcade() {
+    if (this.zone !== 'earth' || this.dropIn || this.hud.minigame || this.intro) return
+    const x = 0, z = 24 // just south of the arcade's front opening (hall center z=46)
+    const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
+    this.input.yaw = 0 // face +z (north) - straight into the hall + marquee
+    this.input.pitch = 0.06
+    this.player.exitVehicle(new THREE.Vector3(x, gy, z))
+    this.player.setBoard(false)
+    this.camera.snap(this.player.position)
+    this.landingFx.trigger(new THREE.Vector3(x, gy, z), 0xff2bd0, true) // magenta arrival sparkle
+    this.audio.play('portal')
+    this.hud.banner = 'ARCADE'
+    this.bannerTimer = 2.2
+    trackEvent('arcade_warp', {})
   }
 
   /**
@@ -1722,7 +1762,7 @@ export class Game {
       this.updateMorningSunrise()
       this.hud.fade = this.dropIn.fade
       const d = this.dropIn.hud
-      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade, showJetTip: d.showJetTip }
+      this.hud.drop = { alt: Math.round(d.alt), speed: Math.round(d.speed), phase: d.phase, hint: d.hint, canDeploy: d.canDeploy, canTrick: d.canTrick, result: d.result, place: d.place, boomCharge: d.boomCharge, combo: d.combo, comboFade: d.comboFade, showJetTip: d.showJetTip, danger: d.danger }
       if (this.dropIn.done) this.finishDrop()
       this.pushHud(dt)
       return
@@ -1950,6 +1990,7 @@ export class Game {
     if (onEarth) this.events.update(dt, this.player.position)
     if (onEarth) this.patrols.update(dt)
     if (onEarth) this.guide.update(dt, this.player.position.x, this.player.position.z)
+    this.landingFx.update(dt) // unconditional so the touchdown burst finishes after the hand-off
     this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
     this.updateEffects(dt)
@@ -2305,6 +2346,7 @@ export class Game {
     this.systems.dispose()
     this.boundary.dispose()
     this.guide.dispose()
+    this.landingFx.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()

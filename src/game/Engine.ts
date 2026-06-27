@@ -103,6 +103,13 @@ export class Engine {
   // soft. Re-evaluated on a timer so we don't reallocate buffers every frame.
   private renderScale = 1
   private adaptTimer = 0
+  private adaptiveOn = true // when false, adapt() is frozen (e.g. during the drop-in)
+  private adaptCooldown = 0 // seconds remaining before another scale change is allowed
+  private adaptStreak = 0 // consecutive same-direction out-of-band evals (debounce)
+  private contextLost = false // true between webglcontextlost and ...restored
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null // debounce for ResizeObserver bursts
+  private lastResizeW = 0
+  private lastResizeH = 0
   private static readonly SCALE_FLOOR = 0.6
   // Hitstop: a brief sim-time slowdown for impact weight. We scale the wall-clock
   // time fed into the fixed-step accumulator (NOT the fixed dt itself), so every
@@ -144,6 +151,7 @@ export class Engine {
     })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.pixelCap))
     this.renderer.setSize(w, h)
+    this.lastResizeW = w; this.lastResizeH = h // seed so the first ResizeObserver fire is a no-op
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     // Manual reset: the counter accumulates across the whole frame (scene +
     // every composer pass) and we snapshot it after composer.render, so the
@@ -158,6 +166,23 @@ export class Engine {
     this.renderer.domElement.style.height = '100%'
     this.renderer.domElement.style.touchAction = 'none'
     container.appendChild(this.renderer.domElement)
+
+    // WebGL context loss recovery. Phones drop the GL context under memory
+    // pressure (or when backgrounded); without this the canvas just stays black.
+    // preventDefault() asks the browser to restore it, and we pause rendering in
+    // between so we don't thrash a dead context.
+    this.renderer.domElement.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault()
+      this.contextLost = true
+      console.warn('[Unit7] WebGL context lost - pausing render until restored')
+    }, false)
+    this.renderer.domElement.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false
+      // Three.js reinitialises its GL state on the restored context; nudge the
+      // size so all render targets are reallocated cleanly.
+      this.applyResolution()
+      console.warn('[Unit7] WebGL context restored')
+    }, false)
 
     this.scene = new THREE.Scene()
     // IBL so PBR metals reflect cohesive neon instead of rendering black at night.
@@ -380,6 +405,7 @@ export class Engine {
         console.error('[Unit7] render error:', err)
       }
     }
+    if (this.contextLost) return // GL context is gone; skip rendering until it's restored
     this.renderer.info.reset()
     this.composer.render()
     // Snapshot the accumulated per-frame totals (scene draw + post passes).
@@ -393,22 +419,49 @@ export class Engine {
    * mobile "never drop below ~30fps" guarantee - it trades a little sharpness
    * for a steady frame rate, then restores sharpness once the load eases.
    */
+  /**
+   * Freeze or resume adaptive resolution. Freezing pins the drawing-buffer size
+   * so no render-target reallocation happens - we use this during the drop-in,
+   * where a mid-skydive resize could flash a black frame on some mobile GPUs.
+   * Optionally snaps to a fixed scale first (a touch lower on mobile for headroom).
+   */
+  setAdaptive(on: boolean, snapScale?: number) {
+    this.adaptiveOn = on
+    if (snapScale != null && Math.abs(snapScale - this.renderScale) > 0.001) {
+      this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, snapScale))
+      this.applyResolution()
+    }
+  }
+
   private adapt(frame: number) {
+    if (!this.adaptiveOn) return
+    if (this.adaptCooldown > 0) this.adaptCooldown -= frame
     this.adaptTimer += frame
     if (this.adaptTimer < 1) return
     this.adaptTimer = 0
-    const prev = this.renderScale
-    // Tier-aware band: desktop targets 60fps (back off below 48, recover above 56);
-    // mobile only needs its 30fps floor (back off below 28, recover above 44). The
-    // old 30/52 band left a dead zone so a 36-43fps desktop crowd never downscaled.
-    const downAt = this.tier.name === 'low' ? 28 : 48
-    const upAt = this.tier.name === 'low' ? 44 : 56
-    if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) {
-      this.renderScale = Math.max(Engine.SCALE_FLOOR, this.renderScale - 0.1)
-    } else if (this.fps > upAt && this.renderScale < 1) {
-      this.renderScale = Math.min(1, this.renderScale + 0.1)
-    }
-    if (Math.abs(this.renderScale - prev) > 0.001) this.applyResolution()
+    // Each render-scale change reallocates the composer's render targets, and on
+    // tile-based mobile GPUs that realloc flashes the canvas black for a frame.
+    // The old code re-evaluated every second and flipped on any transient FPS dip,
+    // so just MOVING around (which briefly drops FPS) caused constant black
+    // flicker. Now: a cooldown after each change, a debounce that needs the FPS
+    // out of band for several seconds running before acting, and on mobile we only
+    // ratchet DOWN (never back up) so the scale settles once and stops resizing -
+    // a stable buffer means no more flicker.
+    if (this.adaptCooldown > 0) return
+    const downAt = this.tier.name === 'low' ? 26 : 46
+    const upAt = this.tier.name === 'low' ? 52 : 58
+    let dir = 0
+    if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) dir = -1
+    else if (this.tier.name !== 'low' && this.fps > upAt && this.renderScale < 1) dir = 1
+    if (dir === 0) { this.adaptStreak = 0; return }
+    // Sustained out-of-band only: a momentary dip from movement won't trigger it.
+    this.adaptStreak = Math.sign(this.adaptStreak) === dir ? this.adaptStreak + dir : dir
+    const need = this.tier.name === 'low' ? 3 : 2
+    if (Math.abs(this.adaptStreak) < need) return
+    this.adaptStreak = 0
+    this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, this.renderScale + dir * 0.1))
+    this.adaptCooldown = 5 // seconds of quiet after a change, so it can't thrash
+    this.applyResolution()
   }
 
   /** Effective drawing-buffer pixel ratio (device ratio, capped, then scaled). */
@@ -452,13 +505,29 @@ export class Engine {
     this.camera.fov = this.baseFov + this.fovBoost
   }
 
+  // Coalesce ResizeObserver bursts. On mobile the browser toolbar shows/hides on
+  // touch (i.e. exactly when you start moving), jiggling the viewport height and
+  // firing a burst of resize events. Reallocating the render targets on each one
+  // black-flashes the canvas - so we debounce to a single realloc once the size
+  // settles, and skip it entirely if the size didn't actually change.
   resize = () => {
+    if (this.disposed) return
+    if (this.resizeTimer != null) clearTimeout(this.resizeTimer)
+    this.resizeTimer = setTimeout(this.applyResize, 180)
+  }
+
+  private applyResize = () => {
+    this.resizeTimer = null
     if (this.disposed) return
     const w = Math.max(1, this.container.clientWidth)
     const h = Math.max(1, this.container.clientHeight)
+    // Camera aspect/FOV are cheap (no realloc) - always keep them current.
     this.camera.aspect = w / h
     this.applyAdaptiveFov(w / h)
     this.camera.updateProjectionMatrix()
+    if (w === this.lastResizeW && h === this.lastResizeH) return // no real change → no buffer realloc
+    this.lastResizeW = w
+    this.lastResizeH = h
     const dpr = this.effectiveDpr()
     this.renderer.setPixelRatio(dpr)
     this.renderer.setSize(w, h)
@@ -476,6 +545,7 @@ export class Engine {
     this.stop()
     this.onUpdate = null
     this.onRender = null
+    if (this.resizeTimer != null) { clearTimeout(this.resizeTimer); this.resizeTimer = null }
     this.resizeObserver.disconnect()
 
     disposeObject(this.scene)

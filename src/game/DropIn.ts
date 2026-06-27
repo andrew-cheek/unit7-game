@@ -18,6 +18,7 @@ export interface DropHud {
   combo: number // running boost-ring chain count (0 = no active chain)
   comboFade: number // 0..1 how much of the 2.2s chain window remains (drives a decay bar)
   showJetTip: boolean // early-dive prompt: hold the jetpack to fly/hover the sky
+  danger: boolean // falling too fast to survive a ground hit - drives a PULL UP warning
 }
 
 // You start very high and fall the whole way down, steering the dive (tuck to
@@ -55,7 +56,7 @@ export class DropIn {
   chosenDest: 'arcade' | 'mars' | 'moon' | 'city' | null = null
   /** Where you ended up - the handoff places the player here. */
   readonly landingPos = new THREE.Vector3()
-  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null, boomCharge: 0, combo: 0, comboFade: 0, showJetTip: true }
+  hud: DropHud = { alt: START_Y, speed: 0, phase: 'dive', hint: null, canDeploy: false, canTrick: false, result: null, place: null, boomCharge: 0, combo: 0, comboFade: 0, showJetTip: true, danger: false }
   /** Flips + fireworks pulled on the way down (small style bonus). */
   tricks = 0
 
@@ -167,13 +168,22 @@ export class DropIn {
   private static readonly V_DIVE = 92 // travel speed at a full straight-down plunge
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
+  // Vertical speed (m/s) above which a no-chute ground hit (or a head-on wall
+  // smack) breaks you apart. Below it you survive a hard landing - so flaring or
+  // a jetpack tap is always enough to save yourself. The HUD warns past ~52.
+  private static readonly CRASH_VSPEED = 74
 
-  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number) {
+  // Push the diver out of building walls (and cancel into-wall speed). Optional so
+  // the drop still works without a physics world; set from Game.
+  private solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void
+
+  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number, solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void) {
     this.scene = scene
     this.cam = cam
     this.input = input
     this.target = target.clone()
     this.getGround = getGround
+    this.solid = solid
     this.start = new THREE.Vector3(target.x + 30, START_Y, target.z - 300)
     this.pos = this.start.clone()
     this.rb = createRobot()
@@ -270,7 +280,7 @@ export class DropIn {
     // head-down tuck, some already gliding under a canopy. Reads as a busy jump.
     const aiBody = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3650, metalness: 0.55, roughness: 0.45 }))
     const tints = [0xff2bd0, 0x8a5cff, 0xff8a1e, 0x9dff5a, 0x27e7ff, 0xffd24a]
-    const N_AI = 9
+    const N_AI = config.tier.name === 'low' ? 4 : 9 // fewer rival skydivers on mobile (memory + draw)
     for (let i = 0; i < N_AI; i++) {
       const g = new THREE.Group()
       const torso = new THREE.Mesh(this.ownG(new THREE.CapsuleGeometry(0.5, 1.1, 4, 8)), aiBody)
@@ -496,7 +506,7 @@ export class DropIn {
     const balloonGeo = this.ownG(new THREE.SphereGeometry(2.2, 14, 12))
     const stringGeo = this.ownG(new THREE.CylinderGeometry(0.05, 0.05, 3, 5))
     const colors = [0xff5ba8, 0x5bdcff, 0xffd24a, 0x9dff5a, 0xb98cff]
-    const n = config.tier.name === 'low' ? 9 : config.tier.name === 'medium' ? 14 : 20
+    const n = config.tier.name === 'low' ? 5 : config.tier.name === 'medium' ? 14 : 20
     for (let i = 0; i < n; i++) {
       const f = (i + 0.5) / n
       const y = THREE.MathUtils.lerp(START_Y - 70, this.target.y + 70, f) + (Math.random() - 0.5) * 36
@@ -608,9 +618,13 @@ export class DropIn {
   /** A little flock of drones hovering at each cloud deck - they scatter when you
    *  punch through that deck (wired from the cloud-punch in updateSkyFx). */
   private buildDrones() {
+    // Skip the drone flock on mobile: dark boxes near the descent line are the
+    // most likely thing to clip the close camera's near plane (a black flash),
+    // and the low tier wants fewer scene objects anyway.
+    if (config.tier.name === 'low') return
     const bodyGeo = this.ownG(new THREE.BoxGeometry(1.0, 0.34, 1.0))
     const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a, 0xb98cff]
-    const perDeck = config.tier.name === 'low' ? 3 : 5
+    const perDeck = config.tier.name === 'medium' ? 4 : 5
     let i = 0
     for (const c of this.clouds) {
       for (let k = 0; k < perDeck; k++, i++) {
@@ -662,6 +676,10 @@ export class DropIn {
 
   /** Holographic billboards drifting past at the sides of the descent (flavor). */
   private buildHolograms() {
+    // Skip on mobile: each is a 512x256 canvas texture, and the drop already peaks
+    // mobile GPU memory (the whole city + the entire drop scene coexist) - shedding
+    // textures here helps avoid a context-loss black-out on phones.
+    if (config.tier.name === 'low') return
     const lines: [string, string][] = [['WELCOME TO', 'UNIT 7'], ['NEON', 'CITY'], ['DROP', 'ZONE']]
     for (let i = 0; i < lines.length; i++) {
       const f = (i + 0.6) / (lines.length + 0.3)
@@ -878,8 +896,15 @@ export class DropIn {
         this.onSfx?.('deploy')
         this.vy *= 0.5
       } else if (alt <= 2) {
-        this.beginCrash(ground)
-        return
+        // A fast nose-dive into the ground without a chute splatters you - but if
+        // you bled off speed (flared or jetpacked), you stick a hard landing
+        // instead of breaking apart. You have to be really booking it to explode.
+        if (-this.vy > DropIn.CRASH_VSPEED) { this.beginCrash(ground); return }
+        this.phase = 'land'
+        this.landingPos.set(this.pos.x, ground, this.pos.z)
+        this.onSfx?.('land')
+        this.hud.result = 'NO-CHUTE LANDING'
+        this.resultT = 0
       }
     } else if (this.phase === 'canopy') {
       // Flare control: pull back (moveY < 0) to brake your descent for a soft
@@ -906,6 +931,19 @@ export class DropIn {
     this.pos.x += this.hVel.x * dt
     this.pos.z += this.hVel.z * dt
     this.pos.y += this.vy * dt
+
+    // Buildings are solid: push out of any wall the diver enters (the resolver only
+    // acts when the diver overlaps a building vertically, so you still sail ABOVE
+    // rooftops). A hard, fast head-on smack into a wall while diving is a crash -
+    // the repair drone reassembles you, which is its own little spectacle.
+    if (this.solid && (this.phase === 'dive' || this.phase === 'canopy')) {
+      const pre = Math.hypot(this.hVel.x, this.hVel.z)
+      this.solid(this.pos, this.hVel)
+      if (this.phase === 'dive') {
+        const lost = pre - Math.hypot(this.hVel.x, this.hVel.z)
+        if (lost > 42 && this.vy < -28) { this.beginCrash(this.getGround(this.pos.x, this.pos.z)); return }
+      }
+    }
 
     this.diver.position.copy(this.pos)
     const diving = this.phase === 'dive'
@@ -938,9 +976,12 @@ export class DropIn {
     this.hud.phase = this.phase
     this.hud.canDeploy = this.phase === 'dive'
     this.hud.canTrick = this.phase === 'dive' || this.phase === 'canopy'
-    // Coach the jetpack early on (it's the key to flying/hovering around the sky):
-    // show until they first use it, then it stays gone.
-    this.hud.showJetTip = this.phase === 'dive' && !this.hasJetted && this.totalT < 18
+    // Going too fast to survive a ground hit: warn so you flare / deploy / jet in
+    // time. Only while diving and not super-high, so it reads as approaching danger.
+    this.hud.danger = this.phase === 'dive' && -this.vy > DropIn.CRASH_VSPEED - 18 && alt < 480
+    // Hide the jetpack coaching tip while the PULL UP warning is up, so the two
+    // prompts don't stack on top of each other.
+    this.hud.showJetTip = this.phase === 'dive' && !this.hasJetted && this.totalT < 18 && !this.hud.danger
     this.hud.hint = this.phase === 'canopy'
       ? (alt < 70 ? (-this.vy < 7 ? 'FLARED - SOFT LANDING' : 'PULL BACK TO FLARE') : 'STEER TO A PORTAL OR THE BEACON')
       : this.phase === 'land' ? 'TOUCHDOWN'
@@ -1209,8 +1250,10 @@ export class DropIn {
     }
 
     // Sonic boom: hold a full nose-dive to terminal velocity and you punch a
-    // shockwave. Re-arms once you slow back down.
-    if (this.phase === 'dive' && this.vy < -82) {
+    // shockwave. Re-arms once you slow back down. DESKTOP ONLY - on mobile the
+    // big additive cone + camera punch were a flicker culprit, so it's removed
+    // there entirely (no charge, ring, cone, or kick).
+    if (config.tier.name !== 'low' && this.phase === 'dive' && this.vy < -82) {
       this.boomCharge += dt
       if (this.boomCharge > 0.5 && !this.boomed) {
         this.boomed = true
@@ -1329,26 +1372,19 @@ export class DropIn {
     // diving; the slower canopy phase can ease more gently.
     if (snap) this.cam.position.copy(want)
     else this.cam.position.lerp(want, this.phase === 'canopy' ? 0.12 : 0.34)
-    // Transient shake from cloud punch-throughs / the sonic boom.
+    // Transient shake from cloud punch-throughs / the sonic boom. This is a
+    // ROTATIONAL shake - we jitter the LOOK TARGET, never the camera position.
+    // A positional shake on the close-trailing dive camera kept shoving its near
+    // plane into nearby geometry (the diver, clouds, drop props), which flashed
+    // dark for a frame - the "black flicker while skydiving", and worse on mobile.
+    // Wobbling only the aim keeps every bit of the impact with zero clipping.
     if (this.camShake > 0.01) {
-      const j = this.camShake
-      this.cam.position.x += (Math.random() - 0.5) * j
-      this.cam.position.y += (Math.random() - 0.5) * j
-      this.cam.position.z += (Math.random() - 0.5) * j
+      // Mobile gets a much gentler shake (it read as jarring there anyway).
+      const j = this.camShake * (config.tier.name === 'low' ? 0.6 : 1.2)
+      lookWant.x += (Math.random() - 0.5) * j
+      lookWant.y += (Math.random() - 0.5) * j
+      lookWant.z += (Math.random() - 0.5) * j
       this.camShake *= 0.86
-      // The shake can jitter the close-trailing dive camera toward the diver and
-      // shove its near plane inside the body/wings - which flashes the dark mesh
-      // interior (the "black flicker" while diving). Clamp it back out so the
-      // camera never gets nearer than the wingspan + near plane. No allocation.
-      const dx = this.cam.position.x - this.pos.x
-      const dy = this.cam.position.y - this.pos.y
-      const dz = this.cam.position.z - this.pos.z
-      const d = Math.hypot(dx, dy, dz)
-      const minD = 3.5
-      if (d > 0.001 && d < minD) {
-        const s = minD / d
-        this.cam.position.set(this.pos.x + dx * s, this.pos.y + dy * s, this.pos.z + dz * s)
-      }
     }
     this.cam.lookAt(lookWant)
   }
