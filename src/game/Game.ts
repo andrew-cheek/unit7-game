@@ -50,6 +50,7 @@ import { SpeedRibbons } from './SpeedRibbons'
 import { HoloBillboards } from './HoloBillboards'
 import { NightFireworks } from './NightFireworks'
 import { GravityLifts } from './GravityLifts'
+import { SkyShards } from './SkyShards'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -486,6 +487,17 @@ export class Game {
         if (this.player.mode !== 'robot' || this.vehicles.current) return
         if (this.player.velocity.y < vy) this.player.velocity.y = vy
         this.player.grounded = false
+      },
+    }))
+    // Sky-shards: airborne reward crystals that give the vertical traversal a point.
+    this.systems.register(new SkyShards(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onCollect: (x, y, z, credits) => {
+        this.addCredits(credits)
+        this.awardXp(Math.round(credits * 0.5))
+        this.popups.pop(x, y + 1, z, `+${credits}c`, '#9bff6a')
+        this.audio.play('ui')
       },
     }))
     // Floating "+score" reward popups at captures / pickups.
