@@ -181,6 +181,13 @@ export class Engine {
       // Three.js reinitialises its GL state on the restored context; nudge the
       // size so all render targets are reallocated cleanly.
       this.applyResolution()
+      // The PMREM env map is GPU-resident and dies with the context, so PBR metals
+      // would reflect black until the next zone change. Rebuild and re-bind it.
+      try {
+        this.envTex.dispose()
+        this.envTex = createEnvTexture(this.renderer)
+        this.scene.environment = this.envTex
+      } catch (err) { console.warn('[Unit7] env map rebuild failed', err) }
       console.warn('[Unit7] WebGL context restored')
     }, false)
 
@@ -443,20 +450,23 @@ export class Engine {
     // tile-based mobile GPUs that realloc flashes the canvas black for a frame.
     // The old code re-evaluated every second and flipped on any transient FPS dip,
     // so just MOVING around (which briefly drops FPS) caused constant black
-    // flicker. Now: a cooldown after each change, a debounce that needs the FPS
-    // out of band for several seconds running before acting, and on mobile we only
-    // ratchet DOWN (never back up) so the scale settles once and stops resizing -
-    // a stable buffer means no more flicker.
+    // flicker. Now: a cooldown after each change and a debounce that needs the FPS
+    // out of band for several seconds running before acting. Mobile down-steps
+    // react in 3s but up-steps need 8s of comfortable headroom, so the scale
+    // settles fast and resizes (the flicker source) become rare.
     if (this.adaptCooldown > 0) return
     const downAt = this.tier.name === 'low' ? 26 : 46
-    const upAt = this.tier.name === 'low' ? 52 : 58
+    const upAt = this.tier.name === 'low' ? 54 : 58
     let dir = 0
     if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) dir = -1
-    else if (this.tier.name !== 'low' && this.fps > upAt && this.renderScale < 1) dir = 1
+    else if (this.fps > upAt && this.renderScale < 1) dir = 1
     if (dir === 0) { this.adaptStreak = 0; return }
     // Sustained out-of-band only: a momentary dip from movement won't trigger it.
     this.adaptStreak = Math.sign(this.adaptStreak) === dir ? this.adaptStreak + dir : dir
-    const need = this.tier.name === 'low' ? 3 : 2
+    // Mobile recovers sharpness only after a LONG comfortable streak (so it isn't
+    // stuck soft forever after one heavy moment) while staying very reluctant to
+    // resize - up-steps need 8s clear, down-steps react in 3s.
+    const need = dir < 0 ? (this.tier.name === 'low' ? 3 : 2) : (this.tier.name === 'low' ? 8 : 2)
     if (Math.abs(this.adaptStreak) < need) return
     this.adaptStreak = 0
     this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, this.renderScale + dir * 0.1))

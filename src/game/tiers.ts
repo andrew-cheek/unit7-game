@@ -158,7 +158,11 @@ export function detectTier(override?: AssetQuality): AssetQuality {
     const dbg = gl.getExtension('WEBGL_debug_renderer_info')
     const renderer = (dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '') as string
     const r = (renderer || '').toLowerCase()
-    const weak = ['swiftshader', 'llvmpipe', 'software', 'apple gpu', 'mali', 'adreno', 'powervr', 'videocore']
+    // Note: NO 'apple gpu' here - this branch only runs for NON-touch devices
+    // (touch already returned 'low' above), so "Apple GPU" here means an Apple
+    // Silicon Mac, which is high-capable. Phones/tablets are caught by the touch
+    // check, not the renderer string.
+    const weak = ['swiftshader', 'llvmpipe', 'software', 'mali', 'adreno', 'powervr', 'videocore']
     if (weak.some((w) => r.includes(w))) return 'low'
   } catch {
     /* probe failed - fall through to high on a desktop UA */
