@@ -972,6 +972,26 @@ export class DropIn {
     this.pos.z += this.hVel.z * dt
     this.pos.y += this.vy * dt
 
+    // Ground floor. The landing check above uses the altitude from the START of the
+    // frame (before this move), so a fast / boosted dive over rising terrain or a
+    // rooftop can step its vertical position straight through the surface in one
+    // frame - which reads as a sudden "skip" to the ground. Clamp to the ground at
+    // the NEW x/z and finalize the landing (or crash) exactly at contact, never
+    // underground.
+    if (this.phase === 'dive' || this.phase === 'canopy' || this.phase === 'land') {
+      const gy = this.getGround(this.pos.x, this.pos.z)
+      if (this.pos.y < gy) {
+        if (this.phase === 'dive' && -this.vy > DropIn.CRASH_VSPEED) { this.pos.y = gy; this.beginCrash(gy); return }
+        if (this.phase !== 'land') {
+          this.phase = 'land'
+          this.landingPos.set(this.pos.x, gy, this.pos.z)
+          if (!this.hud.result) { this.hud.result = 'NO-CHUTE LANDING'; this.resultT = 0 }
+        }
+        this.pos.y = gy
+        if (this.vy < 0) this.vy = 0
+      }
+    }
+
     // Soft horizontal boundary: the jetpack lets you climb and cruise freely, but
     // don't let the dive wander off into empty space far from the city - clamp to a
     // generous box around the descent corridor (and bleed the speed into it).
