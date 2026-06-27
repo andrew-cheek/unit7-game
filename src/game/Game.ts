@@ -177,6 +177,7 @@ export class Game {
   private raidShield = 1 // mech shield during the raid (1=full); drains on contact
   private raidStagger = 0 // brief invuln/recover window after a shield break
   private raidHitPulse = 0 // throttles the shake/vibe while taking contact damage
+  private raidBossShown = false // mothership intro banner fired once
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -797,6 +798,7 @@ export class Game {
     this.raidWaveShown = 0
     this.raidShield = 1
     this.raidStagger = 0
+    this.raidBossShown = false
     // Set the free starter mech down a few steps away so it's an obvious grab.
     const mech = this.vehicles.list.find((v) => v.kind === 'mechM')
     if (mech) {
@@ -817,6 +819,15 @@ export class Game {
       this.landingFx.trigger(pos, 0xffb24a, false)
       this.audio.play('portal')
     }
+    // Mothership destroyed: a big multi-stage payoff (the raid's climax).
+    this.events.onBossDeath = (pos) => {
+      this.camera.shake(1.6)
+      this.engine.triggerHitstop(0.09)
+      this.landingFx.trigger(pos, 0xffd24a, true)
+      this.landingFx.trigger(pos, 0xff8a3c, false)
+      this.audio.play('portal')
+      vibrate(120)
+    }
     this.landingFx.trigger(land, 0xff3b52, false) // red alert shockwave
     this.audio.play('portal')
     vibrate(60)
@@ -831,6 +842,7 @@ export class Game {
     if (!s) return 'Repel the raid'
     const inMech = !!this.vehicles.current && isWalker(this.vehicles.current.kind)
     if (!inMech) return 'Board the MECH and repel the raid'
+    if (s.phase === 'boss') return s.boss ? `Destroy the MOTHERSHIP core - ${s.boss.hp}/${s.boss.hpMax}` : 'Destroy the MOTHERSHIP'
     if (s.phase === 'incoming') return `Wave ${s.wave + 1} incoming...`
     return `Repel WAVE ${s.wave}/${s.waves} - ${s.alive} hostiles`
   }
@@ -855,7 +867,7 @@ export class Game {
     } else {
       this.raidShield = Math.min(1, this.raidShield + 0.12 * dt)
     }
-    this.hud.raid = { wave: s.wave, waves: s.waves, alive: s.alive, incoming: s.phase === 'incoming', shield: this.raidShield }
+    this.hud.raid = { wave: s.wave, waves: s.waves, alive: s.alive, incoming: s.phase === 'incoming', shield: this.raidShield, boss: s.boss }
     // Announce each new wave with a banner + sting.
     if (s.phase === 'fight' && s.wave !== this.raidWaveShown) {
       this.raidWaveShown = s.wave
@@ -863,6 +875,17 @@ export class Game {
       this.bannerTimer = 1.8
       this.audio.play('objective')
       vibrate(30)
+    }
+    // The mothership descends for the final wave - sell the moment.
+    if (s.phase === 'boss' && !this.raidBossShown) {
+      this.raidBossShown = true
+      this.hud.banner = 'MOTHERSHIP INBOUND'
+      this.bannerTimer = 2.6
+      this.hud.missionPopup = { title: 'MOTHERSHIP INBOUND', body: 'The alien command ship is descending! Fire missiles into the exposed core hanging beneath its hull to bring it down.' }
+      this.missionPopupTimer = 5
+      this.camera.shake(0.8)
+      this.audio.play('portal')
+      vibrate(80)
     }
     if (s.cleared) this.endCityRaid()
   }
@@ -1546,6 +1569,14 @@ export class Game {
       this.awardCaptureProgress(hits)
       // One event per blast (not per target) so a big missile hit can't spam GA.
       trackEvent('npc_captured', { total: this.hud.captured })
+    }
+    // A blast that reaches the mothership's exposed core damages it.
+    if (this.raidActive) {
+      const wp = this.events.bossWeakPoint()
+      if (wp) {
+        const dx = wp.x - pos.x, dy = wp.y - pos.y, dz = wp.z - pos.z
+        if (dx * dx + dy * dy + dz * dz < (radius + 5) * (radius + 5)) this.events.damageBoss(1)
+      }
     }
     this.audio.play('explosion')
   }
