@@ -2547,9 +2547,10 @@ export class Game {
       let alienCount = 0
       this.events.forEachAlien((x, z) => { if (alienCount < 6) { add(x, z, 'alien'); alienCount++ } })
       this.patrols.forEach((x, z, big) => add(x, z, big ? 'alien' : 'vehicle'))
-      // Nearby uncollected data shards (capped) so the radar guides exploration.
-      this.collectibles.forEachNearby(px, pz, range, 8, (x, z) => add(x, z, 'powerup'))
     }
+    // Nearby uncollected data shards (capped) so the radar guides exploration in
+    // every zone (Earth's city field and the Moon/Mars fields alike).
+    this.collectibles.forEachNearby(px, pz, range, 8, (x, z) => add(x, z, 'powerup'))
     if (this.zone !== 'moon') this.sky.forEach((x, z) => add(x, z, 'ship'))
     for (const p of this.zones.portalsFor(this.zone)) add(p.position.x, p.position.z, 'portal')
     if (this.zone === 'earth') for (const p of this.arcadePortals) add(p.pos.x, p.pos.z, 'portal')
