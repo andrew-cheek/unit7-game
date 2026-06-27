@@ -804,6 +804,14 @@ export class Game {
       mech.model.group.visible = true
     }
     this.events.startRaid(land, 3)
+    // Juicy kills: every destroyed invader pops with a burst, a camera kick and a
+    // little hit-stop for weight.
+    this.events.onRaidKill = (pos) => {
+      this.camera.shake(0.32)
+      this.engine.triggerHitstop(0.028)
+      this.landingFx.trigger(pos, 0xffb24a, false)
+      this.audio.play('portal')
+    }
     this.landingFx.trigger(land, 0xff3b52, false) // red alert shockwave
     this.audio.play('portal')
     vibrate(60)
@@ -840,6 +848,7 @@ export class Game {
 
   private endCityRaid() {
     this.raidActive = false
+    this.events.onRaidKill = null // don't kick the camera while clearing stragglers
     this.events.stopRaid()
     this.hud.raid = null
     const credits = 250, xp = 120
