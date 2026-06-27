@@ -201,6 +201,7 @@ export class Game {
   private fxPool!: FxPool
   // Data-shard discovery layer (instanced pickups across the city).
   private collectibles!: Collectibles
+  private dustDevils!: DustDevils
   // Style-combo scoring for expressive traversal (air / board / jet / glide).
   private traversal!: TraversalScore
   // Capture chain multiplier (rapid captures scale score + credits).
@@ -366,7 +367,8 @@ export class Game {
       },
     }))
     // Mars dust devils: rust-coloured swirls roaming the surface. Mars-only.
-    this.systems.register(new DustDevils(this.engine.scene, {
+    // Walk into one and its updraft flings you up (handy for the high shards).
+    this.dustDevils = this.systems.register(new DustDevils(this.engine.scene, {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
@@ -2295,6 +2297,11 @@ export class Game {
       // Updraft columns: ride the rising air upward (works grounded or airborne).
       const lift = this.playground.updraftAt(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
       if (lift > 0) this.player.rideUpdraft(lift * dt)
+      // Mars dust devils double as updrafts: ride one up to the floating ore.
+      if (this.zone === 'mars') {
+        const dl = this.dustDevils.liftAt(this.player.position.x, this.player.position.y, this.player.position.z)
+        if (dl > 0) { this.player.rideUpdraft(dl * dt); this.camera.shake(0.04) }
+      }
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
     }
 
