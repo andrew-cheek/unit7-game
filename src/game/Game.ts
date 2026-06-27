@@ -472,6 +472,7 @@ export class Game {
       setCursorLockEnabled: (on: boolean) => { this.input.setLockEnabled(on); if (!on) this.input.exitLock() },
       adjustZoom: (factor: number) => this.camera.adjustZoom(factor),
       exitMinigame: () => this.exitMinigame(),
+      openArcade: () => this.teleportToArcade(),
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
@@ -572,6 +573,9 @@ export class Game {
     }
     this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3))
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
+    // Pin the render resolution for the whole drop so no mid-skydive buffer
+    // resize can flash black on mobile; a touch lower on the low tier for headroom.
+    this.engine.setAdaptive(false, config.tier.name === 'low' ? 0.85 : 1)
     this.hud.intro = true // surfaces the SKIP button
     this.player.setVisible(false)
     // Keep the cursor FREE during the drop (drag to look) so the DEPLOY / CUT
@@ -611,6 +615,7 @@ export class Game {
     const xp = (crashed ? 20 : 50) + (q >= 0.78 ? 40 : 0)
     this.dropIn?.dispose()
     this.dropIn = null
+    this.engine.setAdaptive(true) // resume adaptive resolution for normal play
     this.addCredits(credits)
     this.awardXp(xp)
     const grade = crashed ? 'REASSEMBLED' : q >= 0.78 ? 'CLEAN LANDING' : q >= 0.5 ? 'GOOD LANDING' : 'TOUCHDOWN'
@@ -652,6 +657,25 @@ export class Game {
     // re-announce game_start; on a first solo run with no join prompt, begin now.
     if (this.startedMode) this.emitGameStart(this.startedMode)
     else if (!this.multiplayerEnabled) this.emitGameStart('solo')
+  }
+
+  /** GAMES button / key: warp the player to right in front of the arcade, facing
+   *  the neon marquee + the game doors, ready to walk in. Earth only; ignored
+   *  during the drop-in, a zone change, or while a minigame is up. */
+  private teleportToArcade() {
+    if (this.zone !== 'earth' || this.dropIn || this.hud.minigame || this.intro) return
+    const x = 0, z = 24 // just south of the arcade's front opening (hall center z=46)
+    const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
+    this.input.yaw = 0 // face +z (north) - straight into the hall + marquee
+    this.input.pitch = 0.06
+    this.player.exitVehicle(new THREE.Vector3(x, gy, z))
+    this.player.setBoard(false)
+    this.camera.snap(this.player.position)
+    this.landingFx.trigger(new THREE.Vector3(x, gy, z), 0xff2bd0, true) // magenta arrival sparkle
+    this.audio.play('portal')
+    this.hud.banner = 'ARCADE'
+    this.bannerTimer = 2.2
+    trackEvent('arcade_warp', {})
   }
 
   /**

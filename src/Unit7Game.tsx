@@ -127,6 +127,19 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     }
   }, [joinPanelVisible])
 
+  // J = warp to the arcade entrance (the GAMES shortcut). Ignored while typing in
+  // a text field; the engine-side guard handles zone/drop/minigame eligibility.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'j' && e.key !== 'J') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      controlsRef.current?.openArcade()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
@@ -147,6 +160,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onBuy={(id) => controlsRef.current?.buyCosmetic(id)}
           onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
           onWarp={() => controlsRef.current?.toggleWarp()}
+          onArcade={() => controlsRef.current?.openArcade()}
           hideTopCenter={touch && joinPanelVisible}
         />
       )}

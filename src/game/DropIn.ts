@@ -618,9 +618,13 @@ export class DropIn {
   /** A little flock of drones hovering at each cloud deck - they scatter when you
    *  punch through that deck (wired from the cloud-punch in updateSkyFx). */
   private buildDrones() {
+    // Skip the drone flock on mobile: dark boxes near the descent line are the
+    // most likely thing to clip the close camera's near plane (a black flash),
+    // and the low tier wants fewer scene objects anyway.
+    if (config.tier.name === 'low') return
     const bodyGeo = this.ownG(new THREE.BoxGeometry(1.0, 0.34, 1.0))
     const tints = [0x27e7ff, 0xff2bd0, 0x9dff5a, 0xffd24a, 0xb98cff]
-    const perDeck = config.tier.name === 'low' ? 3 : 5
+    const perDeck = config.tier.name === 'medium' ? 4 : 5
     let i = 0
     for (const c of this.clouds) {
       for (let k = 0; k < perDeck; k++, i++) {

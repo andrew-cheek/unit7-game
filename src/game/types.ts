@@ -151,6 +151,7 @@ export interface GameControls {
   requestPointerLock(): void
   setCursorLockEnabled(on: boolean): void // free/lock the pointer (welcome panel)
   exitMinigame(): void // leave a minigame and return to the city
+  openArcade(): void // warp to the arcade entrance (GAMES button / key)
   restartIntro(): void // replay the opening cinematic from the start
   toggleMute(): void // toggle game audio
   cycleNeon(): void // cycle neon density: low -> med -> high

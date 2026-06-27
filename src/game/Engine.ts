@@ -103,6 +103,7 @@ export class Engine {
   // soft. Re-evaluated on a timer so we don't reallocate buffers every frame.
   private renderScale = 1
   private adaptTimer = 0
+  private adaptiveOn = true // when false, adapt() is frozen (e.g. during the drop-in)
   private static readonly SCALE_FLOOR = 0.6
   // Hitstop: a brief sim-time slowdown for impact weight. We scale the wall-clock
   // time fed into the fixed-step accumulator (NOT the fixed dt itself), so every
@@ -393,7 +394,22 @@ export class Engine {
    * mobile "never drop below ~30fps" guarantee - it trades a little sharpness
    * for a steady frame rate, then restores sharpness once the load eases.
    */
+  /**
+   * Freeze or resume adaptive resolution. Freezing pins the drawing-buffer size
+   * so no render-target reallocation happens - we use this during the drop-in,
+   * where a mid-skydive resize could flash a black frame on some mobile GPUs.
+   * Optionally snaps to a fixed scale first (a touch lower on mobile for headroom).
+   */
+  setAdaptive(on: boolean, snapScale?: number) {
+    this.adaptiveOn = on
+    if (snapScale != null && Math.abs(snapScale - this.renderScale) > 0.001) {
+      this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, snapScale))
+      this.applyResolution()
+    }
+  }
+
   private adapt(frame: number) {
+    if (!this.adaptiveOn) return
     this.adaptTimer += frame
     if (this.adaptTimer < 1) return
     this.adaptTimer = 0

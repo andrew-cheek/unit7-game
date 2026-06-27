@@ -45,6 +45,7 @@ export function HUD({
   onBuy,
   onEquip,
   onWarp,
+  onArcade,
   hideTopCenter,
 }: {
   hud: HudState
@@ -56,6 +57,7 @@ export function HUD({
   onBuy?: (id: string) => void
   onEquip?: (slot: 'trail' | 'accent', id: string) => void
   onWarp?: () => void
+  onArcade?: () => void
   // While the one-time join/solo gate is up it occupies the top-centre on touch;
   // suppress the top-centre HUD elements so they don't collide behind it.
   hideTopCenter?: boolean
@@ -76,6 +78,15 @@ export function HUD({
       <div style={topLeftRow}>
         <button style={pillBtn} onClick={onRestart}>RESTART ↺</button>
         <button style={{ ...pillBtn, borderColor: 'rgba(138,92,255,0.5)', boxShadow: '0 0 14px rgba(138,92,255,0.2)' }} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+        {/* Quick-warp to the arcade entrance. Earth only (the arcade lives there). */}
+        {onArcade && !hud.minigame && !hud.intro && hud.zone === 'earth' && (
+          <button
+            style={{ ...pillBtn, borderColor: 'rgba(255,43,208,0.7)', color: NEON.magenta, boxShadow: '0 0 16px rgba(255,43,208,0.35)', fontWeight: 800 }}
+            onClick={onArcade}
+          >
+            🕹 GAMES{touch ? '' : ' · J'}
+          </button>
+        )}
         {touch && !hud.paused && (
           <button style={{ ...pillBtn, borderColor: 'rgba(255,43,208,0.5)', boxShadow: '0 0 14px rgba(255,43,208,0.2)' }} onClick={onPause}>PAUSE ❚❚</button>
         )}
@@ -236,7 +247,7 @@ export function HUD({
       {/* control hints (desktop) */}
       {!touch && (
         <div style={hints}>
-          WASD move · SPACE fly (tap again = boost) · SHIFT sprint · Q grapple · O chute (tap again = CUT) · C board · G enter/ride · H capture · F boost · T transform · ESC = pause + all controls
+          WASD move · SPACE fly (tap again = boost) · SHIFT sprint · Q grapple · O chute (tap again = CUT) · C board · G enter/ride · H capture · F boost · T transform · J arcade · ESC = pause + all controls
         </div>
       )}
 
