@@ -542,11 +542,12 @@ export class Game {
       this.doTravel(z)
     }
 
-    // The opening you play, not watch: start standing on the floating factory
-    // launch pad and step off the ledge into the skydive (skippable). Off-world
-    // debug starts skip straight to gameplay.
+    // The opening you play, not watch: an interactive orbital drop-in over the
+    // city (skippable). Off-world debug starts skip straight to gameplay.
+    // (The floating-factory launch pad is kept in the codebase but disabled - swap
+    // this back to beginLaunchPad() to re-enable it.)
     if (this.cfg.startInIntro && this.zone === 'earth') {
-      this.beginLaunchPad()
+      this.beginDropIn()
     } else {
       this.startMorning()
       // Start on foot here too - the hoverboard is opt-in via the BOARD button.
@@ -795,7 +796,7 @@ export class Game {
     this.warpRevert()
     if (this.vehicles.current) this.player.exitVehicle(this.player.position)
     if (this.zone !== 'earth') this.doTravel('earth')
-    this.beginLaunchPad() // replay the opening from the assembly platform
+    this.beginDropIn() // replay the dive opening
     this.hudListener({ ...this.hud, radar: this.radar })
   }
 
