@@ -81,6 +81,7 @@ export class NightFireworks implements GameSystem {
 
   setZone(zone: Zone) {
     this.zone = zone
+    this.group.visible = zone === 'earth'
     if (zone !== 'earth') this.hideAll()
   }
 
@@ -161,7 +162,11 @@ export class NightFireworks implements GameSystem {
   }
 
   update(dt: number) {
-    if (this.zone !== 'earth') return
+    // Drive group visibility from the zone each frame so it's correct at startup
+    // too (setZone only fires on a zone *change*, and you begin on Earth).
+    const onEarth = this.zone === 'earth'
+    if (this.group.visible !== onEarth) this.group.visible = onEarth
+    if (!onEarth) return
     const night = this.deps.dayFactor() < NIGHT_AT
 
     // Launch scheduling: only at night, and only when a burst is free.
