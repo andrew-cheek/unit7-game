@@ -107,6 +107,9 @@ export class Engine {
   private adaptCooldown = 0 // seconds remaining before another scale change is allowed
   private adaptStreak = 0 // consecutive same-direction out-of-band evals (debounce)
   private contextLost = false // true between webglcontextlost and ...restored
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null // debounce for ResizeObserver bursts
+  private lastResizeW = 0
+  private lastResizeH = 0
   private static readonly SCALE_FLOOR = 0.6
   // Hitstop: a brief sim-time slowdown for impact weight. We scale the wall-clock
   // time fed into the fixed-step accumulator (NOT the fixed dt itself), so every
@@ -148,6 +151,7 @@ export class Engine {
     })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.pixelCap))
     this.renderer.setSize(w, h)
+    this.lastResizeW = w; this.lastResizeH = h // seed so the first ResizeObserver fire is a no-op
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     // Manual reset: the counter accumulates across the whole frame (scene +
     // every composer pass) and we snapshot it after composer.render, so the
@@ -501,13 +505,29 @@ export class Engine {
     this.camera.fov = this.baseFov + this.fovBoost
   }
 
+  // Coalesce ResizeObserver bursts. On mobile the browser toolbar shows/hides on
+  // touch (i.e. exactly when you start moving), jiggling the viewport height and
+  // firing a burst of resize events. Reallocating the render targets on each one
+  // black-flashes the canvas - so we debounce to a single realloc once the size
+  // settles, and skip it entirely if the size didn't actually change.
   resize = () => {
+    if (this.disposed) return
+    if (this.resizeTimer != null) clearTimeout(this.resizeTimer)
+    this.resizeTimer = setTimeout(this.applyResize, 180)
+  }
+
+  private applyResize = () => {
+    this.resizeTimer = null
     if (this.disposed) return
     const w = Math.max(1, this.container.clientWidth)
     const h = Math.max(1, this.container.clientHeight)
+    // Camera aspect/FOV are cheap (no realloc) - always keep them current.
     this.camera.aspect = w / h
     this.applyAdaptiveFov(w / h)
     this.camera.updateProjectionMatrix()
+    if (w === this.lastResizeW && h === this.lastResizeH) return // no real change → no buffer realloc
+    this.lastResizeW = w
+    this.lastResizeH = h
     const dpr = this.effectiveDpr()
     this.renderer.setPixelRatio(dpr)
     this.renderer.setSize(w, h)
@@ -525,6 +545,7 @@ export class Engine {
     this.stop()
     this.onUpdate = null
     this.onRender = null
+    if (this.resizeTimer != null) { clearTimeout(this.resizeTimer); this.resizeTimer = null }
     this.resizeObserver.disconnect()
 
     disposeObject(this.scene)
