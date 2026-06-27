@@ -40,6 +40,7 @@ export class MissionSystem {
   private idx = 0
   private captureBase = 0
   private minigamePlayed = false
+  private visited = new Set<Zone>() // distinct zones reached this session (off-world steps are order-independent)
   private beaconMats: THREE.Material[] = []
 
   constructor() {
@@ -71,6 +72,25 @@ export class MissionSystem {
     this.idx = Math.max(0, Math.min(Math.floor(Number(p.idx) || 0), config.missions.length))
     this.minigamePlayed = !!p.minigamePlayed
     this.captureBase = sessionCaptured
+    // Seed the visited set from chain progress so off-world steps already cleared
+    // last session stay cleared (the set itself isn't persisted - it's reconstructed).
+    this.visited.clear()
+    for (let i = 0; i < this.idx && i < config.missions.length; i++) {
+      const mm = config.missions[i]
+      if (mm.type === 'zone' && mm.zone && mm.zone !== 'earth') this.visited.add(mm.zone)
+    }
+  }
+
+  /** How many off-world 'zone' steps the chain requires up to and including the
+   *  current one (so off-world steps complete in order, regardless of which
+   *  off-world zone you actually reach first). */
+  private offWorldOrdinal(): number {
+    let n = 0
+    for (let i = 0; i <= this.idx && i < config.missions.length; i++) {
+      const mm = config.missions[i]
+      if (mm.type === 'zone' && mm.zone && mm.zone !== 'earth') n++
+    }
+    return n
   }
 
   /**
@@ -79,6 +99,7 @@ export class MissionSystem {
    */
   update(ctx: MissionContext): string | null {
     const list = config.missions
+    this.visited.add(ctx.zone)
     if (this.idx >= list.length) {
       this.objTarget = null
       this.objBeacon.visible = false
@@ -94,7 +115,17 @@ export class MissionSystem {
         done = !!ctx.currentVehicle && isMech(ctx.currentVehicle.kind)
         break
       case 'zone':
-        done = ctx.zone === m.zone
+        if (m.zone === 'earth') {
+          done = ctx.zone === 'earth'
+        } else {
+          // Off-world steps are order-independent: clear when you've visited at
+          // least as many distinct off-world zones as the chain needs up to here.
+          // So flying through EITHER portal (incl. during the drop-in) progresses
+          // the chain instead of stranding you off-world with a dead beacon.
+          let off = 0
+          for (const z of this.visited) if (z !== 'earth') off++
+          done = off >= this.offWorldOrdinal()
+        }
         break
       case 'capture':
         done = ctx.captured - this.captureBase >= (m.count ?? 1)
@@ -114,9 +145,13 @@ export class MissionSystem {
       label = nextM?.title ?? 'Free roam: explore the world!'
       rewardOf = nextM
     } else if (m.type === 'capture') {
-      // Live progress on the only objective with no beacon/distance feedback.
+      // Live progress on the only objective with no beacon/distance feedback. The
+      // aliens live in the city, so if you arrive on this step off-world (it starts
+      // right after the Mars trip), say so instead of showing a dead 0/N.
       const got = Math.min(m.count ?? 1, ctx.captured - this.captureBase)
-      label = `${m.title} · ${got}/${m.count ?? 1}`
+      label = ctx.zone === 'earth'
+        ? `${m.title} · ${got}/${m.count ?? 1}`
+        : `${m.title} — head back to Earth · ${got}/${m.count ?? 1}`
       rewardOf = m
     } else {
       label = m.title

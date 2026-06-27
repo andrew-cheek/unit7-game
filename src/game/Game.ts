@@ -608,10 +608,11 @@ export class Game {
     const placeBonus = di ? Math.max(0, di.raceTotal - di.racePlace) * 25 : 0
     const dest = di?.chosenDest ?? null
     // Where you come down. Flying through a destination portal overrides it:
-    // arcade -> the plaza; mars/moon -> a zone jump kicked off below. A CRASH also
-    // comes down at the plaza (the repair drone sets you on the onboarding spot)
-    // so you always land right by the guide robot instead of stranded mid-city.
-    const land = dest === 'arcade' || crashed ? this.dropLand.clone() : di ? di.landingPos.clone() : this.dropLand.clone()
+    // arcade/city -> the plaza; mars/moon -> a zone jump kicked off below. A CRASH
+    // also comes down at the plaza (the repair drone sets you on the onboarding
+    // spot) so you always land right by the guide robot, the arcade and the first
+    // objectives instead of stranded out at the edge of the map.
+    const land = dest === 'arcade' || dest === 'city' || crashed ? this.dropLand.clone() : di ? di.landingPos.clone() : this.dropLand.clone()
     const chuteBonus = crashed ? 0 : q >= 0.78 ? 180 : q >= 0.5 ? 80 : 0
     const credits = (crashed ? 40 : 120) + chuteBonus + orbBonus + trickBonus + placeBonus
     const xp = (crashed ? 20 : 50) + (q >= 0.78 ? 40 : 0)
