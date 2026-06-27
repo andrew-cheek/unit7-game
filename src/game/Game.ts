@@ -36,6 +36,7 @@ import { CaptureCombo } from './CaptureCombo'
 import { Bots } from './Bots'
 import { CityLife } from './CityLife'
 import { GrindRails } from './GrindRails'
+import { MeteorShower } from './MeteorShower'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -352,6 +353,17 @@ export class Game {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
     this.player.setGrindSnap((x, y, z) => grindRails.querySnap(x, y, z))
+    // Moon meteor shower: ambient spectacle that rains rock out of the lunar sky.
+    // A near strike kicks the camera so it reads as physical. Moon-only.
+    this.systems.register(new MeteorShower(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      focus: () => this.focus,
+      onImpact: (pos, strength) => {
+        this.camera.shake(0.18 + strength * 0.7)
+        this.landingFx.trigger(pos, 0xffb060, strength > 0.6)
+        if (strength > 0.3) { this.audio.play('explosion'); vibrate(Math.round(20 + strength * 50)) }
+      },
+    }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
