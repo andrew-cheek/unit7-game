@@ -542,12 +542,11 @@ export class Game {
       this.doTravel(z)
     }
 
-    // The opening you play, not watch: an interactive orbital drop-in over the
-    // city (skippable). Off-world debug starts skip straight to gameplay.
-    // (The floating-factory launch pad is kept in the codebase but disabled - swap
-    // this back to beginLaunchPad() to re-enable it.)
+    // The opening you play, not watch: start standing on the floating factory
+    // launch pad and step off the ledge into the skydive (skippable). Off-world
+    // debug starts skip straight to gameplay.
     if (this.cfg.startInIntro && this.zone === 'earth') {
-      this.beginDropIn()
+      this.beginLaunchPad()
     } else {
       this.startMorning()
       // Start on foot here too - the hoverboard is opt-in via the BOARD button.
@@ -612,7 +611,7 @@ export class Game {
     this.hud.onPlatform = false
   }
 
-  private beginDropIn(startPos?: THREE.Vector3) {
+  private beginDropIn(startPos?: THREE.Vector3, easeIn?: boolean) {
     // Steer toward the open plaza right in front of the ARCADE - the activity hub
     // (arcade doors, bounce pads, cannons, the mech, the Mars gate are all here),
     // so you touch down in the middle of the fun instead of an empty edge.
@@ -627,7 +626,7 @@ export class Game {
       const roof = this.physics.topSupport(x, z, 1e6)
       return roof != null && roof > g ? roof : g
     }
-    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3), startPos)
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3), startPos, easeIn)
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
     // Pin the render resolution for the whole drop so no mid-skydive buffer
     // resize can flash black on mobile; a touch lower on the low tier for headroom.
@@ -648,10 +647,12 @@ export class Game {
     // Don't clobber the density the launch pad already saved (or we'd restore the
     // thinned value, not the original, after landing).
     if (fog instanceof THREE.FogExp2) { if (this.savedFogDensity == null) this.savedFogDensity = fog.density; fog.density = 0.0007 }
-    this.hud.banner = 'HIGH-ALTITUDE DROP'
-    this.bannerTimer = 2.5
-    this.hud.missionPopup = { title: 'DIVE IN', body: 'Skydive down. Steer with WASD (or drag) - push forward to nose-dive steeply (hit terminal velocity for a SONIC BOOM), pull back to flare and slow. Thread the glowing boost rings, punch through the clouds, and race the other divers down. Hold SPACE for the JETPACK to slow, hover, or climb. Fly through a portal pad to pick where you land (city, arcade, Mars, Moon). H or FLIP does a mid-air somersault. Press O or DEPLOY for the chute before you hit the ground.' }
-    this.missionPopupTimer = 8
+    // When eased in from the pad, don't slam a banner + wall-of-text over the
+    // smooth hand-off; the in-dive HUD (jetpack tip, altimeter, PULL UP) coaches it.
+    this.hud.banner = easeIn ? null : 'HIGH-ALTITUDE DROP'
+    this.bannerTimer = easeIn ? 0 : 2.5
+    this.hud.missionPopup = { title: 'SKYDIVE', body: 'Steer with WASD or drag. Hold SPACE to jetpack; press O for the chute before you land. Fly through a portal to pick where you touch down.' }
+    this.missionPopupTimer = easeIn ? 4 : 8
   }
 
   private finishDrop() {
@@ -796,7 +797,7 @@ export class Game {
     this.warpRevert()
     if (this.vehicles.current) this.player.exitVehicle(this.player.position)
     if (this.zone !== 'earth') this.doTravel('earth')
-    this.beginDropIn() // replay the dive opening
+    this.beginLaunchPad() // replay the opening from the launch platform
     this.hudListener({ ...this.hud, radar: this.radar })
   }
 
@@ -1873,7 +1874,7 @@ export class Game {
       if (this.launchPad.steppedOff(p.x, p.y, p.z)) {
         const off = p.clone()
         this.endLaunchPad()
-        this.beginDropIn(off) // dive begins exactly where you stepped off
+        this.beginDropIn(off, true) // dive begins where you stepped off, camera eases in
         this.pushHud(dt)
         return
       }

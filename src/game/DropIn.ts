@@ -160,6 +160,13 @@ export class DropIn {
   private camPos = new THREE.Vector3()
   private camLook = new THREE.Vector3()
   private fwd = new THREE.Vector3()
+  // Hand-off ease: when launched from the pad, glide the camera from the on-foot
+  // view into the dive view (instead of a hard snap) so stepping off feels like
+  // tipping into a dive, not a jump-cut.
+  private camEase = 0
+  private camFrom = new THREE.Vector3()
+  private lookFrom = new THREE.Vector3()
+  private easeLook = new THREE.Vector3()
 
   private static readonly STEER = 64 // canopy steer authority
   private static readonly TURN_RATE = 4.0 // dive heading turn speed (rad/s) at full moveX - snappy aiming
@@ -177,7 +184,7 @@ export class DropIn {
   // the drop still works without a physics world; set from Game.
   private solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void
 
-  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number, solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void, startPos?: THREE.Vector3) {
+  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number, solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void, startPos?: THREE.Vector3, easeIn?: boolean) {
     this.scene = scene
     this.cam = cam
     this.input = input
@@ -193,7 +200,17 @@ export class DropIn {
     this.diveHeading = this.camHeading
     this.build()
     scene.add(this.group)
-    this.placeCamera(true)
+    if (easeIn) {
+      // Stepped off the pad: keep the camera where it was (behind the walking
+      // robot) and ease it into the dive view; start the fall gently and let it
+      // accelerate, so it reads as "step off -> tip into a dive", not a jump-cut.
+      this.camEase = 1
+      this.camFrom.copy(cam.position)
+      cam.getWorldDirection(this.lookFrom).multiplyScalar(12).add(cam.position)
+      this.vy = -4
+    } else {
+      this.placeCamera(true)
+    }
   }
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
@@ -774,6 +791,7 @@ export class DropIn {
 
   update(dt: number) {
     if (this.done) return
+    if (this.camEase > 0) this.camEase = Math.max(0, this.camEase - dt / 0.7) // hand-off ease timer
     // Safety: a normal drop finishes well under a minute; if anything stalls it,
     // force a clean handoff so the player is never trapped in the drop-in. Hand off
     // at the PLAZA target (not wherever the stall left you) so you still arrive by
@@ -1402,7 +1420,16 @@ export class DropIn {
       lookWant.z += (Math.random() - 0.5) * j
       this.camShake *= 0.86
     }
-    this.cam.lookAt(lookWant)
+    // Hand-off ease: blend position + aim from the on-foot view into the dive view.
+    if (this.camEase > 0) {
+      const p = 1 - this.camEase
+      const pe = p * p * (3 - 2 * p) // smoothstep
+      this.cam.position.lerpVectors(this.camFrom, want, pe)
+      this.easeLook.lerpVectors(this.lookFrom, lookWant, pe)
+      this.cam.lookAt(this.easeLook)
+    } else {
+      this.cam.lookAt(lookWant)
+    }
   }
 
   dispose() {
