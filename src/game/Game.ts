@@ -15,6 +15,7 @@ import { Sky } from './Sky'
 import { AssetLoader } from './AssetLoader'
 import { Zones } from './Zones'
 import { Events } from './Events'
+import { CitySpectacle } from './CitySpectacle'
 import { Intro } from './Intro'
 import { DropIn } from './DropIn'
 import { CameraController } from './Camera'
@@ -98,6 +99,7 @@ export class Game {
   readonly assets: AssetLoader
   readonly zones: Zones
   readonly events: Events
+  private citySpectacle!: CitySpectacle
   readonly camera: CameraController
   readonly controls
   zone: Zone
@@ -374,6 +376,7 @@ export class Game {
       vibrate(50)
     }
     this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind))
+    this.citySpectacle = new CitySpectacle(this.engine.scene)
     this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
@@ -1172,6 +1175,7 @@ export class Game {
     this.missiles.setVisible(true)
     this.npcs.setVisible(zone === 'earth')
     this.events.setVisible(zone === 'earth')
+    this.citySpectacle.setVisible(zone === 'earth')
     this.patrols.setVisible(zone === 'earth')
     this.sky.setVisible(zone !== 'moon') // ships fly over Earth and Mars
 
@@ -2225,6 +2229,7 @@ export class Game {
 
     const ambient = onEarth && !this.launchPad // skip ground crowds while up on the launch pad
     if (this.raidActive) this.updateCityRaid()
+    if (onEarth) this.citySpectacle.update(dt)
     if (ambient) this.npcs.update(dt, this.player.position)
     if (ambient) this.events.update(dt, this.player.position)
     if (ambient) this.patrols.update(dt)
@@ -2607,6 +2612,7 @@ export class Game {
     this.sky.dispose()
     this.zones.dispose()
     this.events.dispose()
+    this.citySpectacle.dispose()
     this.intro?.dispose()
     this.dropIn?.dispose()
     this.assets.dispose()
