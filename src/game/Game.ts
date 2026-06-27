@@ -24,6 +24,7 @@ import { ArcadeSystem } from './ArcadeSystem'
 import { Boundary } from './Boundary'
 import { GuideBot } from './GuideBot'
 import { LandingFx } from './LandingFx'
+import { LaunchPad } from './LaunchPad'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -165,6 +166,7 @@ export class Game {
   private boundary!: Boundary // bouncy alien-blob world edge (Earth)
   private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
   private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
+  private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
   private arcadeMats: THREE.Material[] = []
   private arcadeGeos: THREE.BufferGeometry[] = []
   private arcadeTex: THREE.CanvasTexture[] = []
@@ -460,8 +462,10 @@ export class Game {
       resume: () => this.setPaused(false),
       pause: () => this.setPaused(true),
       skipIntro: () => {
-        if ((this.intro && !this.intro.done) || (this.dropIn && !this.dropIn.done)) trackEvent('intro_skipped')
+        if ((this.intro && !this.intro.done) || (this.dropIn && !this.dropIn.done) || this.launchPad) trackEvent('intro_skipped')
         this.intro?.skip()
+        // Skipping from the launch pad starts the dive, then immediately lands it.
+        if (this.launchPad) { this.endLaunchPad(); this.beginDropIn() }
         this.dropIn?.skip()
       },
       dropDeploy: () => this.dropIn?.deploy(),
@@ -537,10 +541,11 @@ export class Game {
       this.doTravel(z)
     }
 
-    // The opening you play, not watch: an interactive orbital drop-in over the
-    // city (skippable). Off-world debug starts skip straight to gameplay.
+    // The opening you play, not watch: start standing on the floating factory
+    // launch pad and step off the ledge into the skydive (skippable). Off-world
+    // debug starts skip straight to gameplay.
     if (this.cfg.startInIntro && this.zone === 'earth') {
-      this.beginDropIn()
+      this.beginLaunchPad()
     } else {
       this.startMorning()
       // Start on foot here too - the hoverboard is opt-in via the BOARD button.
@@ -556,7 +561,43 @@ export class Game {
    * and lighten the fog so the city reads from altitude. The day clock runs on
    * through the descent so you land as the sun finishes cresting.
    */
-  private beginDropIn() {
+  /** Stand the player on the floating factory launch pad, high above the city, at
+   *  the dive's start point - so stepping off the ledge hands straight into the
+   *  skydive. Robots are stamped out behind you and march off the edge to dive. */
+  private beginLaunchPad() {
+    const tx = 0, tz = 20
+    this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
+    const start = new THREE.Vector3(tx + 30, 1320, tz - 300) // matches DropIn's default high-altitude start
+    const faceYaw = Math.atan2(tx - start.x, tz - start.z) // local +Z (the ledge) points at the city
+    this.launchPad = new LaunchPad(this.engine.scene, start, faceYaw)
+    this.physics.addGroundMesh(this.launchPad.collider)
+    this.player.exitVehicle(this.launchPad.spawn)
+    this.player.setVisible(true)
+    this.player.setBoard(false)
+    this.input.yaw = this.launchPad.spawnYaw
+    this.input.pitch = 0.06
+    this.player.resetInterp()
+    this.camera.snap(this.player.position)
+    this.input.setLockEnabled(true)
+    if (!this.timeFromQuery) { this.world.setDebugTime(9); this.world.setTimeScale(0.5); this.morningSunrise = true }
+    const fog = this.engine.scene.fog
+    if (fog instanceof THREE.FogExp2 && this.savedFogDensity == null) { this.savedFogDensity = fog.density; fog.density = 0.0006 }
+    this.engine.setAdaptive(false, config.tier.name === 'low' ? 0.85 : 1)
+    this.hud.intro = true // surfaces the SKIP button
+    this.hud.banner = 'UNIT 7 · ASSEMBLY PLATFORM'
+    this.bannerTimer = 2.6
+    this.hud.missionPopup = { title: 'BEGIN YOUR JOURNEY', body: "You're a fresh Unit-7 on the assembly platform, high above the city. Walk (WASD / the stick) to the glowing neon arrow at the edge and step or jump off to start your skydive down. The other units are doing exactly that." }
+    this.missionPopupTimer = 7
+  }
+
+  private endLaunchPad() {
+    if (!this.launchPad) return
+    this.physics.removeGroundMesh(this.launchPad.collider)
+    this.launchPad.dispose()
+    this.launchPad = null
+  }
+
+  private beginDropIn(startPos?: THREE.Vector3) {
     // Steer toward the open plaza right in front of the ARCADE - the activity hub
     // (arcade doors, bounce pads, cannons, the mech, the Mars gate are all here),
     // so you touch down in the middle of the fun instead of an empty edge.
@@ -571,7 +612,7 @@ export class Game {
       const roof = this.physics.topSupport(x, z, 1e6)
       return roof != null && roof > g ? roof : g
     }
-    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3))
+    this.dropIn = new DropIn(this.engine.scene, this.engine.camera, this.input, this.dropLand, dropGround, (pos, vel) => this.physics.resolveHorizontal(pos, vel, 1.4, 3), startPos)
     this.dropIn.onSfx = (k) => this.audio.play(k === 'ring' ? 'objective' : k === 'deploy' ? 'ui' : 'portal')
     // Pin the render resolution for the whole drop so no mid-skydive buffer
     // resize can flash black on mobile; a touch lower on the low tier for headroom.
@@ -589,7 +630,9 @@ export class Game {
       this.morningSunrise = true
     }
     const fog = this.engine.scene.fog
-    if (fog instanceof THREE.FogExp2) { this.savedFogDensity = fog.density; fog.density = 0.0007 }
+    // Don't clobber the density the launch pad already saved (or we'd restore the
+    // thinned value, not the original, after landing).
+    if (fog instanceof THREE.FogExp2) { if (this.savedFogDensity == null) this.savedFogDensity = fog.density; fog.density = 0.0007 }
     this.hud.banner = 'HIGH-ALTITUDE DROP'
     this.bannerTimer = 2.5
     this.hud.missionPopup = { title: 'DIVE IN', body: 'Skydive down. Steer with WASD (or drag) - push forward to nose-dive steeply (hit terminal velocity for a SONIC BOOM), pull back to flare and slow. Thread the glowing boost rings, punch through the clouds, and race the other divers down. Hold SPACE for the JETPACK to slow, hover, or climb. Fly through a portal pad to pick where you land (city, arcade, Mars, Moon). H or FLIP does a mid-air somersault. Press O or DEPLOY for the chute before you hit the ground.' }
@@ -729,7 +772,7 @@ export class Game {
 
   /** Replay the opening cinematic from the top (triggered by the HUD button). */
   private restartIntro() {
-    if (this.intro || this.dropIn || this.inMinigame || this.paused) return
+    if (this.intro || this.dropIn || this.launchPad || this.inMinigame || this.paused) return
     // Replaying ends the current run; finishDrop re-emits game_start (with the
     // same mode) when control hands back. Restart now replays the playable dive
     // opening (the same one you get on a fresh load), not the old cinematic.
@@ -738,7 +781,7 @@ export class Game {
     this.warpRevert()
     if (this.vehicles.current) this.player.exitVehicle(this.player.position)
     if (this.zone !== 'earth') this.doTravel('earth')
-    this.beginDropIn()
+    this.beginLaunchPad() // replay the opening from the assembly platform
     this.hudListener({ ...this.hud, radar: this.radar })
   }
 
@@ -1806,6 +1849,21 @@ export class Game {
     }
     if (this.trans.phase !== 'none') this.updateTransition(dt)
 
+    // Launch pad: you stand on the floating factory and walk/jump off the ledge to
+    // start the dive. The player runs the normal on-foot update (below); here we
+    // just animate the pad and hand off to the skydive once you're over the edge.
+    if (this.launchPad) {
+      this.launchPad.update(dt, this.player.position.x, this.player.position.z)
+      const p = this.player.position
+      if (this.launchPad.steppedOff(p.x, p.y, p.z)) {
+        const off = p.clone()
+        this.endLaunchPad()
+        this.beginDropIn(off) // dive begins exactly where you stepped off
+        this.pushHud(dt)
+        return
+      }
+    }
+
     const onEarth = this.zone === 'earth'
     const piloting = !!this.vehicles.current
 
@@ -1874,7 +1932,7 @@ export class Game {
       // Low-G bubbles scale the player's gravity down locally (floaty triple-hops).
       const pg = gravity * this.playground.lowGFactor(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
       this.player.update(dt, this.input, this.physics, pg)
-      if (this.zone === 'earth') {
+      if (this.zone === 'earth' && !this.launchPad) {
         // Bouncy alien-blob edge (replaces the old hard square clamp on Earth): it
         // shoves you back inside the ring and, on foot/flying, flings you up and
         // back toward the arcade. Height-independent, so you can't jetpack over it.
@@ -1962,7 +2020,7 @@ export class Game {
       this.heroLight.intensity = 22
       this.heroLight.color.setHex(0x9fd8ff)
     }
-    this.hud.objective = this.missions.update({
+    this.hud.objective = this.launchPad ? 'Walk to the arrow and step off the edge to dive in' : this.missions.update({
       zone: this.zone,
       playerPos: this.player.position,
       captured: this.hud.captured,
@@ -1987,10 +2045,11 @@ export class Game {
       },
     })
 
-    if (onEarth) this.npcs.update(dt, this.player.position)
-    if (onEarth) this.events.update(dt, this.player.position)
-    if (onEarth) this.patrols.update(dt)
-    if (onEarth) this.guide.update(dt, this.player.position.x, this.player.position.z)
+    const ambient = onEarth && !this.launchPad // skip ground crowds while up on the launch pad
+    if (ambient) this.npcs.update(dt, this.player.position)
+    if (ambient) this.events.update(dt, this.player.position)
+    if (ambient) this.patrols.update(dt)
+    if (ambient) this.guide.update(dt, this.player.position.x, this.player.position.z)
     this.landingFx.update(dt) // unconditional so the touchdown burst finishes after the hand-off
     this.missiles.update(dt, (x, z) => this.physics.sampleGround(x, z, 200)?.y ?? 0, (pos, r) => this.detonate(pos, r))
     if (this.zone !== 'moon') this.sky.update(dt) // sky traffic on Earth + Mars
@@ -2348,6 +2407,7 @@ export class Game {
     this.boundary.dispose()
     this.guide.dispose()
     this.landingFx.dispose()
+    this.launchPad?.dispose()
     this.worldEvents.dispose()
     this.exploration.dispose()
     this.playground.dispose()

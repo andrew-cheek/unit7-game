@@ -177,14 +177,16 @@ export class DropIn {
   // the drop still works without a physics world; set from Game.
   private solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void
 
-  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number, solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void) {
+  constructor(scene: THREE.Scene, cam: THREE.PerspectiveCamera, input: Input, target: THREE.Vector3, getGround: (x: number, z: number) => number, solid?: (pos: THREE.Vector3, vel: THREE.Vector3) => void, startPos?: THREE.Vector3) {
     this.scene = scene
     this.cam = cam
     this.input = input
     this.target = target.clone()
     this.getGround = getGround
     this.solid = solid
-    this.start = new THREE.Vector3(target.x + 30, START_Y, target.z - 300)
+    // Default high-altitude start, or begin exactly where the player stepped off
+    // the launch pad so the hand-off is seamless.
+    this.start = startPos ? startPos.clone() : new THREE.Vector3(target.x + 30, START_Y, target.z - 300)
     this.pos = this.start.clone()
     this.rb = createRobot()
     this.camHeading = Math.atan2(this.target.x - this.start.x, this.target.z - this.start.z)

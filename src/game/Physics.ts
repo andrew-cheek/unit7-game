@@ -52,6 +52,11 @@ export class Physics {
     this.rebuildGrid()
   }
 
+  /** Temporarily add a walkable surface (e.g. the launch-pad platform) so the
+   *  player can stand/walk on it via sampleGround. Paired with removeGroundMesh. */
+  addGroundMesh(m: THREE.Mesh) { if (!this.groundMeshes.includes(m)) this.groundMeshes.push(m) }
+  removeGroundMesh(m: THREE.Mesh) { const i = this.groundMeshes.indexOf(m); if (i >= 0) this.groundMeshes.splice(i, 1) }
+
   private cellKey(ix: number, iz: number): number {
     return (ix + 4096) * 8192 + (iz + 4096)
   }
