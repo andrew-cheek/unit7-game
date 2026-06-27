@@ -9,10 +9,12 @@ export interface Profile {
   credits: number
   unlocks: string[] // unlocked vehicle kinds (mechM is free by default)
   shardsFound: number // lifetime data shards collected (discovery layer)
+  motherships: number // raid motherships destroyed (lifetime)
+  zonesArchived: string[] // zones whose shard field has been 100% collected
 }
 
 const KEY = 'unit7.profile.v1'
-const DEFAULT: Profile = { best: 0, lifetimeCaptured: 0, credits: 0, unlocks: ['mechM'], shardsFound: 0 }
+const DEFAULT: Profile = { best: 0, lifetimeCaptured: 0, credits: 0, unlocks: ['mechM'], shardsFound: 0, motherships: 0, zonesArchived: [] }
 
 export function loadProfile(): Profile {
   try {
@@ -27,6 +29,8 @@ export function loadProfile(): Profile {
       credits: Number(p.credits) || 0,
       unlocks,
       shardsFound: Number(p.shardsFound) || 0,
+      motherships: Number(p.motherships) || 0,
+      zonesArchived: Array.isArray(p.zonesArchived) ? p.zonesArchived.map(String) : [],
     }
   } catch {
     return { ...DEFAULT, unlocks: [...DEFAULT.unlocks] }
