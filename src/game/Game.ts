@@ -38,6 +38,7 @@ import { CityLife } from './CityLife'
 import { GrindRails } from './GrindRails'
 import { MeteorShower } from './MeteorShower'
 import { DustDevils } from './DustDevils'
+import { Aurora } from './Aurora'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
 import { Playground } from './Playground'
@@ -380,6 +381,11 @@ export class Game {
     // Walk into one and its updraft flings you up (handy for the high shards).
     this.dustDevils = this.systems.register(new DustDevils(this.engine.scene, {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // Night aurora over the city: shimmering curtains that fade in after dusk and
+    // out at dawn. Earth-only ambient set dressing.
+    this.systems.register(new Aurora(this.engine.scene, {
+      dayFactor: () => this.world.dayFactor,
     }))
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
