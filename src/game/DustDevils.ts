@@ -87,6 +87,21 @@ export class DustDevils implements GameSystem {
     this.group.visible = zone === 'mars'
   }
 
+  /** Rising-air lift (m/s) if the point sits inside a dust devil's column, else 0.
+   *  Walk into one on Mars and it flings you up - handy for the high shards. */
+  liftAt(x: number, y: number, z: number): number {
+    if (this.zone !== 'mars') return 0
+    for (const d of this.devils) {
+      const p = d.group.position
+      const dx = x - p.x, dz = z - p.z
+      const rad = 4 * d.scale
+      if (dx * dx + dz * dz > rad * rad) continue
+      const top = p.y + 13 * d.scale
+      if (y >= p.y - 2 && y < top) return 15
+    }
+    return 0
+  }
+
   update(dt: number) {
     if (this.zone !== 'mars') return
     for (const d of this.devils) {
