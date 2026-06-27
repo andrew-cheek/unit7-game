@@ -228,6 +228,71 @@ export class Zones {
     group.add(body)
   }
 
+  /** A big, detailed Earth hung in the Moon's black sky (the iconic Earthrise):
+   *  oceans + continents + clouds + ice caps, wrapped in an atmosphere glow. */
+  private buildEarthGlobe(group: THREE.Group, pos: THREE.Vector3, radius: number): (dt: number) => void {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256
+    const ctx = cv.getContext('2d')!
+    const g = ctx.createLinearGradient(0, 0, 0, 256)
+    g.addColorStop(0, '#0a2a5e'); g.addColorStop(0.5, '#1862b4'); g.addColorStop(1, '#0a2a5e')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 512, 256)
+    const land = ['#2e6b3a', '#3f7a44', '#6b5a2e', '#4a7a3a', '#7a6b3a']
+    for (let i = 0; i < 26; i++) {
+      ctx.fillStyle = land[i % land.length]
+      ctx.beginPath(); ctx.ellipse(Math.random() * 512, 30 + Math.random() * 196, 16 + Math.random() * 44, 10 + Math.random() * 28, Math.random() * 3, 0, 6.28); ctx.fill()
+    }
+    ctx.globalAlpha = 0.5; ctx.fillStyle = '#eef4ff'
+    for (let i = 0; i < 30; i++) { ctx.beginPath(); ctx.ellipse(Math.random() * 512, Math.random() * 256, 12 + Math.random() * 34, 5 + Math.random() * 12, 0, 0, 6.28); ctx.fill() }
+    ctx.globalAlpha = 1; ctx.fillStyle = '#dfeaff'
+    ctx.fillRect(0, 0, 512, 16); ctx.fillRect(0, 240, 512, 16)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    const earth = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 32), new THREE.MeshBasicMaterial({ map: tex, fog: false }))
+    earth.position.copy(pos); earth.rotation.z = 0.32
+    group.add(earth)
+    const atmo = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.13, 40, 28), new THREE.MeshBasicMaterial({ color: 0x4aa6ff, transparent: true, opacity: 0.22, side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    atmo.position.copy(pos); group.add(atmo)
+    return (dt) => { earth.rotation.y += dt * 0.015 }
+  }
+
+  /** Mars sky drama: twin moons (Phobos/Deimos) + a towering dust-storm wall that
+   *  drifts along one horizon. Returns an animate fn. */
+  private buildMarsSky(group: THREE.Group): (dt: number) => void {
+    this.celestial(group, 0xc6b09a, new THREE.Vector3(190, 116, -250), 10) // Phobos
+    this.celestial(group, 0x9a8a78, new THREE.Vector3(-150, 168, -300), 5.5) // Deimos
+    const stormMat = new THREE.MeshBasicMaterial({ color: 0xcf6a26, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
+    const storm = new THREE.Mesh(new THREE.CylinderGeometry(235, 235, 95, 48, 1, true, Math.PI * 0.62, Math.PI * 0.95), stormMat)
+    storm.position.set(0, 34, 0); group.add(storm)
+    const stormMat2 = new THREE.MeshBasicMaterial({ color: 0xe0a060, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
+    const storm2 = new THREE.Mesh(new THREE.CylinderGeometry(210, 210, 70, 48, 1, true, Math.PI * 0.7, Math.PI * 0.85), stormMat2)
+    storm2.position.set(0, 26, 0); group.add(storm2)
+    let t = 0
+    return (dt) => {
+      t += dt
+      stormMat.opacity = 0.13 + Math.sin(t * 0.25) * 0.05
+      stormMat2.opacity = 0.09 + Math.sin(t * 0.33 + 1.5) * 0.04
+      storm.rotation.y += dt * 0.012
+      storm2.rotation.y -= dt * 0.018
+    }
+  }
+
+  /** A big natural rock arch you can drive the rover under - pure set dressing. */
+  private buildRockArch(group: THREE.Group, displace: (x: number, z: number) => number, cx: number, cz: number, color: number) {
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 })
+    const arch = new THREE.Group()
+    const by = displace(cx, cz)
+    arch.position.set(cx, by, cz)
+    for (const s of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 4.2, 22, 7), mat)
+      leg.position.set(s * 9, 10, 0); leg.rotation.z = s * 0.18
+      arch.add(leg)
+    }
+    const span = new THREE.Mesh(new THREE.TorusGeometry(10, 3, 7, 16, Math.PI), mat)
+    span.position.y = 19; span.rotation.z = Math.PI
+    arch.add(span)
+    arch.rotation.y = Math.random() * Math.PI
+    group.add(arch)
+  }
+
   /**
    * Launch ramps: solid wedges the rover (and player) drive up and fly off. Each
    * is a triangular prism added to the ground-raycast meshes (so Y follows the
@@ -379,7 +444,7 @@ export class Zones {
     const terrain = this.makeTerrain(displace, 0x7a3a1c, 0.95)
     group.add(terrain)
     this.celestial(group, 0xffd9a8, new THREE.Vector3(-180, 150, -320), 30) // distant sun
-    this.celestial(group, 0xc98b6b, new THREE.Vector3(260, 120, -200), 14) // small moon
+    const marsSky = this.buildMarsSky(group) // twin moons + a drifting dust storm
 
     const portals = [
       this.makePortal('earth', config.palette.lime, new THREE.Vector3(-8, 0, 0)),
@@ -412,9 +477,11 @@ export class Zones {
       [10, 70, Math.PI, 14, 26, 9],
     ])
     this.buildMarsLife(group, displace)
+    this.buildRockArch(group, displace, -70, -30, 0x7a3a1c)
+    this.buildRockArch(group, displace, 48, 64, 0x6b3216)
     const colony = this.buildMarsColony(group, env, displace, 64, -56)
     const baseUpdate = env.update
-    env.update = (dt) => { baseUpdate(dt); colony(dt) }
+    env.update = (dt) => { baseUpdate(dt); colony(dt); marsSky(dt) }
     return env
   }
 
@@ -690,7 +757,8 @@ export class Zones {
     const group = new THREE.Group()
     const terrain = this.makeTerrain(displace, 0x6a6a73, 1.0)
     group.add(terrain)
-    this.celestial(group, 0x3a6ea5, new THREE.Vector3(200, 150, -300), 26, false) // distant Earth
+    // Iconic Earthrise: a big, detailed Earth low over the regolith horizon.
+    const earthSpin = this.buildEarthGlobe(group, new THREE.Vector3(150, 96, -260), 64)
     void rnd
 
     const portals = [
@@ -726,7 +794,7 @@ export class Zones {
     const base = this.buildMoonBase(group, env, displace, 44, 30)
     const dc = this.buildMoonDataCenter(group, env, displace, 0, 34)
     const baseUpdate = env.update
-    env.update = (dt) => { baseUpdate(dt); base(dt); dc(dt) }
+    env.update = (dt) => { baseUpdate(dt); base(dt); dc(dt); earthSpin(dt) }
     return env
   }
 
