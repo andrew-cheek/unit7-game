@@ -1669,10 +1669,14 @@ export class Game {
    *  during the drop-in, a zone change, or while a minigame is up. */
   private teleportToArcade() {
     if (this.zone !== 'earth' || this.dropIn || this.launchPad || this.hud.minigame || this.intro) return
-    const x = 0, z = 24 // just south of the arcade's front opening (hall center z=46)
+    // Set down INSIDE the lit hall (front wall z=28, back z=64) facing the games on
+    // both side walls - so you arrive among the cabinets instead of staring at the
+    // dark exterior facade from outside.
+    const x = 0, z = 37
     const gy = this.physics.sampleGround(x, z, 60)?.y ?? 0
-    this.input.yaw = 0 // face +z (north) - straight into the hall + marquee
-    this.input.pitch = 0.06
+    this.input.yaw = 0 // face +z (north) down the hall
+    this.input.pitch = 0.12 // a hair down so the floor + cabinets read (the indoor
+    // ceiling-collider flattens the view anyway)
     this.player.exitVehicle(new THREE.Vector3(x, gy, z))
     this.player.setBoard(false)
     this.camera.snap(this.player.position)
