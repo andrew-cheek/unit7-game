@@ -83,6 +83,9 @@ export class MultiplayerManager implements GameSystem {
   private incomingChallenge: { fromId: string; name: string } | null = null
   private matchView: MatchView | null = null
   private netAccum = 0
+  // Deferred profile-publish timers (connect + every reconnect). Tracked so
+  // dispose() can cancel them and not fire publishProfile() after teardown.
+  private publishTimers = new Set<ReturnType<typeof setTimeout>>()
 
   constructor(scene: THREE.Scene, host: MultiplayerHost) {
     this.scene = scene
@@ -235,11 +238,18 @@ export class MultiplayerManager implements GameSystem {
           this.host.shockwave({ x: p[0], y: p[1], z: p[2] }, 0x27e7ff, 3, 0.4)
         },
         onStatus: (connected) => {
-          if (!connected) this.online = this.remotePlayers.count + 1
+          if (!connected) {
+            this.online = this.remotePlayers.count + 1
+            // The drop invalidates any pending duel UI: clear a stale incoming
+            // challenge and leave a frozen match so the HUD doesn't show offline
+            // challenges or a match that can no longer receive ticks.
+            this.incomingChallenge = null
+            if (this.matchView) this.leaveMatch()
+          }
           // Re-publish our profile after every (re)connect so a reconnected
           // avatar gets re-tinted/labelled (the join is sent first, so defer
           // briefly to let the server register us before the profile lands).
-          else setTimeout(() => this.publishProfile(), 300)
+          else this.deferPublish(300)
         },
         onFull: () => this.host.banner('WORLD FULL — TRY AGAIN', 3),
         onAliens: (list) => this.sharedAliens.sync(list),
@@ -315,7 +325,16 @@ export class MultiplayerManager implements GameSystem {
       { host: serverHost },
     )
     // Publish shortly after connecting (lets the socket open + the server register us).
-    setTimeout(() => this.publishProfile(), 800)
+    this.deferPublish(800)
+  }
+
+  /** Schedule a profile publish, tracking the timer so dispose() can cancel it. */
+  private deferPublish(ms: number) {
+    const t = setTimeout(() => {
+      this.publishTimers.delete(t)
+      this.publishProfile()
+    }, ms)
+    this.publishTimers.add(t)
   }
 
   update(dt: number) {
@@ -372,6 +391,9 @@ export class MultiplayerManager implements GameSystem {
   }
 
   dispose() {
+    // Cancel any deferred publish so it can't fire after teardown.
+    for (const t of this.publishTimers) clearTimeout(t)
+    this.publishTimers.clear()
     this.net?.close()
     this.net = null
     this.remotePlayers.dispose()

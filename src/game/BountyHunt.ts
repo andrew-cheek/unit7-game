@@ -210,7 +210,10 @@ export class BountyHunt implements GameSystem {
     }
 
     // Ease velocity toward desired (frame-rate-independent), integrate.
-    const k = Math.min(1, dt * (dist < FLEE_RANGE ? 5 : 2.5))
+    // Exponential damping so evasion feels identical at 30 vs 60fps (a raw
+    // dt-lerp factor would converge faster the more frames you render).
+    const lambda = dist < FLEE_RANGE ? 8 : 4
+    const k = 1 - Math.exp(-lambda * dt)
     this.vel.x += (this.desired.x - this.vel.x) * k
     this.vel.z += (this.desired.z - this.vel.z) * k
     this.pos.x += this.vel.x * dt

@@ -94,7 +94,10 @@ export class ColonistNPCs implements GameSystem {
 
   constructor(scene: THREE.Scene, private deps: Deps) {
     const low = config.tier.name === 'low'
-    const count = low ? 5 : 9
+    const medium = config.tier.name === 'medium'
+    // Three-step crowd size so the medium tier gets a fuller-but-not-full crowd
+    // rather than sharing the low or high count.
+    const count = low ? 5 : medium ? 7 : 9
     this.count = count
 
     // Shared geometry reused across every instance.

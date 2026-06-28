@@ -425,9 +425,13 @@ export class Player {
     } else if (this.mode === 'plane') {
       const targetYaw = moving ? Math.atan2(this.moveDir.x, this.moveDir.z) : this.yaw
       this.yaw = dampAngle(this.yaw, targetYaw, 5, dt)
-      this.object.rotation.y = this.yaw
-      this.object.rotation.z = damp(this.object.rotation.z, -input.moveX * config.plane.bank, 6, dt)
-      this.object.rotation.x = damp(this.object.rotation.x, clamp(-this.velocity.y * 0.03, -0.5, 0.5), 6, dt)
+      // Damp pitch/bank off their current values, then set yaw+pitch+bank in one
+      // call. With rotation.order 'YXZ', setting x after y/z made pitch depend on
+      // the bank/yaw already applied (squirrelly); compute the locals first so all
+      // three axes are applied together against a clean basis.
+      const targetBank = damp(this.object.rotation.z, -input.moveX * config.plane.bank, 6, dt)
+      const targetPitch = damp(this.object.rotation.x, clamp(-this.velocity.y * 0.03, -0.5, 0.5), 6, dt)
+      this.object.rotation.set(targetPitch, this.yaw, targetBank)
     } else if (moving && this.mode === 'robot') {
       const targetYaw = Math.atan2(this.moveDir.x, this.moveDir.z)
       const prevYaw = this.yaw
@@ -615,7 +619,9 @@ export class Player {
     if (this.danceMove === 2) {
       const flipPeriod = 2.0
       const ct = this.danceMoveT % flipPeriod
-      if (ct < dt * 2 && this.grounded) this.velocity.y = Math.max(this.velocity.y, 5.5)
+      // Fixed time window (not dt-scaled) so the hop fires at the same point in the
+      // flip cycle at any frame rate; dt*2 widened/narrowed the window per device.
+      if (ct < 0.04 && this.grounded) this.velocity.y = Math.max(this.velocity.y, 5.5)
     }
   }
 
@@ -867,5 +873,16 @@ export class Player {
     })
     this.canopyMat.dispose()
     ;(this.canopyMat.userData.cordMat as THREE.Material)?.dispose()
+    // Free the hoverboard's own geometries + materials (deck/edge/glow/jets); these
+    // are unique to the board (not shared), so dispose both halves per mesh.
+    this.board.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (m.geometry) m.geometry.dispose()
+      const mat = m.material
+      if (Array.isArray(mat)) mat.forEach((x) => x?.dispose())
+      else mat?.dispose()
+    })
+    // The robot group was added to the scene in the constructor but never removed.
+    this.scene.remove(this.object)
   }
 }

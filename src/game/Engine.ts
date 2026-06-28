@@ -44,8 +44,8 @@ const GradeShader = {
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
       c.rgb = mix(c.rgb, c.rgb * uTint, uTintAmt);
       c.rgb += uHi * smoothstep(0.6, 1.0, l);
-      // vignette
-      float d = distance(vUv, vec2(0.5));
+      // vignette - length(a-b) is the same value as distance(a,b) but cheaper
+      float d = length(vUv - vec2(0.5));
       c.rgb *= 1.0 - smoothstep(0.55, 0.95, d) * uVignette;
       gl_FragColor = c;
     }
@@ -63,7 +63,9 @@ export class Engine {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly composer: EffectComposer
-  readonly bloomPass: UnrealBloomPass
+  // Nullable: only created when the tier enables bloom. In lite (low/no-bloom)
+  // mode it stays null, so every access is guarded (mirrors bokeh/sao/smaa).
+  readonly bloomPass: UnrealBloomPass | null = null
   readonly container: HTMLElement
   readonly tier: QualityTier
 
@@ -236,20 +238,24 @@ export class Engine {
     // crawling shimmer. Cheaper too.
     this.bloomScale = tier.name === 'low' ? 0.4 : 0.5
     this.baseBloom = config.render.bloom.strength * (tier.name === 'high' ? 1 : tier.name === 'low' ? 0.72 : 0.85)
-    this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
-      this.baseBloom,
-      config.render.bloom.radius,
-      // High tier lowers the threshold a touch so mid-bright hero neon actually
-      // halos: after ACES tonemapping the bright signs/cores sit below white, so
-      // the old ~1.0 threshold meant almost nothing bloomed. 0.78 is deliberately
-      // conservative — it lets the hero emitters bloom while keeping the dimmer
-      // lit windows out of it, so the city doesn't haze up (the original intent).
-      // Tune down further toward 0.7 if the neon should read punchier on a device.
-      // Low/medium keep the tuned default (their bloom is already closer to right).
-      tier.name === 'high' ? 0.78 : config.render.bloom.threshold,
-    )
-    if (tier.bloom) this.composer.addPass(this.bloomPass)
+    // Only build the bloom pass when the tier enables it; otherwise bloomPass stays
+    // null and every consumer guards for it (lite mode has no bloom at all).
+    if (tier.bloom) {
+      this.bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
+        this.baseBloom,
+        config.render.bloom.radius,
+        // High tier lowers the threshold a touch so mid-bright hero neon actually
+        // halos: after ACES tonemapping the bright signs/cores sit below white, so
+        // the old ~1.0 threshold meant almost nothing bloomed. 0.78 is deliberately
+        // conservative — it lets the hero emitters bloom while keeping the dimmer
+        // lit windows out of it, so the city doesn't haze up (the original intent).
+        // Tune down further toward 0.7 if the neon should read punchier on a device.
+        // Low/medium keep the tuned default (their bloom is already closer to right).
+        tier.name === 'high' ? 0.78 : config.render.bloom.threshold,
+      )
+      this.composer.addPass(this.bloomPass)
+    }
 
     // Subtle cinematic depth of field (desktop). Keeps the focal subject crisp
     // while distant towers soften - reads as a lens, not a blur.
@@ -296,7 +302,7 @@ export class Engine {
    * city — without ever exceeding the tuned night value (keeps bloom FPS-safe).
    */
   setBloomScale(s: number) {
-    this.bloomPass.strength = this.baseBloom * s
+    if (this.bloomPass) this.bloomPass.strength = this.baseBloom * s
   }
 
   /** Ramp tone-mapping exposure (e.g. by time of day): a touch darker at noon so
@@ -455,8 +461,11 @@ export class Engine {
     // react in 3s but up-steps need 8s of comfortable headroom, so the scale
     // settles fast and resizes (the flicker source) become rare.
     if (this.adaptCooldown > 0) return
-    const downAt = this.tier.name === 'low' ? 26 : 46
-    const upAt = this.tier.name === 'low' ? 54 : 58
+    // Medium (iPad) runs lighter settings than high, so give it its own band
+    // rather than borrowing the desktop-high thresholds: it can tolerate a
+    // slightly lower floor before stepping down and reacts a touch sooner up.
+    const downAt = this.tier.name === 'low' ? 26 : this.tier.name === 'medium' ? 42 : 46
+    const upAt = this.tier.name === 'low' ? 54 : this.tier.name === 'medium' ? 56 : 58
     let dir = 0
     if (this.fps < downAt && this.renderScale > Engine.SCALE_FLOOR) dir = -1
     else if (this.fps > upAt && this.renderScale < 1) dir = 1
@@ -466,7 +475,11 @@ export class Engine {
     // Mobile recovers sharpness only after a LONG comfortable streak (so it isn't
     // stuck soft forever after one heavy moment) while staying very reluctant to
     // resize - up-steps need 8s clear, down-steps react in 3s.
-    const need = dir < 0 ? (this.tier.name === 'low' ? 3 : 2) : (this.tier.name === 'low' ? 8 : 2)
+    // Medium recovers sharpness faster than high but slower than low: it's a
+    // capable tablet, so it needn't stay soft as long as a phone after a spike.
+    const need = dir < 0
+      ? (this.tier.name === 'low' ? 3 : 2)
+      : (this.tier.name === 'low' ? 8 : this.tier.name === 'medium' ? 5 : 2)
     if (Math.abs(this.adaptStreak) < need) return
     this.adaptStreak = 0
     this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, this.renderScale + dir * 0.1))
@@ -490,9 +503,17 @@ export class Engine {
     const dpr = this.effectiveDpr()
     this.renderer.setPixelRatio(dpr)
     this.renderer.setSize(w, h)
+    // composer.setSize() allocates fresh renderTarget1/renderTarget2 without
+    // freeing the old ones - on every adaptive-resolution step. Capture them
+    // first and dispose after the resize so we don't leak GPU buffers (mirrors
+    // how the main renderTarget is disposed on teardown).
+    const oldRt1 = this.composer.renderTarget1
+    const oldRt2 = this.composer.renderTarget2
     this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
-    this.bloomPass.setSize(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale))
+    if (oldRt1 && oldRt1 !== this.composer.renderTarget1) oldRt1.dispose()
+    if (oldRt2 && oldRt2 !== this.composer.renderTarget2) oldRt2.dispose()
+    this.bloomPass?.setSize(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale))
     this.saoPass?.setSize(w, h)
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }
@@ -548,7 +569,7 @@ export class Engine {
     this.renderer.setSize(w, h)
     this.composer.setPixelRatio(dpr)
     this.composer.setSize(w, h)
-    this.bloomPass.setSize(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale))
+    this.bloomPass?.setSize(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale))
     this.saoPass?.setSize(w, h)
     this.smaaPass?.setSize(w * dpr, h * dpr)
   }

@@ -42,6 +42,11 @@ export class MissionSystem {
   private minigamePlayed = false
   private visited = new Set<Zone>() // distinct zones reached this session (off-world steps are order-independent)
   private beaconMats: THREE.Material[] = []
+  private beaconGeos: THREE.BufferGeometry[] = [] // beacon geometries to free in dispose() (materials alone leaked them)
+  // Reused per-frame so computeTarget() doesn't allocate/clone a Vector3 every frame.
+  // NOTE: the returned vector is a shared mutable reference owned by this system - read it
+  // immediately; do not retain it across frames.
+  private cachedTarget = new THREE.Vector3()
 
   constructor() {
     this.objBeacon = this.buildBeacon()
@@ -188,11 +193,17 @@ export class MissionSystem {
     return label
   }
 
-  /** World position the current objective points at (beacon + radar). */
+  /**
+   * World position the current objective points at (beacon + radar).
+   *
+   * Returns `this.cachedTarget`, a shared mutable scratch vector reused every
+   * frame (no per-frame allocation). Callers must read it immediately and must
+   * not retain it - the next call overwrites it in place.
+   */
   private computeTarget(ctx: MissionContext): THREE.Vector3 | null {
     const m = config.missions[this.idx]
     if (!m) return null
-    if (m.type === 'reach') return new THREE.Vector3(m.x ?? 0, 0, m.z ?? 0)
+    if (m.type === 'reach') return this.cachedTarget.set(m.x ?? 0, 0, m.z ?? 0)
     if (ctx.zone !== 'earth') return null // beacons only guide within the city
     if (m.type === 'mech') {
       // Guide to the nearest mech you can actually board (free/unlocked first).
@@ -202,10 +213,10 @@ export class MissionSystem {
         const d = (v.position.x - ctx.playerPos.x) ** 2 + (v.position.z - ctx.playerPos.z) ** 2
         if (d < bd) { bd = d; best = v.position }
       }
-      return best ? best.clone() : null
+      return best ? this.cachedTarget.copy(best) : null
     }
     if (m.type === 'zone') {
-      for (const p of ctx.earthPortals) if (p.target === m.zone) return p.position.clone()
+      for (const p of ctx.earthPortals) if (p.target === m.zone) return this.cachedTarget.copy(p.position)
       return null
     }
     if (m.type === 'minigame') {
@@ -214,11 +225,13 @@ export class MissionSystem {
         const d = (p.pos.x - ctx.playerPos.x) ** 2 + (p.pos.z - ctx.playerPos.z) ** 2
         if (d < bd) { bd = d; best = p.pos }
       }
-      return best ? best.clone() : null
+      return best ? this.cachedTarget.copy(best) : null
     }
     if (m.type === 'capture') {
-      // Aliens roam, so guide to whichever live one is closest right now.
-      return ctx.nearestAlien(ctx.playerPos.x, ctx.playerPos.z)
+      // Aliens roam, so guide to whichever live one is closest right now. Copy into
+      // the scratch vector so the contract holds (caller never retains the callback's vec).
+      const a = ctx.nearestAlien(ctx.playerPos.x, ctx.playerPos.z)
+      return a ? this.cachedTarget.copy(a) : null
     }
     return null
   }
@@ -226,12 +239,13 @@ export class MissionSystem {
   private buildBeacon(): THREE.Group {
     const g = new THREE.Group()
     const own = <T extends THREE.Material>(m: T) => { this.beaconMats.push(m); return m }
+    const ownG = <T extends THREE.BufferGeometry>(geo: T) => { this.beaconGeos.push(geo); return geo } // track for disposal
     const colMat = own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 60, 12, 1, true), colMat)
+    const col = new THREE.Mesh(ownG(new THREE.CylinderGeometry(0.9, 1.4, 60, 12, 1, true)), colMat)
     col.position.y = 30
     g.add(col)
     const ringMat = own(new THREE.MeshBasicMaterial({ color: 0x9bff4d, transparent: true, opacity: 0.8, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const ring = new THREE.Mesh(new THREE.RingGeometry(2.4, 3.2, 28), ringMat)
+    const ring = new THREE.Mesh(ownG(new THREE.RingGeometry(2.4, 3.2, 28)), ringMat)
     ring.rotation.x = -Math.PI / 2
     ring.position.y = 0.4
     g.add(ring)
@@ -241,5 +255,6 @@ export class MissionSystem {
 
   dispose() {
     this.beaconMats.forEach((m) => m.dispose())
+    this.beaconGeos.forEach((geo) => geo.dispose())
   }
 }
