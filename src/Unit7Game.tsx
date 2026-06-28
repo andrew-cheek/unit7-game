@@ -270,6 +270,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           hud={hud}
           onToggleMute={() => controlsRef.current?.toggleMute()}
           onCycleNeon={() => controlsRef.current?.cycleNeon()}
+          onToggleReducedMotion={() => controlsRef.current?.toggleReducedMotion()}
           onOpenChatGate={() => openChatGate()}
           onDisableChat={() => { disableChat(); controlsRef.current?.refreshChatEnabled(); setMessages([]) }}
         />

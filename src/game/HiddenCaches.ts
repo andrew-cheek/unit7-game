@@ -202,7 +202,10 @@ export class HiddenCaches implements GameSystem {
       this.coreMesh.setMatrixAt(i, this.mtx)
       // Core brightens slightly while opening, else a soft pulse on its tint.
       const corePulse = c.opening ? 1 : 0.85 + 0.15 * Math.sin(this.t * 3 + c.phase)
-      this.scratch.copy(c.tint).lerp(WHITE, c.opening ? c.pop * 0.8 : 0).multiplyScalar(corePulse)
+      // Opening white-flash: normally lerps toward white by pop*0.8 (a quick white pop).
+      // Under reduced motion, cap the lerp so opening is a gentle brighten, not a strobe.
+      const whiteLerp = c.opening ? (config.reducedMotion ? c.pop * 0.25 : c.pop * 0.8) : 0
+      this.scratch.copy(c.tint).lerp(WHITE, whiteLerp).multiplyScalar(corePulse)
       this.coreMesh.setColorAt(i, this.scratch)
 
       // Shell: counter-rotates, hovers in place; additive glow.

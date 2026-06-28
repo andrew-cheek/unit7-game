@@ -225,13 +225,18 @@ export class MeteorStrikes implements GameSystem {
     this.deps.shockwave(x, gy + 0.2, z)
 
     s.flash.position.set(x, gy + 1.2, z)
-    s.flash.scale.setScalar(10)
-    s.flash.material.opacity = 1
+    // reducedMotion: soften the bright impact pop - smaller, dimmer flash so it
+    // doesn't hard-flash. Live-read the flag (player can toggle at runtime).
+    const flashPeak = config.reducedMotion ? 0.35 : 1
+    const flashScale = config.reducedMotion ? 7 : 10
+    s.flash.scale.setScalar(flashScale)
+    s.flash.material.opacity = flashPeak
     s.flashLife = 0.35
     s.flash.visible = true
 
     s.scorch.position.set(x, gy + 0.05, z)
-    s.scorchMat.opacity = 0.9
+    // reducedMotion: dim the additive scorch glow (it blooms bright on impact).
+    s.scorchMat.opacity = config.reducedMotion ? 0.9 * 0.35 : 0.9
     s.scorch.visible = true
     s.scorchLife = SCORCH_TIME
 
@@ -300,8 +305,12 @@ export class MeteorStrikes implements GameSystem {
       // AFTER: fade flash, animate debris, fade scorch, then idle.
       if (s.flashLife > 0) {
         s.flashLife -= dt
-        s.flash.material.opacity = Math.max(0, s.flashLife / 0.35)
-        s.flash.scale.setScalar(10 + (0.35 - s.flashLife) * 30)
+        // reducedMotion: dim the fading flash to the same ~35% peak and start the
+        // expansion from the smaller base so there's no bright additive pop.
+        const flashPeak = config.reducedMotion ? 0.35 : 1
+        const flashBase = config.reducedMotion ? 7 : 10
+        s.flash.material.opacity = Math.max(0, (s.flashLife / 0.35) * flashPeak)
+        s.flash.scale.setScalar(flashBase + (0.35 - s.flashLife) * 30)
         if (s.flashLife <= 0) s.flash.visible = false
       }
 
@@ -324,7 +333,9 @@ export class MeteorStrikes implements GameSystem {
       }
 
       s.scorchLife -= dt
-      s.scorchMat.opacity = Math.max(0, (s.scorchLife / SCORCH_TIME) * 0.9)
+      // reducedMotion: keep the fading scorch glow dimmed to match the impact init.
+      const scorchPeak = config.reducedMotion ? 0.9 * 0.35 : 0.9
+      s.scorchMat.opacity = Math.max(0, (s.scorchLife / SCORCH_TIME) * scorchPeak)
       if (s.scorchLife <= 0) {
         s.scorch.visible = false
         if (debrisDone && s.flashLife <= 0) this.reset(s)

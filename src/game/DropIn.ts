@@ -1196,7 +1196,11 @@ export class DropIn {
         this.repairBeam.scale.set(1, len, 1)
         this.repairBeam.lookAt(to)
         this.repairBeam.rotateX(Math.PI / 2)
-        bm.opacity = 0.4 + Math.sin(t * 30) * 0.25
+        // reducedMotion: drop the 30 rad/s strobe to a calm ~2.5 rad/s low-amplitude
+        // shimmer (visual-only; beam geometry/physics unchanged).
+        bm.opacity = config.reducedMotion
+          ? 0.45 + Math.sin(t * 2.5) * 0.08
+          : 0.4 + Math.sin(t * 30) * 0.25
       } else {
         this.repairBeam.visible = false
       }

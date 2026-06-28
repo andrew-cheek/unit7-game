@@ -10,6 +10,15 @@ export const config = {
   // (tests, asset previews) still have a valid object.
   tier: TIERS.high as QualityTier,
 
+  // Photosensitivity / accessibility: when true, the flashiest visuals (fast
+  // strobes, fireworks bursts, screen flashes, rapid flickers) are softened to
+  // calm steady glows. Game resolves this at startup from a persisted setting or
+  // the OS `prefers-reduced-motion` preference, then every flashy system reads
+  // it. Defaults false so the normal look is byte-for-byte unchanged unless a
+  // player (or their OS) asks for calmer motion. NEVER read in the fixed-step
+  // sim — purely a render/FX gate, so it can't perturb deterministic physics.
+  reducedMotion: false,
+
   render: {
     pixelRatioCap: 2,
     exposure: 0.98,

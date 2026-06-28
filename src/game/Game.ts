@@ -354,6 +354,10 @@ export class Game {
   // Neon density/quality setting (persisted): scales city neon + bloom.
   private neonLevel: 'low' | 'med' | 'high' = (() => { const v = loadHighScore('neon'); return v === 1 ? 'low' : v === 2 ? 'med' : 'high' })()
   private neonBloomMul = 1
+  // Photosensitivity-safe mode (persisted): 0 = auto (follow OS prefers-reduced-
+  // motion), 1 = forced off, 2 = forced on. Resolved to config.reducedMotion in
+  // the constructor so every flashy FX system can soften itself.
+  private reducedMotion = false
   // Bubble-gun projectiles that burst into the crowd-floating effect.
   private bubbleShots: { mesh: THREE.Mesh; vel: THREE.Vector3; t: number }[] = []
   private bubbleShotGeo = new THREE.SphereGeometry(0.5, 12, 10)
@@ -402,6 +406,16 @@ export class Game {
     const tier = resolveTier(userConfig.quality)
     config.quality = tierName
     config.tier = tier
+    // Resolve photosensitivity-safe mode once at startup: an explicit persisted
+    // choice wins (1 = off, 2 = on); otherwise follow the OS prefers-reduced-
+    // motion preference. Stays a pure render/FX gate (never touches the sim).
+    this.reducedMotion = (() => {
+      const v = loadHighScore('reducemotion')
+      if (v === 1) return false
+      if (v === 2) return true
+      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
+    })()
+    config.reducedMotion = this.reducedMotion
     // A much larger world on capable devices (it thins out toward the edges), but
     // kept smaller on mobile so the draw count stays sane. Per-chunk frustum
     // culling bounds the draw calls to the view bubble, so going bigger mainly
@@ -1012,6 +1026,7 @@ export class Game {
       restartIntro: () => this.restartIntro(),
       toggleMute: () => { this.hud.muted = this.audio.toggleMute(); trackEvent('mute_toggled', { muted: this.hud.muted }) },
       cycleNeon: () => this.cycleNeon(),
+      toggleReducedMotion: () => this.toggleReducedMotion(),
       challengePilot: (id: string) => this.mp.challenge(id, this.equippedTrailColor()),
       acceptChallenge: () => this.mp.accept(this.equippedTrailColor()),
       declineChallenge: () => this.mp.decline(),
@@ -1063,6 +1078,7 @@ export class Game {
       online: 1,
       leaderboard: [],
       neon: this.neonLevel,
+      reducedMotion: this.reducedMotion,
       profiles: [],
       challenge: null,
       match: null,
@@ -3079,6 +3095,19 @@ export class Game {
     trackEvent('neon_changed', { level: this.neonLevel })
     this.hud.banner = `NEON: ${this.neonLevel.toUpperCase()}`
     this.bannerTimer = 1.2
+  }
+
+  /** Toggle photosensitivity-safe mode (calmer flashing). Persists an explicit
+   *  on/off choice so it overrides the OS preference next load. Pure render/FX
+   *  flag — flashy systems read config.reducedMotion; the sim is untouched. */
+  private toggleReducedMotion() {
+    this.reducedMotion = !this.reducedMotion
+    config.reducedMotion = this.reducedMotion
+    saveHighScore('reducemotion', this.reducedMotion ? 2 : 1) // 2 = on, 1 = off (explicit)
+    this.hud.reducedMotion = this.reducedMotion
+    trackEvent('reduced_motion_toggled', { on: this.reducedMotion })
+    this.hud.banner = this.reducedMotion ? 'CALM MODE: ON' : 'CALM MODE: OFF'
+    this.bannerTimer = 1.4
   }
 
   /** A known-good spawn for the active zone (used by stuck/fall recovery). */

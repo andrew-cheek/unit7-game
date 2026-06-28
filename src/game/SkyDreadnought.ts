@@ -180,7 +180,8 @@ export class SkyDreadnought implements GameSystem {
   private capture(): number {
     if (!this.cap.alive) return 0
     this.hp -= 1
-    this.flash = 0.25
+    // Hit-flash peak: full 0.25 normally; cut to a calmer 0.1 under reduced motion (read live at hit time).
+    this.flash = config.reducedMotion ? 0.1 : 0.25
     this.deps.onHit(this.cap.position)
     if (this.hp <= 0) {
       this.cap.alive = false
@@ -257,7 +258,11 @@ export class SkyDreadnought implements GameSystem {
       this.group.position.y -= dt * 6
       this.hull.rotation.z += dt * 0.5
       const f = Math.max(0, 1 - this.defeatT / 2.2)
-      const burst = Math.sin(this.defeatT * 22) > 0.4 ? 1 : 0
+      // Defeat burst: normally a 22 rad/s binary strobe. Under reduced motion, replace
+      // with a steady glow + slow (<=2 rad/s) breathe so the wreck still flares calmly.
+      const burst = config.reducedMotion
+        ? 0.6 + 0.2 * Math.sin(this.defeatT * 2)
+        : (Math.sin(this.defeatT * 22) > 0.4 ? 1 : 0)
       this.bodyMat.emissiveIntensity = burst * 1.8 * f
       this.coreMat.opacity = (0.5 + 0.5 * burst) * f
       this.group.scale.setScalar(Math.max(0.001, f))

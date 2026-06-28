@@ -217,8 +217,11 @@ export class CargoRun implements GameSystem {
       // Urgency: as time runs low the gold column shifts hot and pulses faster.
       const ratio = this.timeLeft / this.timeTotal // 1 -> 0
       const urgency = 1 - ratio // 0 -> 1
-      const flashSpeed = 3 + urgency * urgency * 12
-      const flash = 0.5 + 0.5 * Math.sin(this.t * flashSpeed)
+      // reducedMotion (read live): cap the strobe to a slow, gentle pulse and
+      // halve the flash amplitude. urgency itself is untouched (gates expiry).
+      const flashSpeed = config.reducedMotion ? 3 : (3 + urgency * urgency * 12)
+      const flashAmp = config.reducedMotion ? 0.25 : 0.5
+      const flash = 0.5 + flashAmp * Math.sin(this.t * flashSpeed)
       this.scratch.copy(this.gold).lerp(this.hot, urgency * urgency)
       this.dropColumnMat.color.copy(this.scratch)
       this.dropColumnMat.opacity = 0.14 + flash * (0.12 + urgency * 0.22)

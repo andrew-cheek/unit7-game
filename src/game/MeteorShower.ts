@@ -191,9 +191,14 @@ export class MeteorShower implements GameSystem {
       im.t += dt
       const k = im.t / 0.6
       if (k >= 1) { im.active = false; im.flash.visible = false; im.ring.visible = false; continue }
-      ;(im.flash.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 * (1 - k * 1.6))
+      // reducedMotion: dim the bright additive flash bloom and the dust ring's
+      // additive flash to ~35% peak (live-read so a runtime toggle takes effect);
+      // the expanding ring/flash motion is unchanged.
+      const flashPeak = config.reducedMotion ? 0.9 * 0.35 : 0.9
+      const ringPeak = config.reducedMotion ? 0.8 * 0.35 : 0.8
+      ;(im.flash.material as THREE.MeshBasicMaterial).opacity = Math.max(0, flashPeak * (1 - k * 1.6))
       im.flash.scale.setScalar(1 + k * 4)
-      ;(im.ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.8 * (1 - k))
+      ;(im.ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, ringPeak * (1 - k))
       im.ring.scale.setScalar(1 + k * 12)
     }
 

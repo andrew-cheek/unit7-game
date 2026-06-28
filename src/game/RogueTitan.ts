@@ -171,7 +171,8 @@ export class RogueTitan implements GameSystem {
   private capture(): number {
     if (!this.cap.alive) return 0
     this.hp -= 1
-    this.flash = 0.25
+    // Hit-flash peak: full 0.25 normally; cut to a calmer 0.1 under reduced motion (read live at hit time).
+    this.flash = config.reducedMotion ? 0.1 : 0.25
     this.deps.onHit(this.cap.position)
     if (this.hp <= 0) {
       this.cap.alive = false
@@ -241,7 +242,8 @@ export class RogueTitan implements GameSystem {
       this.pos.y -= dt * 2.2
       this.group.position.y = this.pos.y
       const f = Math.max(0, 1 - this.defeatT / 1.4)
-      this.bodyMat.emissiveIntensity = this.flash > 0 ? 1.2 : 0
+      // Defeat emissive flare: full 1.2 pop normally; calm it to a gentler 0.4 under reduced motion.
+      this.bodyMat.emissiveIntensity = this.flash > 0 ? (config.reducedMotion ? 0.4 : 1.2) : 0
       this.coreMat.opacity = 0.95 * f
       this.group.rotation.z += dt * 0.6
       if (this.defeatT >= 1.4) {

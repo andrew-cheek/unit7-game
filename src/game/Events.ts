@@ -626,7 +626,10 @@ export class Events {
       if (p.active) {
         p.group.rotation.y += dt * 1.4
         p.group.children[0].position.y = Math.sin(this.t * 2 + p.pos.x) * 0.12
-        p.mat.emissiveIntensity = 2.4 + Math.sin(this.t * 4 + p.pos.z) * 0.6
+        // reducedMotion: slow the pulse (4->2 rad/s) and shrink amplitude (0.6->0.2) so it gently brightens instead of throbbing
+        const pwrFreq = config.reducedMotion ? 2 : 4
+        const pwrAmp = config.reducedMotion ? 0.2 : 0.6
+        p.mat.emissiveIntensity = 2.4 + Math.sin(this.t * pwrFreq + p.pos.z) * pwrAmp
         const dx = playerPos.x - p.pos.x
         const dz = playerPos.z - p.pos.z
         if (dx * dx + dz * dz < 2.0 * 2.0 && Math.abs(playerPos.y - (p.pos.y - 1.4)) < 3) {
@@ -921,7 +924,9 @@ export class Events {
       const b = this.raidBursts[i]
       b.t += dt
       const k = b.t / 0.42
-      b.mat.opacity = Math.max(0, 1 - k)
+      // reducedMotion: cap the additive burst's peak brightness (1->0.35) so there's no hard pop; same fade timing
+      const burstPeak = config.reducedMotion ? 0.35 : 1
+      b.mat.opacity = Math.max(0, burstPeak * (1 - k))
       ;(b.g.children[0] as THREE.Mesh).scale.setScalar(1 + k * 3)
       ;(b.g.children[1] as THREE.Mesh).scale.setScalar(1 + k * 6)
       if (b.t >= 0.42) { this.root.remove(b.g); this.raidBursts.splice(i, 1) }
@@ -988,7 +993,10 @@ export class Events {
     else b.descended = true
     b.group.rotation.y += dt * 0.35
     b.flash = Math.max(0, b.flash - dt * 3)
-    b.coreMat.opacity = 0.55 + Math.sin(b.t * 4) * 0.18 + b.flash
+    // reducedMotion: slow the core pulse (4->2 rad/s) and shrink amplitude (0.18->0.06) so it reads as a steady glow
+    const coreFreq = config.reducedMotion ? 2 : 4
+    const coreAmp = config.reducedMotion ? 0.06 : 0.18
+    b.coreMat.opacity = 0.55 + Math.sin(b.t * coreFreq) * coreAmp + b.flash
     b.coreMat.color.setHex(b.flash > 0.2 ? 0xffffff : 0xffd24a)
     // Once it's down, it periodically drops reinforcements around the plaza.
     if (b.descended) {
@@ -1017,7 +1025,13 @@ export class Events {
     if (!b.strikeStruck) {
       // Telegraph: ring pulses faster + brighter as the strike nears.
       const k = b.strikeT / WARN
-      b.strikeMat.opacity = (0.35 + 0.45 * k) * (0.6 + 0.4 * Math.sin(b.strikeT * (8 + k * 18)))
+      // reducedMotion: kill the accelerating strobe. Hold frequency steady at 3 rad/s (was 8 -> ~26)
+      // and shrink the oscillation amplitude (0.4 -> 0.12, base 0.6 -> 0.85) so it's a steady, slow brighten.
+      // The (0.35 + 0.45 * k) envelope and all strike TIMING stay identical, so the telegraph reads the same.
+      const strikeFreq = config.reducedMotion ? 3 : (8 + k * 18)
+      const strikeBase = config.reducedMotion ? 0.85 : 0.6
+      const strikeOsc = config.reducedMotion ? 0.12 : 0.4
+      b.strikeMat.opacity = (0.35 + 0.45 * k) * (strikeBase + strikeOsc * Math.sin(b.strikeT * strikeFreq))
       b.ring.scale.setScalar(1.25 - 0.25 * k)
       if (b.strikeT >= WARN) {
         // Strike! Flash the pillar, hit-test the player.
@@ -1058,7 +1072,9 @@ export class Events {
     const b = this.boss
     if (!b || !this.raid || this.raid.phase !== 'boss' || !b.descended) return
     b.hp = Math.max(0, b.hp - n)
-    b.flash = 0.7
+    // reducedMotion: cut the bright-white hit pop to ~0.25 (0.7->0.18). Below the 0.2 color threshold it
+    // stays the warm core hue instead of flashing pure white, but still brightens enough to read as a hit.
+    b.flash = config.reducedMotion ? 0.18 : 0.7
     this.spawnBurst(new THREE.Vector3(b.group.position.x, b.group.position.y - 4.5, b.group.position.z))
     if (b.hp <= 0) this.killBoss()
   }
@@ -1078,7 +1094,8 @@ export class Events {
   private spawnBurst(pos: THREE.Vector3) {
     if (!this.burstGeo) this.burstGeo = new THREE.SphereGeometry(1, 12, 10)
     if (!this.burstRingGeo) this.burstRingGeo = new THREE.TorusGeometry(1, 0.18, 6, 20)
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    // reducedMotion: start the additive burst dimmer (1->0.35) to avoid a bright pop on the first frame; the update loop keeps it gated
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: config.reducedMotion ? 0.35 : 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
     this.ownedMats.push(mat)
     const g = new THREE.Group(); g.position.set(pos.x, pos.y + 1.4, pos.z)
     g.add(new THREE.Mesh(this.burstGeo, mat))

@@ -73,6 +73,7 @@ export interface HudState {
   online: number // players in the shared world incl. self (1 = solo / not connected)
   leaderboard: { name: string; score: number }[] // shared-world scoreboard (empty when solo)
   neon: 'low' | 'med' | 'high' // neon density / quality setting
+  reducedMotion: boolean // photosensitivity-safe mode: softens fast flashes / strobes / fireworks
   profiles: PlayerProfile[] // roster of viewable pilot profiles (self first; networked others follow)
   challenge: { fromId: string; name: string } | null // incoming duel offer awaiting accept/decline
   match: MatchView | null // non-null while a live Beam Wars duel is on screen
@@ -162,6 +163,7 @@ export interface GameControls {
   restartIntro(): void // replay the opening cinematic from the start
   toggleMute(): void // toggle game audio
   cycleNeon(): void // cycle neon density: low -> med -> high
+  toggleReducedMotion(): void // toggle photosensitivity-safe mode (calmer flashing)
   // Challenges + live Beam Wars duels.
   challengePilot(id: string): void // invite another online pilot to a duel
   acceptChallenge(): void // accept the pending incoming duel offer

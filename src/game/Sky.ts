@@ -279,7 +279,10 @@ export class Sky {
     }
     this.bigT += dt * 0.05 // slow, majestic pass
     this.big.group.position.lerpVectors(this.bigFrom, this.bigTo, this.bigT)
-    this.bigTrailMat.opacity = 0.25 + Math.sin(this.bigT * 20) * 0.06
+    // reducedMotion: slow the 20 rad/s trail pulse to a gentle 2.5 rad/s, lower amplitude.
+    this.bigTrailMat.opacity = config.reducedMotion
+      ? 0.25 + Math.sin(this.bigT * 2.5) * 0.03
+      : 0.25 + Math.sin(this.bigT * 20) * 0.06
     if (this.bigT >= 1) {
       this.big.group.visible = false
       this.bigActive = false

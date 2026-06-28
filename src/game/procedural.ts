@@ -312,8 +312,10 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     wingL.scale.x = ws
     wingR.scale.x = ws
 
-    // Flame flicker scaled by thrust.
-    const flicker = 0.85 + Math.sin(t * 40) * 0.15
+    // Flame flicker scaled by thrust. reducedMotion: slow, low-amplitude soft glow.
+    const flicker = config.reducedMotion
+      ? 0.92 + Math.sin(t * 3) * 0.05
+      : 0.85 + Math.sin(t * 40) * 0.15
     const fs = thrust * flicker
     for (const flame of flames) flame.scale.set(thrust * 0.9, fs, thrust * 0.9)
   }
@@ -1095,10 +1097,18 @@ export function createPoliceCar(): VehicleModel {
     group,
     update: (dt) => {
       t += dt
-      // ~3 Hz alternating red/blue strobe.
-      const phase = Math.sin(t * 18)
-      redMat.emissiveIntensity = phase > 0 ? 5.5 : 0.4
-      blueMat.emissiveIntensity = phase > 0 ? 0.4 : 5.5
+      if (config.reducedMotion) {
+        // Photosensitive-safe: slow (~0.5 Hz) gentle cross-fade between a dim
+        // red and dim blue instead of a hard ~3 Hz strobe. Both stay lit.
+        const u = (Math.sin(t * Math.PI) + 1) * 0.5 // 0..1, ~0.5 Hz
+        redMat.emissiveIntensity = 1.0 + u * 1.2
+        blueMat.emissiveIntensity = 1.0 + (1 - u) * 1.2
+      } else {
+        // ~3 Hz alternating red/blue strobe.
+        const phase = Math.sin(t * 18)
+        redMat.emissiveIntensity = phase > 0 ? 5.5 : 0.4
+        blueMat.emissiveIntensity = phase > 0 ? 0.4 : 5.5
+      }
     },
     dispose: () => disposeGroup(group, mats),
   }
@@ -1544,7 +1554,13 @@ export function createSmallShip(accent = config.palette.cyan): VehicleModel {
   let t = 0
   return {
     group,
-    update: (dt) => { t += dt; engMat.emissiveIntensity = 3 + Math.sin(t * 12) * 1.2 },
+    update: (dt) => {
+      t += dt
+      // reducedMotion: slow, low-amplitude pulse so it reads as a steady glow.
+      engMat.emissiveIntensity = config.reducedMotion
+        ? 3 + Math.sin(t * 3) * 0.4
+        : 3 + Math.sin(t * 12) * 1.2
+    },
     dispose: () => disposeGroup(group, mats),
   }
 }
@@ -1755,7 +1771,10 @@ export function createMechSuit(opts: MechOpts = {}): VehicleModel {
       })
       core.rotation.x = -s * 0.18 * (1 - morph) - (Math.PI / 2) * 0.82 * morph
       reactorMat.emissiveIntensity = 3.6 + Math.sin(t * 4) * 0.8
-      const flicker = 0.7 + Math.sin(t * 38) * 0.2
+      // reducedMotion: slow, low-amplitude soft glow instead of a fast flicker.
+      const flicker = config.reducedMotion
+        ? 0.85 + Math.sin(t * 3) * 0.07
+        : 0.7 + Math.sin(t * 38) * 0.2
       const fs = (0.35 + s * 0.65 + morph * 0.6) * flicker
       for (const f of flames) f.scale.set(0.6 + s * 0.4 + morph * 0.3, fs, 0.6 + s * 0.4 + morph * 0.3)
     },

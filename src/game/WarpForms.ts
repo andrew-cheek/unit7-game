@@ -7,6 +7,7 @@
 // energy constructs without textures. Disposed when you warp out.
 
 import * as THREE from 'three'
+import { config } from './config'
 
 export interface WarpFormMeta {
   id: string
@@ -124,7 +125,9 @@ function buildFighter(): WarpFormModel {
   group.add(fuse, wing, thrust)
   const mats = [hull, thrustMat]
   let t = 0
-  return { group, update: (dt) => { t += dt; group.rotation.z = Math.sin(t * 2) * 0.12; thrust.scale.z = 1 + Math.sin(t * 18) * 0.3 }, dispose: disposer(group, mats) }
+  return { group, update: (dt) => { t += dt; group.rotation.z = Math.sin(t * 2) * 0.12
+    // Thrust pulse: fast 18 rad/s flicker normally; calm it to a slow 4 rad/s, lower-amplitude breathe under reduced motion.
+    thrust.scale.z = config.reducedMotion ? 1 + Math.sin(t * 4) * 0.12 : 1 + Math.sin(t * 18) * 0.3 }, dispose: disposer(group, mats) }
 }
 
 function buildGolem(): WarpFormModel {
@@ -158,7 +161,9 @@ function buildOrb(): WarpFormModel {
   group.add(core, ring1, ring2)
   const mats = [coreMat, ringMat]
   let t = 0
-  return { group, update: (dt) => { t += dt; ring1.rotation.y += dt * 2; ring2.rotation.z -= dt * 2.4; core.scale.setScalar(1 + Math.sin(t * 6) * 0.12) }, dispose: disposer(group, mats) }
+  return { group, update: (dt) => { t += dt; ring1.rotation.y += dt * 2; ring2.rotation.z -= dt * 2.4
+    // Core pulse is already mild (6 rad/s); soften lightly to 4 rad/s under reduced motion.
+    core.scale.setScalar(1 + Math.sin(t * (config.reducedMotion ? 4 : 6)) * 0.12) }, dispose: disposer(group, mats) }
 }
 
 function buildCube(): WarpFormModel {
