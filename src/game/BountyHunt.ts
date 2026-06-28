@@ -140,10 +140,13 @@ export class BountyHunt implements GameSystem {
   /** Netted/blasted: pay the big bounty, banner, retire with a cooldown. */
   private onCaptured(): number {
     if (!this.cap.alive) return 0
+    // Pay the full bounty through the callback only, then return 0 so the weapon
+    // doesn't convert the return value into a SECOND credit+score payout (the
+    // multi-hit bosses guard the same way).
     this.deps.onCaught(BOUNTY_CREDITS, BOUNTY_XP, this.pos.x, this.pos.y, this.pos.z)
     this.deps.banner('⭐ BOUNTY CAPTURED')
     this.retire()
-    return BOUNTY_CREDITS
+    return 0
   }
 
   setZone(zone: Zone) {

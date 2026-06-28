@@ -172,8 +172,11 @@ export class AirGates implements GameSystem {
         // Cleared the active gate: advance, grow the combo, pay out, extend time.
         this.current++
         this.chain++
+        // First leg gets the full base window; later legs roll over leftover time
+        // (capped at the base) plus a per-gate bonus, so speed is rewarded.
+        const firstLeg = !this.started
         this.started = true
-        this.timer = Math.min(this.timer, TIME_BASE) + TIME_BONUS
+        this.timer = (firstLeg ? TIME_BASE : Math.min(this.timer, TIME_BASE)) + TIME_BONUS
         const credits = 25 * this.chain
         this.deps.onScore(credits, Math.round(credits * 0.5), target.pos.x, target.pos.y + 1.5, target.pos.z, `+${credits}c`)
         target.mesh.scale.setScalar(1.6) // a brief pop, eased back below
