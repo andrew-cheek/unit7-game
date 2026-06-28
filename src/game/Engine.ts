@@ -474,6 +474,11 @@ export class Engine {
     this.applyResolution()
   }
 
+  /** Current adaptive-resolution scale (0.6..1). Read-only; for debug/test stats. */
+  get scale() {
+    return this.renderScale
+  }
+
   /** Effective drawing-buffer pixel ratio (device ratio, capped, then scaled). */
   private effectiveDpr() {
     return Math.min(window.devicePixelRatio || 1, this.pixelCap) * this.renderScale
