@@ -82,7 +82,7 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     accentLights: true,
     starCount: 2600,
     anisotropy: 16,
-    drawDistance: 460,
+    drawDistance: 560, // see further across the bigger district on desktop
     envMapIntensity: 1.22,
     fxScale: 1,
   },

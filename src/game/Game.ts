@@ -341,8 +341,10 @@ export class Game {
     config.quality = tierName
     config.tier = tier
     // A much larger world on capable devices (it thins out toward the edges), but
-    // kept smaller on mobile so the draw count stays sane.
-    config.world.half = tier.fxScale >= 0.9 ? 560 : tier.fxScale >= 0.6 ? 440 : 256
+    // kept smaller on mobile so the draw count stays sane. Per-chunk frustum
+    // culling bounds the draw calls to the view bubble, so going bigger mainly
+    // costs resident geometry memory - generous on desktop, moderate on mobile.
+    config.world.half = tier.fxScale >= 0.9 ? 760 : tier.fxScale >= 0.6 ? 600 : 360
 
     this.cfg = {
       startInIntro: userConfig.startInIntro ?? true,
