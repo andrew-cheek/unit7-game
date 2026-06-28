@@ -1369,6 +1369,20 @@ export class Game {
     this.world.pushHeadline('UNIT 7 REPELS RAID — CITY SAFE')
   }
 
+  /** Tear the raid down WITHOUT the "city saved" reward + fanfare. Used when the
+   *  player abandons it by leaving Earth: the raid is an Earth-city event, so it
+   *  must not follow you to the Moon/Mars (its HUD banner + objective were
+   *  rendering off-world). No credits/XP, since the city wasn't actually held. */
+  private abortCityRaid() {
+    if (!this.raidActive) return
+    this.raidActive = false
+    this.events.onRaidKill = null
+    this.events.onBossStrike = null
+    this.events.onBossDeath = null
+    this.events.stopRaid()
+    this.hud.raid = null
+  }
+
   /** GAMES button / key: warp the player to right in front of the arcade, facing
    *  the neon marquee + the game doors, ready to walk in. Earth only; ignored
    *  during the drop-in, a zone change, or while a minigame is up. */
@@ -1874,6 +1888,9 @@ export class Game {
   /** Hard swap of surfaces, atmosphere, visible terrain and spawn for a zone. */
   private doTravel(zone: Zone) {
     this.warpRevert() // drop any warp form on zone change
+    // The city raid is an Earth-only event; abandon it on any zone change so its
+    // banner + objective don't bleed onto the Moon/Mars.
+    if (this.raidActive) this.abortCityRaid()
     if (this.vehicles.current) {
       this.player.exitVehicle(this.player.position)
     }
