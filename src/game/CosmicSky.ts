@@ -191,7 +191,10 @@ export class CosmicSky implements GameSystem {
 
   /** Draw a faint star-band (galaxy) ONCE; returns a CanvasTexture. */
   private drawGalaxy(): THREE.CanvasTexture {
-    const w = 1024, h = 256
+    // Low tier halves the galaxy texture (512x128) to cut VRAM; it's a faint,
+    // far additive band where the detail loss is invisible. High/medium keep full.
+    const lowTex = config.tier.name === 'low'
+    const w = lowTex ? 512 : 1024, h = lowTex ? 128 : 256
     const cv = document.createElement('canvas')
     cv.width = w; cv.height = h
     const ctx = cv.getContext('2d')!

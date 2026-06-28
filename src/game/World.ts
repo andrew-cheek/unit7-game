@@ -1455,6 +1455,10 @@ export class World {
     places.forEach((p, i) => {
       const ph = p.w * 0.16 // sign height
       // A fixed-width canvas; the strip is drawn (and re-drawn on BREAKING news).
+      // Width must stay wide on every tier: redraw() lays the headline strip out at
+      // a fixed font with no wrap, so W also bounds how much scrolling text is visible
+      // before the repeat seam. Cutting it on mobile clipped the content, so keep 3200
+      // across tiers (VRAM is reclaimed elsewhere — window/galaxy/billboard textures).
       const H = 72
       const W = 3200
       const cv = document.createElement('canvas')

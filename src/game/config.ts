@@ -211,6 +211,32 @@ export const config = {
     minGroundClearance: 0.6,
   },
 
+  // Landing-impact "juice": a camera kick + ground dust ring when the player
+  // touches down hard. Intensity scales with the downward speed at touchdown,
+  // captured the step BEFORE the controller zeroes velocity.y on contact. A
+  // deadzone keeps gentle steps / small hops from shaking the view. Tier-gated
+  // in Game.ts (heavier on high, trimmed on medium, off on low).
+  juice: {
+    // Downward speed (m/s) below which a touchdown is a gentle step / small hop:
+    // no shake, no dust. A plain flat-ground jump (jumpSpeed 9.5, fall gravity
+    // 1.6x) lands at roughly 12 m/s, so this sits just above it - a deliberate
+    // hop reads silent and only real drops (off a roof, after a jetpack climb)
+    // start to register.
+    landMinSpeed: 13,
+    // Downward speed mapped to a full-intensity (1.0) landing. Anything faster
+    // is clamped to 1.0 so a terminal-velocity plummet doesn't over-shake.
+    landMaxSpeed: 38,
+    // Peak camera-shake amount fed to Camera.shake() at full intensity. Camera
+    // owns the exponential decay; this is just the kick size.
+    shakeMax: 0.85,
+    // Intensity above which a dust-ring FX (LandingFx burst) also fires, so only
+    // genuinely heavy landings spawn the ground burst (light hops just shake a
+    // touch). 0..1 against the speed mapping above.
+    fxThreshold: 0.4,
+    // Per-tier shake scale so the kick is softer on mid devices and off on low.
+    shakeScaleMedium: 0.7,
+  },
+
   vehicle: {
     hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
     speeder: { accel: 56, maxSpeed: 58, reverse: 12, turn: 2.4, hoverHeight: 0.9, bob: 0.1 },

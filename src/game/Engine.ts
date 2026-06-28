@@ -244,7 +244,10 @@ export class Engine {
       this.bloomPass = new UnrealBloomPass(
         new THREE.Vector2(Math.max(1, w * this.bloomScale), Math.max(1, h * this.bloomScale)),
         this.baseBloom,
-        config.render.bloom.radius,
+        // Low: tighter kernel (0.25 vs the tuned 0.4) cuts the blur tap spread on
+        // the already-cheaper half-res target — fewer wide samples per phone GPU.
+        // Medium/high keep the tuned default so their glow is unchanged.
+        tier.name === 'low' ? 0.25 : config.render.bloom.radius,
         // High tier lowers the threshold a touch so mid-bright hero neon actually
         // halos: after ACES tonemapping the bright signs/cores sit below white, so
         // the old ~1.0 threshold meant almost nothing bloomed. 0.78 is deliberately
@@ -483,7 +486,9 @@ export class Engine {
     if (Math.abs(this.adaptStreak) < need) return
     this.adaptStreak = 0
     this.renderScale = Math.max(Engine.SCALE_FLOOR, Math.min(1, this.renderScale + dir * 0.1))
-    this.adaptCooldown = 5 // seconds of quiet after a change, so it can't thrash
+    // Quiet window after a change so the scale can't thrash. Lighter tiers restore
+    // sharpness sooner: high=5s, medium=3s, low=2s. (high unchanged from before.)
+    this.adaptCooldown = this.tier.name === 'low' ? 2 : this.tier.name === 'medium' ? 3 : 5
     this.applyResolution()
   }
 
