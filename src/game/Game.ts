@@ -69,6 +69,12 @@ import { LevelUpShow } from './LevelUpShow'
 import { WanderingMerchant } from './WanderingMerchant'
 import { DataRelics } from './DataRelics'
 import { TurretNests } from './TurretNests'
+import { ObjectiveTrail } from './ObjectiveTrail'
+import { CapturedEntourage } from './CapturedEntourage'
+import { MilestoneToasts } from './MilestoneToasts'
+import { AdBlimps } from './AdBlimps'
+import { Monorail } from './Monorail'
+import { CarePackages } from './CarePackages'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -654,6 +660,35 @@ export class Game {
       focus: () => this.player.position,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onZap: (kx, kz, ky) => { this.player.velocity.x += kx; this.player.velocity.z += kz; this.player.velocity.y += ky; this.player.grounded = false },
+    }))
+    // Objective trail: a glowing breadcrumb path guiding to the current goal.
+    this.systems.register(new ObjectiveTrail(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      target: () => this.missions.objBeacon.visible ? this.missions.objBeacon.position : null,
+    }))
+    // Captured entourage: the aliens you've caught trail behind you as a flex.
+    this.systems.register(new CapturedEntourage(this.engine.scene, {
+      focus: () => this.player.position,
+      yaw: () => this.player.yaw,
+      count: () => this.hud.captured,
+    }))
+    // Milestone toasts: celebratory callouts when you cross capture/credit/level marks.
+    this.systems.register(new MilestoneToasts({
+      stats: () => ({ captured: this.hud.captured, credits: this.credits, level: levelForXp(this.progression.xp) }),
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.6 },
+      notify: (text) => this.popups.pop(this.player.position.x, this.player.position.y + 2.4, this.player.position.z, text, '#ffd24a'),
+    }))
+    // Ad blimps: big slow advertising airships drifting over the skyline.
+    this.systems.register(new AdBlimps(this.engine.scene, { focus: () => this.focus }))
+    // Monorail: an elevated neon train endlessly looping the city.
+    this.systems.register(new Monorail(this.engine.scene))
+    // Care packages: periodic supply drops you race to claim for a reward.
+    this.systems.register(new CarePackages(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onCollect: (x, y, z, credits, xp) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `SUPPLY +${credits}c`, '#9bff6a') },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.6 },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
