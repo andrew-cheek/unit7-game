@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { config } from './config'
 import { PlatformAirshow } from './PlatformAirshow'
 import { SkyElevator } from './SkyElevator'
+import { RetroDeco } from './RetroDeco'
 
 /**
  * The opening you stand on, not fall into: a big floating robot FACTORY high above
@@ -35,6 +36,7 @@ export class LaunchPad {
   // robots in the airspace, and a Moon/Mars space-elevator set piece on the deck.
   private airshow!: PlatformAirshow
   private skyElevator!: SkyElevator
+  private retroDeco!: RetroDeco
 
   private units: {
     g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Object3D; legR: THREE.Object3D
@@ -117,6 +119,7 @@ export class LaunchPad {
     // local deck space and are driven from update()/freed in dispose().
     this.airshow = new PlatformAirshow(this.group, { radius: this.radius })
     this.skyElevator = new SkyElevator(this.group, { radius: this.radius })
+    this.retroDeco = new RetroDeco(this.group, { radius: this.radius })
 
     // Circular collider with enough segments to read as a true circle, matching the
     // visual floor radius exactly - so you fall off right at the visible edge.
@@ -1131,9 +1134,10 @@ export class LaunchPad {
 
   update(dt: number, _x: number, _z: number) {
     this.t += dt
-    // Launch-pad set dressing (planes/parachutists + space elevator).
+    // Launch-pad set dressing (planes/parachutists + space elevator + retro deco).
     this.airshow.update(dt)
     this.skyElevator.update(dt)
+    this.retroDeco.update(dt)
     // Item 4: on 'low' ONLY, skip the distant-backdrop opacity sweeps on 2 of every
     // 3 frames - they rewrite a uniform every frame yet read identically at a third
     // the rate this far away. Medium/high leave `lowSkip` false, so they stay
@@ -1361,6 +1365,20 @@ export class LaunchPad {
     return box
   }
 
+  // --- Sky elevator proxies (the functional off-world lift on the deck) ---------
+  /** World-space centre of the elevator boarding spot (deck level), written into
+   *  `out`. The elevator's boardLocal is in this group's local space, so we push it
+   *  through the group's world matrix. */
+  elevatorWorldCenter(out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.skyElevator.boardLocal).applyMatrix4(this.group.matrixWorld)
+  }
+  /** XZ radius of the boarding footprint (step inside to ride). */
+  elevatorRadius(): number { return this.skyElevator.boardRadius }
+  /** The destination the sign is currently showing ('moon' | 'mars'). */
+  elevatorDest(): 'moon' | 'mars' { return this.skyElevator.currentDest() }
+  /** Lock the sign + ramp the boarding visual on/off. */
+  elevatorSetBoarding(on: boolean): void { this.skyElevator.setBoarding(on) }
+
   /** Left the deck - off the edge of the (circular) floor, which the collider and
    *  this test now share a radius with, so there's no invisible lip to walk on. */
   steppedOff(x: number, y: number, z: number): boolean {
@@ -1434,6 +1452,7 @@ export class LaunchPad {
     this.strobes?.dispose()
     this.airshow?.dispose()
     this.skyElevator?.dispose()
+    this.retroDeco?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
     this.texs.forEach((t) => t.dispose())

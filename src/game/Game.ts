@@ -217,6 +217,11 @@ export class Game {
   // cinematic on the default Earth start.
   private dropIn: DropIn | null = null
   private cityCheer!: CityCheer // reactive crowd cheer FX; fired on captures + combo milestones
+  // Sky-elevator boarding: while non-null, the screen fades and then we end the
+  // launch pad and travel off-world to `dest`. Scratch vector reused for the
+  // elevator world-centre proximity test (no per-frame allocation).
+  private elevatorBoard: { t: number; dest: Zone } | null = null
+  private elevScratch = new THREE.Vector3()
   private dropLand = new THREE.Vector3() // where the drop-in steers + hands off (arcade plaza)
   private savedFogDensity: number | null = null
   // Sit the sky/star dome around the cinematic's pocket of airspace.
@@ -3416,6 +3421,47 @@ export class Game {
     if (this.launchPad) {
       this.launchPad.update(dt, this.player.position.x, this.player.position.z)
       const p = this.player.position
+
+      // Sky elevator boarding: once started, hold the player put (we return before
+      // the on-foot update so no movement/physics runs), fade the screen, then end
+      // the pad and hard-travel off-world to the chosen destination.
+      if (this.elevatorBoard) {
+        this.elevatorBoard.t += dt
+        this.hud.fade = Math.min(1, this.elevatorBoard.t / 0.8)
+        if (this.elevatorBoard.t >= 0.8) {
+          const dest = this.elevatorBoard.dest
+          this.elevatorBoard = null
+          this.endLaunchPad()
+          this.doTravel(dest)
+          this.trans = { phase: 'in', t: 0, target: dest } // fade back in on arrival
+        }
+        this.pushHud(dt)
+        return
+      }
+
+      // Near the elevator: prompt, and step into the car footprint to ride. The
+      // destination is whatever the sign is showing as you enter (it cycles
+      // MOON/MARS, so you "catch the lift" to where you want).
+      const ec = this.launchPad.elevatorWorldCenter(this.elevScratch)
+      const er = this.launchPad.elevatorRadius()
+      const ed = Math.hypot(p.x - ec.x, p.z - ec.z)
+      if (!this.vehicles.current && ed < er + 3.5) {
+        const dest = this.launchPad.elevatorDest()
+        if (ed < er) {
+          // Stepped into the car — lock it in and begin the boarding sequence.
+          this.launchPad.elevatorSetBoarding(true)
+          this.elevatorBoard = { t: 0, dest }
+          this.hud.banner = `ELEVATOR · ${dest.toUpperCase()}`
+          this.bannerTimer = 2.6
+          this.audio.play('portal')
+          this.pushHud(dt)
+          return
+        }
+        this.hud.prompt = `ELEVATOR — step in to ride to ${dest.toUpperCase()}`
+      } else {
+        this.launchPad.elevatorSetBoarding(false)
+      }
+
       // On foot: walk off the ledge -> normal skydive. (Driving off in a vehicle is
       // handled after vehicles.update, below, so the car becomes the diver.)
       if (!this.vehicles.current && this.launchPad.steppedOff(p.x, p.y, p.z)) {
