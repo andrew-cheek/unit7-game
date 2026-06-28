@@ -36,6 +36,7 @@ export class LaunchPad {
   // robots in the airspace, and a Moon/Mars space-elevator set piece on the deck.
   private airshow!: PlatformAirshow
   private skyElevator!: SkyElevator
+  private skyElevator2!: SkyElevator // decorative twin on the opposite side
   private retroDeco!: RetroDeco
 
   private units: {
@@ -102,7 +103,11 @@ export class LaunchPad {
     this.group.rotation.y = faceYaw
 
     this.buildTowers()
-    this.buildFactoryTower()
+    // A matching pair of HUMANOID ROBOTS glass plants flank the deck - one front-
+    // left, a twin on the opposite (back-right) side - so the platform reads as a
+    // full factory campus from any angle.
+    this.buildFactoryTower(-52, 54)
+    this.buildFactoryTower(52, -54)
     this.buildDeck()
     this.buildConveyor()
     this.buildForgeMachine()
@@ -119,6 +124,7 @@ export class LaunchPad {
     // local deck space and are driven from update()/freed in dispose().
     this.airshow = new PlatformAirshow(this.group, { radius: this.radius })
     this.skyElevator = new SkyElevator(this.group, { radius: this.radius })
+    this.skyElevator2 = new SkyElevator(this.group, { radius: this.radius, mirror: true })
     this.retroDeco = new RetroDeco(this.group, { radius: this.radius })
 
     // Circular collider with enough segments to read as a true circle, matching the
@@ -250,14 +256,14 @@ export class LaunchPad {
    *  You can see right into each lit bay where assembly arms weld suspended humanoid
    *  units; glass lift tubes with travelling cores run the corners, a giant
    *  "UNIT 7 ROBOTICS" sign crowns it, and neon bands ring every floor. */
-  private buildFactoryTower() {
+  private buildFactoryTower(cx: number, cz: number) {
     const low = config.tier.name === 'low'
     const W = 32, D = 18, FH = 12
     const floors = low ? 2 : 4
-    // Off to the FRONT-LEFT and beyond the rim, angled to face the deck - so the
-    // centred player robot doesn't block it and you can take in the whole glass
-    // plant beside you. Far enough out that it never overlaps the deck.
-    const cx = -52, cz = 54
+    // Beyond the rim, angled to face the deck - so the centred player robot doesn't
+    // block it and you can take in the whole glass plant beside you. Far enough out
+    // that it never overlaps the deck. Built once per side (a matching pair flanks
+    // the platform), so cx/cz are passed in.
     const g = new THREE.Group(); g.position.set(cx, 0, cz); g.rotation.y = Math.atan2(-cx, -cz) // face the deck centre
 
     const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0xe6ebf4, metalness: 0.5, roughness: 0.4 }))
@@ -1137,6 +1143,7 @@ export class LaunchPad {
     // Launch-pad set dressing (planes/parachutists + space elevator + retro deco).
     this.airshow.update(dt)
     this.skyElevator.update(dt)
+    this.skyElevator2.update(dt)
     this.retroDeco.update(dt)
     // Item 4: on 'low' ONLY, skip the distant-backdrop opacity sweeps on 2 of every
     // 3 frames - they rewrite a uniform every frame yet read identically at a third
@@ -1452,6 +1459,7 @@ export class LaunchPad {
     this.strobes?.dispose()
     this.airshow?.dispose()
     this.skyElevator?.dispose()
+    this.skyElevator2?.dispose()
     this.retroDeco?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
