@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "ci": "npm run typecheck && npm run build",
     "smoke": "node scripts/ci-smoke.mjs",
+    "perf:sweep": "node scripts/perf-sweep.mjs",
     "smoke:boot": "node scripts/smoke.mjs",
     "shots": "node scripts/shoot.mjs",
     "party:dev": "partykit dev",

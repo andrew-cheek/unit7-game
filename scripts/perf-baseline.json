@@ -1,0 +1,184 @@
+{
+  "generatedAt": "2026-06-28T18:49:54.597Z",
+  "baseUrl": "http://localhost:4173",
+  "note": "Per-tier render-cost regression baseline. The COUNTS (drawCalls, triangles, geometries, textures) are the meaningful, hardware-independent signal. Absolute frame times under headless swiftshader are meaningless vs real hardware and are recorded for drift visibility only, never gated.",
+  "budgets": {
+    "low": {
+      "draws": 2200,
+      "triangles": 700000
+    },
+    "medium": {
+      "draws": 3000,
+      "triangles": 1000000
+    },
+    "high": {
+      "draws": 4000,
+      "triangles": 1600000
+    }
+  },
+  "tiers": {
+    "low": {
+      "url": "http://localhost:4173/?tier=low&debug&bot",
+      "zones": {
+        "earth": {
+          "fps": 22,
+          "drawCalls": 800,
+          "triangles": 144918,
+          "renderScale": 1,
+          "geometries": 554,
+          "textures": 45,
+          "zone": "earth",
+          "raidActive": false
+        },
+        "moon": {
+          "fps": 15,
+          "drawCalls": 909,
+          "triangles": 80569,
+          "renderScale": 1,
+          "geometries": 944,
+          "textures": 51,
+          "zone": "moon",
+          "raidActive": false
+        },
+        "mars": {
+          "fps": 10,
+          "drawCalls": 840,
+          "triangles": 98197,
+          "renderScale": 1,
+          "geometries": 1119,
+          "textures": 55,
+          "zone": "mars",
+          "raidActive": false
+        }
+      },
+      "perfSample": {
+        "tier": "low",
+        "reducedMotion": false,
+        "zone": "earth",
+        "renderScale": 1,
+        "drawCalls": 784,
+        "triangles": 143676,
+        "perf": {
+          "frames": 3,
+          "avgMs": 837.1,
+          "medianMs": 829.1,
+          "p95Ms": 853.2,
+          "p99Ms": 853.2,
+          "maxMs": 853.2,
+          "avgFps": 1.19,
+          "onePercentLowFps": 1.17
+        }
+      }
+    },
+    "medium": {
+      "url": "http://localhost:4173/?tier=medium&debug&bot",
+      "zones": {
+        "earth": {
+          "fps": 24,
+          "drawCalls": 1053,
+          "triangles": 294382,
+          "renderScale": 1,
+          "geometries": 745,
+          "textures": 53,
+          "zone": "earth",
+          "raidActive": false
+        },
+        "moon": {
+          "fps": 16,
+          "drawCalls": 995,
+          "triangles": 93866,
+          "renderScale": 1,
+          "geometries": 1153,
+          "textures": 59,
+          "zone": "moon",
+          "raidActive": false
+        },
+        "mars": {
+          "fps": 11,
+          "drawCalls": 864,
+          "triangles": 112004,
+          "renderScale": 1,
+          "geometries": 1339,
+          "textures": 63,
+          "zone": "mars",
+          "raidActive": false
+        }
+      },
+      "perfSample": {
+        "tier": "medium",
+        "reducedMotion": false,
+        "zone": "earth",
+        "renderScale": 1,
+        "drawCalls": 1044,
+        "triangles": 293888,
+        "perf": {
+          "frames": 3,
+          "avgMs": 1315.67,
+          "medianMs": 1314.1,
+          "p95Ms": 1330.2,
+          "p99Ms": 1330.2,
+          "maxMs": 1330.2,
+          "avgFps": 0.76,
+          "onePercentLowFps": 0.75
+        }
+      }
+    },
+    "high": {
+      "url": "http://localhost:4173/?tier=high&debug&bot",
+      "zones": {
+        "earth": {
+          "fps": 24,
+          "drawCalls": 1239,
+          "triangles": 558491,
+          "renderScale": 1,
+          "geometries": 899,
+          "textures": 47,
+          "zone": "earth",
+          "raidActive": false
+        },
+        "moon": {
+          "fps": 18,
+          "drawCalls": 1036,
+          "triangles": 105021,
+          "renderScale": 1,
+          "geometries": 1353,
+          "textures": 53,
+          "zone": "moon",
+          "raidActive": false
+        },
+        "mars": {
+          "fps": 13,
+          "drawCalls": 959,
+          "triangles": 133705,
+          "renderScale": 1,
+          "geometries": 1558,
+          "textures": 57,
+          "zone": "mars",
+          "raidActive": false
+        }
+      },
+      "perfSample": {
+        "tier": "high",
+        "reducedMotion": false,
+        "zone": "earth",
+        "renderScale": 1,
+        "drawCalls": 1222,
+        "triangles": 557489,
+        "perf": {
+          "frames": 2,
+          "avgMs": 2079.05,
+          "medianMs": 2080.8,
+          "p95Ms": 2080.8,
+          "p99Ms": 2080.8,
+          "maxMs": 2080.8,
+          "avgFps": 0.48,
+          "onePercentLowFps": 0.48
+        }
+      }
+    }
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "ignoredLocal404Count": 62,
+  "pass": true
+}
