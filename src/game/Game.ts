@@ -64,6 +64,11 @@ import { BountyHunt } from './BountyHunt'
 import { CargoRun } from './CargoRun'
 import { RogueTitan } from './RogueTitan'
 import { NightMarket } from './NightMarket'
+import { SkyDreadnought } from './SkyDreadnought'
+import { LevelUpShow } from './LevelUpShow'
+import { WanderingMerchant } from './WanderingMerchant'
+import { DataRelics } from './DataRelics'
+import { TurretNests } from './TurretNests'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -613,6 +618,42 @@ export class Game {
     this.systems.register(new NightMarket(this.engine.scene, {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       dayFactor: () => this.world.dayFactor,
+    }))
+    // Sky dreadnought: a giant airborne BOSS you fly up to and chip down.
+    this.systems.register(new SkyDreadnought(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      onHit: (pos) => this.popups.pop(pos.x, pos.y, pos.z, 'HIT', '#ff6a4a'),
+      onDefeated: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `DREADNOUGHT DOWN +${credits}c`, '#ffd24a') },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.8 },
+    }))
+    // Level-up celebration: a world FX burst + banner when you level up.
+    this.systems.register(new LevelUpShow(this.engine.scene, {
+      focus: () => this.player.position,
+      level: () => levelForXp(this.progression.xp),
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.4 },
+    }))
+    // Wandering merchant: a roaming vendor drone - a mobile credit sink to hunt down.
+    this.systems.register(new WanderingMerchant(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      credits: () => this.credits,
+      spend: (cost) => { if (this.credits < cost) return false; this.addCredits(-cost); return true },
+      buff: (kind) => this.applyPowerup(kind),
+      notify: (x, y, z, label, color) => this.popups.pop(x, y, z, label, color),
+    }))
+    // Data relics: a curated collect-them-all set hidden around the city.
+    this.systems.register(new DataRelics(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onScan: (got, total, x, y, z) => { this.addCredits(30); this.awardXp(20); this.popups.pop(x, y, z, `DATA ${got}/${total}`, '#9bd4ff'); this.hud.banner = `DATA RELIC ${got}/${total}`; this.bannerTimer = 1.6 },
+      onComplete: (credits, xp) => { this.addCredits(credits); this.awardXp(xp) },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.8 },
+    }))
+    // Turret nests: fixed hostile turrets that make certain spots dangerous.
+    this.systems.register(new TurretNests(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onZap: (kx, kz, ky) => { this.player.velocity.x += kx; this.player.velocity.z += kz; this.player.velocity.y += ky; this.player.grounded = false },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
