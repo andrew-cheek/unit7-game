@@ -1,6 +1,7 @@
 import { memo, useState, type CSSProperties } from 'react'
 import type { BlipKind, HudState, PlayerProfile } from '../game/types'
 import { ACHIEVEMENTS } from '../game/progression'
+import { useUnit7UiStyles, U7_UI_CLASS } from './uiAnims'
 
 // Friendly labels for the per-game W/L lines on a profile card.
 const GAME_LABELS: Record<string, string> = {
@@ -77,6 +78,7 @@ export function HUD({
   // suppress both. Real desktop players are unaffected (defaults to false).
   botMode?: boolean
 }) {
+  useUnit7UiStyles()
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
   // Meters + stat readouts are clutter on a phone, so collapse them behind a
@@ -88,7 +90,7 @@ export function HUD({
   const profiles = hud.profiles ?? []
   const viewed = viewing === '__self__' ? profiles.find((p) => p.self) : viewing ? profiles.find((p) => p.id === viewing) : null
   return (
-    <div style={wrap}>
+    <div className={U7_UI_CLASS} style={wrap}>
       {/* top-left controls (restart replays the cinematic; pause is touch-only since desktop has Esc) */}
       {!hideCorners && <div style={touch ? { ...topLeftRow, maxWidth: '92vw' } : topLeftRow}>
         <button style={pillBtn} onClick={onRestart}>RESTART ↺</button>

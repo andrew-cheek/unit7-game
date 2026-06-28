@@ -3,7 +3,7 @@ import { config } from './config'
 import { createRobot, type RobotModel } from './procedural'
 import { clamp, damp, dampAngle } from './utils'
 import type { Input } from './Input'
-import type { Physics } from './Physics'
+import type { Physics, ImpactOut } from './Physics'
 import type { PlayerMode } from './types'
 import type { GrindHit } from './GrindRails'
 
@@ -27,6 +27,11 @@ export class Player {
   yaw = 0
   speed = 0
   grounded = true
+  // Closing speed (m/s) at which the last collide step shoved us out of a wall;
+  // 0 when free or just sliding along one. Game reads it after update() for the
+  // wall-impact juice (sound + shake), mirroring the landing-juice signal.
+  wallImpactSpeed = 0
+  private readonly impactOut: ImpactOut = { speed: 0 } // scratch, reused (no per-step alloc)
   mode: PlayerMode = 'robot'
   stamina = config.player.staminaMax
   fuel = config.jetpack.fuelMax
@@ -414,6 +419,7 @@ export class Player {
 
     // Grinding sets its own position on the rail; skip the collide/ground-snap.
     if (!this.grinding) this.integrateAndCollide(dt, physics)
+    else this.wallImpactSpeed = 0 // no collide step this frame -> no wall impact
     this.updateGrappleLine()
 
     // Face + animate.
@@ -820,7 +826,11 @@ export class Player {
     pos.y += this.velocity.y * dt
     pos.z += this.velocity.z * dt
 
-    physics.resolveHorizontal(pos, this.velocity, config.player.radius, config.player.height)
+    // Reset the impact scratch, resolve, then surface the closing speed so Game
+    // can fire wall-impact juice. Sliding along a wall leaves speed at 0.
+    this.impactOut.speed = 0
+    physics.resolveHorizontal(pos, this.velocity, config.player.radius, config.player.height, this.impactOut)
+    this.wallImpactSpeed = this.impactOut.speed
     // Landing surface = the higher of the terrain below and any building roof
     // whose footprint we're over. Use the PRE-step height so a fast fall that
     // crosses a whole roof in one frame still catches it (no tunnelling through).

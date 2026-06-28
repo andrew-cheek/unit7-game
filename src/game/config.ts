@@ -253,6 +253,32 @@ export const config = {
     shakeScaleMedium: 0.7,
   },
 
+  // Wall-impact "juice": a thud SFX + camera kick + haptic pulse when the on-foot
+  // player runs into a building. Intensity scales with the closing speed into the
+  // wall (the velocity component the collider cancelled this step, reported by
+  // Physics.resolveHorizontal). A deadzone keeps gentle nudges silent, and a
+  // cooldown stops sliding along a wall from machine-gunning the sound/shake.
+  // Tier-gated in Game.ts (full on high, trimmed on medium, off on low) and
+  // softened under config.reducedMotion, exactly like the landing juice above.
+  impact: {
+    // Closing speed (m/s) below which a wall touch is a gentle nudge: no sound,
+    // no shake. Walk speed is ~6 m/s and sprint ~11, so this sits where only a
+    // committed run into a wall registers; brushing past at an angle stays quiet.
+    minSpeed: 5,
+    // Closing speed mapped to a full-intensity (1.0) hit; faster is clamped so a
+    // jetpack-boosted slam into a tower doesn't over-shake.
+    maxSpeed: 16,
+    // Peak camera-shake amount fed to Camera.shake() at full intensity. Camera
+    // owns the exponential decay; this is just the kick size. Smaller than a hard
+    // landing (0.85) - a wall bump should nudge, not jolt.
+    shakeMax: 0.4,
+    // Min seconds between impacts. While you grind into a wall the resolver fires
+    // every step; this gates the juice so it reads as one hit, not a buzz.
+    cooldown: 0.4,
+    // Per-tier shake scale so the kick is softer on mid devices and off on low.
+    shakeScaleMedium: 0.7,
+  },
+
   vehicle: {
     hovercar: { accel: 42, maxSpeed: 42, reverse: 14, turn: 1.9, hoverHeight: 1.1, bob: 0.12 },
     speeder: { accel: 56, maxSpeed: 58, reverse: 12, turn: 2.4, hoverHeight: 0.9, bob: 0.1 },

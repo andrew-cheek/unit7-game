@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from 'react'
+import { useUnit7UiStyles, U7_UI_CLASS, panelEnter, backdropEnter } from './uiAnims'
 
 /**
  * Save / Restore panel. Kid-friendly, touch/iPad-first, fully PROP-DRIVEN: it
@@ -35,6 +36,7 @@ export function SavePanel({ recoveryCode, online, onCopyCode, onRestore, onClose
   const [copied, setCopied] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aliveRef = useRef(true)
+  useUnit7UiStyles()
 
   useEffect(() => {
     aliveRef.current = true
@@ -81,10 +83,9 @@ export function SavePanel({ recoveryCode, online, onCopyCode, onRestore, onClose
   }
 
   return (
-    <div style={backdrop} onPointerDown={onClose}>
-      <style>{SAVE_KEYFRAMES}</style>
+    <div className={U7_UI_CLASS} style={{ ...backdrop, ...backdropEnter }} onPointerDown={onClose}>
       <div
-        style={touch ? { ...card, ...cardTouch } : card}
+        style={touch ? { ...card, ...cardTouch, ...panelEnter } : { ...card, ...panelEnter }}
         onPointerDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -183,8 +184,6 @@ const NEON = {
   text: 'rgba(223,238,255,0.92)',
   dim: 'rgba(223,238,255,0.6)',
 }
-
-const SAVE_KEYFRAMES = `@keyframes u7spin{to{transform:rotate(360deg)}}`
 
 const backdrop: CSSProperties = {
   position: 'absolute',

@@ -196,22 +196,32 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
   core.add(antennaTip)
 
   // Chunky legs: navy thigh / metal shin / glowing-toed blue foot off a hip pivot.
+  // The shin/knee/foot/toe hang off a `lower` group pivoted at the knee joint
+  // (y=-0.42 in hip space) so the lower leg can flex independently of the thigh -
+  // that's what lets the swing leg bend instead of swinging as a rigid peg. The
+  // foot also gets its own `ankle` pivot for the toe-down/roll on lift.
   const makeLeg = (sx: number) => {
     const hip = new THREE.Group()
     hip.position.set(sx, 0.98, 0)
     const thigh = box(0.2, 0.4, 0.22, darkMat)
     thigh.position.set(0, -0.2, 0)
+    const lower = new THREE.Group()
+    lower.position.set(0, -0.42, 0) // knee joint
     const knee = box(0.18, 0.12, 0.2, accentMat)
-    knee.position.set(0, -0.42, 0.02)
+    knee.position.set(0, 0, 0.02)
     const shin = box(0.18, 0.38, 0.2, bodyMat)
-    shin.position.set(0, -0.62, 0)
+    shin.position.set(0, -0.2, 0)
+    const ankle = new THREE.Group()
+    ankle.position.set(0, -0.42, 0) // foot pivot (relative to knee)
     const foot = box(0.24, 0.16, 0.38, accentMat)
-    foot.position.set(0, -0.84, 0.08)
+    foot.position.set(0, 0, 0.08)
     const toe = box(0.2, 0.07, 0.08, trimMat)
-    toe.position.set(0, -0.86, 0.27)
-    hip.add(thigh, knee, shin, foot, toe)
+    toe.position.set(0, -0.02, 0.27)
+    ankle.add(foot, toe)
+    lower.add(knee, shin, ankle)
+    hip.add(thigh, lower)
     core.add(hip)
-    return hip
+    return { hip, lower, ankle }
   }
   // Chunky arms: glossy blue ball shoulder, metal upper, navy forearm, blocky blue hand.
   const makeArm = (sx: number) => {
@@ -287,6 +297,9 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
 
   let phase = 0
   let t = 0
+  // Damped state for secondary motion (frame-rate independent, no per-frame alloc).
+  let headLag = 0 // eased head yaw that trails the body sway
+  let weight = 0 // signed weight-shift, eased toward the planted side each step
   let fly = 0
   let plane = 0
   let thrust = 0
@@ -302,13 +315,43 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
     phase += dt * (3 + s * 9)
     const stride = 0.12 + s * 0.7
     const swing = Math.sin(phase) * stride
+    const calm = config.reducedMotion ? 0.5 : 1 // dial the new motion back, never off
 
     const pose = Math.max(fly, plane) // flight tuck shared by jetpack + plane
     const walk = 1 - pose
-    legL.rotation.x = swing * walk + pose * 0.5
-    legR.rotation.x = -swing * walk + pose * 0.5
-    armL.rotation.x = -swing * 0.8 * walk - pose * 1.2
-    armR.rotation.x = swing * 0.8 * walk - pose * 1.2
+
+    // Hip swing (unchanged peg motion), but each leg now bends at the knee through
+    // its swing phase and straightens on the plant. The leg is in swing when its
+    // hip is rotating forward (phase derivative of its own sine), so we key the
+    // bend off a raised cosine that peaks mid-swing and bottoms at the plant.
+    legL.hip.rotation.x = swing * walk + pose * 0.5
+    legR.hip.rotation.x = -swing * walk + pose * 0.5
+    // 0 at plant, ~1 at mid-swing. legL leads, legR is a half-cycle behind.
+    const swingL = Math.max(0, -Math.cos(phase)) // peaks when sin' is climbing
+    const swingR = Math.max(0, Math.cos(phase))
+    const bend = (0.25 + s * 0.85) * walk // knees tuck harder at speed
+    legL.lower.rotation.x = -swingL * bend
+    legR.lower.rotation.x = -swingR * bend
+    // Foot: toe-down + slight lift while swinging, flat while planted. The visible
+    // lift comes from the knee tuck; the ankle just rolls the foot so it doesn't
+    // skim the ground heel-first. reducedMotion keeps the roll gentle.
+    const roll = (0.5 + s * 0.6) * walk * calm
+    legL.ankle.rotation.x = swingL * roll
+    legR.ankle.rotation.x = swingR * roll
+    // Fly tuck: bend the knees and tip the feet back so the legs read as drawn-up.
+    if (pose > 0) {
+      legL.lower.rotation.x -= pose * 0.7
+      legR.lower.rotation.x -= pose * 0.7
+      legL.ankle.rotation.x -= pose * 0.5
+      legR.ankle.rotation.x -= pose * 0.5
+    }
+
+    // Arms swing opposite the legs, but LAG the leg phase by a small offset and
+    // overshoot slightly (1.0x carry) so they trail then catch up rather than
+    // mirror perfectly - the single clearest secondary-motion read on a biped.
+    const armSwing = Math.sin(phase - 0.5) * stride
+    armL.rotation.x = -armSwing * 0.9 * walk - pose * 1.2
+    armR.rotation.x = armSwing * 0.9 * walk - pose * 1.2
     armL.rotation.z = 0.08 + pose * 0.4
     armR.rotation.z = -0.08 - pose * 0.4
     // Skydiver steering: forward (sy>0) sweeps arms back/overhead, flaring (sy<0)
@@ -320,12 +363,25 @@ export function createRobot(colors: RobotColors = {}): RobotModel {
       armR.rotation.z += steerX * 0.35
     }
 
-    // Bob + sway while moving; gentle breathing while idle.
+    // Weight shift: the body drops and leans toward whichever foot is planted, so
+    // each step transfers weight instead of gliding. The plant alternates with the
+    // step, tracked by sign(sin(phase)); ease `weight` toward it for a damped lean
+    // (frame-rate independent). This is the biggest "alive" win.
+    const plant = Math.sin(phase) >= 0 ? 1 : -1
+    weight += (plant * s * walk - weight) * Math.min(1, dt * 9)
+
+    // Bob + sway while moving; gentle breathing while idle. Double-bob (|sin| has
+    // two dips per stride - one per footfall) drops the core on each plant.
     const bob = Math.abs(Math.sin(phase)) * 0.045 * s
     const breathe = Math.sin(t * 1.6) * 0.012 * (1 - s)
     core.position.y = bob + breathe
-    core.rotation.z = Math.sin(phase) * 0.03 * s
+    core.position.x = weight * 0.05 * calm // lateral core offset toward the plant
+    core.rotation.z = (Math.sin(phase) * 0.03 + weight * 0.05 * calm) * s
     core.rotation.x = pose * 0.35
+
+    // Head trails the body sway and counter-rotates a touch (secondary motion).
+    headLag += (core.rotation.z - headLag) * Math.min(1, dt * 6)
+    head.rotation.z = -headLag * 0.6 * calm
 
     // Wings deploy with the plane morph OR an explicit wing-out (skydive/jetpack).
     wings += (wingsTarget - wings) * Math.min(1, dt * 12)
@@ -411,8 +467,26 @@ export function createAlien(opts: { big?: boolean; color?: number; eye?: number 
     core.add(piv)
     return piv
   }
-  const legL = makeLimb(-0.09, 0.82, 0.66, 0.06)
-  const legR = makeLimb(0.09, 0.82, 0.66, 0.06)
+  // Legs get a real knee: thigh capsule off the hip, shin hung off a `lower` group
+  // pivoted mid-leg, so the swing leg can flex (spindly aliens read as bug-legged
+  // when the lower segment kicks). Arms stay single-capsule.
+  const makeLeg = (sx: number, y: number, len: number, r: number) => {
+    const hip = new THREE.Group()
+    hip.position.set(sx, y, 0)
+    const half = len / 2
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(r, half, 4, 8), darkMat)
+    thigh.position.y = -half / 2
+    const lower = new THREE.Group()
+    lower.position.y = -half // knee joint
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(r * 0.85, half, 4, 8), darkMat)
+    shin.position.y = -half / 2
+    lower.add(shin)
+    hip.add(thigh, lower)
+    core.add(hip)
+    return { hip, lower }
+  }
+  const legL = makeLeg(-0.09, 0.82, 0.66, 0.06)
+  const legR = makeLeg(0.09, 0.82, 0.66, 0.06)
   const armL = makeLimb(-0.2, 1.28, 0.6, 0.05)
   const armR = makeLimb(0.2, 1.28, 0.6, 0.05)
 
@@ -424,18 +498,32 @@ export function createAlien(opts: { big?: boolean; color?: number; eye?: number 
     }
   })
   let phase = Math.random() * 6.28
+  let weight = 0 // eased weight-shift toward the planted leg
   return {
     group,
     update: (dt, s01) => {
       const s = Math.min(1, Math.max(0, s01))
       phase += dt * (5 + s * 8)
+      const calm = config.reducedMotion ? 0.5 : 1
       const sw = Math.sin(phase) * (0.25 + s * 0.6)
-      legL.rotation.x = sw
-      legR.rotation.x = -sw
-      armL.rotation.x = -sw * 0.6
-      armR.rotation.x = sw * 0.6
+      legL.hip.rotation.x = sw
+      legR.hip.rotation.x = -sw
+      // Knee flex peaks mid-swing, straightens on the plant (bug-leg kick).
+      const swingL = Math.max(0, -Math.cos(phase))
+      const swingR = Math.max(0, Math.cos(phase))
+      const bend = 0.3 + s * 0.9
+      legL.lower.rotation.x = -swingL * bend
+      legR.lower.rotation.x = -swingR * bend
+      // Arms lag the leg phase + overshoot rather than mirror perfectly.
+      const aw = Math.sin(phase - 0.5) * (0.25 + s * 0.6)
+      armL.rotation.x = -aw * 0.6
+      armR.rotation.x = aw * 0.6
+      // Weight shift: lean toward the planted leg with a damped lateral sway.
+      const plant = Math.sin(phase) >= 0 ? 1 : -1
+      weight += (plant * s - weight) * Math.min(1, dt * 8)
       core.position.y = Math.abs(Math.sin(phase)) * 0.04 * s
-      core.rotation.z = Math.sin(phase * 0.5) * 0.04
+      core.position.x = weight * 0.04 * calm
+      core.rotation.z = Math.sin(phase * 0.5) * 0.04 + weight * 0.06 * calm
     },
     dispose: () => {
       group.traverse((o) => {
@@ -777,14 +865,22 @@ export function createCitizen(opts: CitizenColors = {}): CharacterModel {
     core.add(hair)
   }
 
+  // Leg split into thigh + a `lower` group pivoted at the knee, so the swing leg
+  // bends instead of swinging as one rigid capsule. (~1 extra mesh per leg; the
+  // crowd is shadow-free, so the cost is negligible.)
   const makeLeg = (sx: number) => {
     const hip = new THREE.Group()
     hip.position.set(sx, 0.82, 0)
-    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.58, 4, 8), outfitMat)
-    leg.position.y = -0.36
-    hip.add(leg)
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.28, 4, 8), outfitMat)
+    thigh.position.y = -0.18
+    const lower = new THREE.Group()
+    lower.position.y = -0.34 // knee joint
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.28, 4, 8), outfitMat)
+    shin.position.y = -0.18
+    lower.add(shin)
+    hip.add(thigh, lower)
     core.add(hip)
-    return hip
+    return { hip, lower }
   }
   const makeArm = (sx: number) => {
     const sh = new THREE.Group()
@@ -810,18 +906,37 @@ export function createCitizen(opts: CitizenColors = {}): CharacterModel {
 
   let phase = Math.random() * 6.28
   let t = 0
+  let weight = 0 // eased weight-shift toward the planted leg
+  let headLag = 0 // eased head yaw trailing the body sway
   return {
     group,
     update: (dt, speed01) => {
       t += dt
       const s = Math.min(1, Math.max(0, speed01))
       phase += dt * (4 + s * 8)
+      const calm = config.reducedMotion ? 0.5 : 1
       const swing = Math.sin(phase) * (0.2 + s * 0.65)
-      legL.rotation.x = swing
-      legR.rotation.x = -swing
-      armL.rotation.x = -swing * 0.7
-      armR.rotation.x = swing * 0.7
+      legL.hip.rotation.x = swing
+      legR.hip.rotation.x = -swing
+      // Knee flex peaks mid-swing, straightens on the plant.
+      const swingL = Math.max(0, -Math.cos(phase))
+      const swingR = Math.max(0, Math.cos(phase))
+      const bend = 0.25 + s * 0.8
+      legL.lower.rotation.x = -swingL * bend
+      legR.lower.rotation.x = -swingR * bend
+      // Arms lag the leg phase + overshoot rather than mirror perfectly.
+      const armSwing = Math.sin(phase - 0.5) * (0.2 + s * 0.65)
+      armL.rotation.x = -armSwing * 0.75
+      armR.rotation.x = armSwing * 0.75
+      // Weight shift: lean toward the planted leg with a damped lateral sway.
+      const plant = Math.sin(phase) >= 0 ? 1 : -1
+      weight += (plant * s - weight) * Math.min(1, dt * 9)
       core.position.y = Math.abs(Math.sin(phase)) * 0.03 * s + Math.sin(t * 1.5) * 0.006 * (1 - s)
+      core.position.x = weight * 0.04 * calm
+      core.rotation.z = (Math.sin(phase) * 0.025 + weight * 0.05) * s * calm
+      // Head trails the body sway as secondary motion.
+      headLag += (core.rotation.z - headLag) * Math.min(1, dt * 6)
+      head.rotation.z = -headLag * 0.5 * calm
     },
     dispose: () => {
       group.traverse((o) => {

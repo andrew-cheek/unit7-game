@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { CHAT_MAX_LEN, type ChatMessage } from '../game/kidShared'
+import { useUnit7UiStyles, U7_UI_CLASS } from './uiAnims'
 
 // Kid-safe typed chat dock. PURE presentational + local input state only: it
 // owns nothing but the draft text. All filtering, networking and persistence are
@@ -41,7 +42,7 @@ export interface ChatPanelProps {
 export function ChatPanel({ messages, onSend, onFilterPreview, selfId, touch, onClose }: ChatPanelProps) {
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
-  useChatKeyframes()
+  useUnit7UiStyles()
 
   // Auto-scroll to the newest line whenever the log grows. useLayoutEffect so the
   // jump happens before paint (no visible flash of the old scroll position).
@@ -75,7 +76,7 @@ export function ChatPanel({ messages, onSend, onFilterPreview, selfId, touch, on
   const remaining = CHAT_MAX_LEN - draft.length
 
   return (
-    <div style={touch ? { ...dock, ...dockTouch } : dock}>
+    <div className={U7_UI_CLASS} style={touch ? { ...dock, ...dockTouch } : dock}>
       <div style={header}>
         <span style={headerLeft}>
           <span style={liveDot} />
@@ -144,19 +145,8 @@ export function ChatPanel({ messages, onSend, onFilterPreview, selfId, touch, on
 }
 
 // --- styles -----------------------------------------------------------------
-// A short pop-in for the slide-up sheet, injected once on mount so the panel
-// doesn't snap into view (kept local; nothing else needs the keyframe).
-function useChatKeyframes() {
-  useEffect(() => {
-    const id = 'unit7-chat-kf'
-    if (document.getElementById(id)) return
-    const el = document.createElement('style')
-    el.id = id
-    el.textContent =
-      '@keyframes unit7chatIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}'
-    document.head.appendChild(el)
-  }, [])
-}
+// The slide-up pop-in keyframe (unit7chatIn) and the focus / reduced-motion
+// rules now live in the shared global block injected by useUnit7UiStyles().
 
 const dock: CSSProperties = {
   position: 'absolute',

@@ -297,6 +297,12 @@ export class Game {
   // velocity.y on contact) for debugging via window.__unit7.
   private landImpactSpeed = 0
   private landScratch = new THREE.Vector3() // reused FX position (no per-landing alloc)
+  // Wall-impact juice: cooldown timer (s) so sliding/grinding into a wall - which
+  // fires the resolver every step - reads as one clunk, not a buzz. Ticks down in
+  // the on-foot branch of the sim step. wallImpactSpeed mirrors landImpactSpeed:
+  // the last hit's closing speed, kept for debugging via window.__unit7.
+  private wallImpactCd = 0
+  private wallImpactSpeed = 0
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
   private launchCineT = -1 // >=0 while the opening establishing-orbit cinematic plays
   private launchCineBloom = 1 // render-driven bloom multiplier for the opening swell (1 = neutral; visual only, never sim)
@@ -2712,6 +2718,40 @@ export class Game {
     }
   }
 
+  /**
+   * On-foot wall impact: when the collide step shoved the player out of a building
+   * with enough closing speed, play a thud, kick the camera, and buzz once. Mirrors
+   * onPlayerLanded - `closingSpeed` is the velocity component into the wall that the
+   * resolver cancelled this step (Physics writes it to player.wallImpactSpeed). A
+   * deadzone (config.impact.minSpeed) keeps gentle nudges silent and a cooldown
+   * stops a wall-slide/grind-in from machine-gunning the juice.
+   *
+   * Tier-gated: full on high, trimmed on medium, OFF on low (mobile budget) - the
+   * thud SFX still plays on low (sound is cheap), only the shake is dropped. Under
+   * reducedMotion the camera kick is softened. Frame-rate-independent: the cooldown
+   * ticks on the fixed sim step and the shake decay lives in Camera (exponential).
+   */
+  private onPlayerWallImpact(closingSpeed: number) {
+    const im = config.impact
+    if (closingSpeed < im.minSpeed) return // deadzone: gentle nudge / glancing brush
+    if (this.wallImpactCd > 0) return // still cooling down from the last hit
+    this.wallImpactCd = im.cooldown
+    // Normalise into 0..1 across the deadzone -> full-impact band.
+    const span = Math.max(1e-3, im.maxSpeed - im.minSpeed)
+    const intensity = clamp((closingSpeed - im.minSpeed) / span, 0, 1)
+    this.wallImpactSpeed = closingSpeed // exposed for debugging via window.__unit7
+    // Thud SFX, gain faded in with the hit (cheap on every tier).
+    this.audio.play('impact', 0.5 + intensity * 0.5)
+    // Camera kick: off on low; tier-scaled on medium; softened under reducedMotion.
+    const tier = config.tier.name
+    if (tier !== 'low') {
+      const tierScale = tier === 'medium' ? im.shakeScaleMedium : 1
+      const motionScale = config.reducedMotion ? 0.35 : 1
+      this.camera.shake(im.shakeMax * intensity * tierScale * motionScale)
+    }
+    vibrate(Math.round(8 + intensity * 22)) // short pulse, lighter than a hard landing
+  }
+
   /** Apply a missile blast: capture every live target inside the radius. */
   private detonate(pos: THREE.Vector3, radius: number) {
     const r2 = radius * radius
@@ -3579,6 +3619,10 @@ export class Game {
       const wasAirborne = !this.player.grounded
       this.player.update(dt, this.input, this.physics, pg)
       if (wasAirborne && this.player.grounded) this.onPlayerLanded(fallSpeed)
+      // Wall impact: the collide step inside update() reports the closing speed it
+      // cancelled this frame; turn a hard-enough run into a wall into a thud + kick.
+      if (this.wallImpactCd > 0) this.wallImpactCd -= dt
+      if (this.player.wallImpactSpeed > 0) this.onPlayerWallImpact(this.player.wallImpactSpeed)
       // Seamless free-fall: once you touch down, settle into normal city play
       // (restores fog/res, fires the first-landing raid). Portal fly-through is
       // handled by the general airborne check below (works in free roam too).

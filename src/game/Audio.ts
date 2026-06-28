@@ -12,7 +12,7 @@ export type Sfx =
   | 'capture' | 'explosion' | 'fire' | 'mechOnline' | 'land' | 'step'
   | 'soak' | 'portal' | 'objective' | 'ui'
   | 'buff_shield' | 'enter_vehicle' | 'exit_vehicle'
-  | 'collect' | 'buff' | 'buff_expire' | 'zone_enter'
+  | 'collect' | 'buff' | 'buff_expire' | 'zone_enter' | 'impact'
 
 export class AudioManager {
   private ctx: AudioContext | null = null
@@ -132,8 +132,12 @@ export class AudioManager {
     src.stop(t + dur + 0.02)
   }
 
-  play(name: Sfx) {
+  /** Play a one-shot SFX. `gainScale` (default 1) scales the synth gain so a
+   *  caller can make the sound softer/louder by impact - used by wall-impact
+   *  juice to fade the thud in with closing speed. Clamped to a sane range. */
+  play(name: Sfx, gainScale = 1) {
     if (!this.unlocked || this.muted || !this.ctx) return
+    const gs = Math.max(0, Math.min(2, gainScale))
     switch (name) {
       case 'capture': this.tone(520, 0.18, 'sine', 0.3, 1040); break
       case 'fire': this.noise(0.18, 0.25, 1800, 300); this.tone(220, 0.16, 'sawtooth', 0.15, 90); break
@@ -158,6 +162,10 @@ export class AudioManager {
       case 'buff': this.tone(440, 0.16, 'sine', 0.22, 880); this.tone(660, 0.14, 'sine', 0.08, 990); break // warm rising power-up
       case 'buff_expire': this.tone(420, 0.14, 'sine', 0.14, 210); break // soft falling wear-off
       case 'zone_enter': this.noise(0.4, 0.18, 1400, 200); this.tone(220, 0.5, 'sine', 0.16, 660); break // arrival whoosh
+      // Dull robot-on-wall thud: a low filtered noise scuff over a short low sine
+      // thump. gainScale fades it in with the impact's closing speed. Kept quiet
+      // and bassy so a bump reads as a clunk, not a hit.
+      case 'impact': this.noise(0.16, 0.28 * gs, 360, 70); this.tone(58, 0.18, 'sine', 0.32 * gs, 34); break
     }
   }
 

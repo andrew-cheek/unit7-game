@@ -1,5 +1,6 @@
 import { type CSSProperties } from 'react'
 import type { HudState } from '../game/types'
+import { useUnit7UiStyles, U7_UI_CLASS, panelEnter, backdropEnter } from './uiAnims'
 
 const CONTROLS: Array<[string, string]> = [
   ['WASD', 'Move'],
@@ -41,9 +42,10 @@ export function PauseMenu({
   // Parental control: turn typed chat OFF (no PIN — never trap a kid enabled).
   onDisableChat?: () => void
 }) {
+  useUnit7UiStyles()
   return (
-    <div style={wrap}>
-      <div style={panel}>
+    <div className={U7_UI_CLASS} style={{ ...wrap, ...backdropEnter }}>
+      <div style={{ ...panel, ...panelEnter }}>
         <div style={title}>
           <span style={{ color: '#27e7ff' }}>UNIT</span>
           <span style={{ color: '#ff2bd0' }}> 7</span>

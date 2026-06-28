@@ -10,6 +10,15 @@ export interface GroundHit {
   normal: THREE.Vector3
 }
 
+/** Out-param for resolveHorizontal so callers can sense a wall hit (for impact
+ *  juice) without an extra query. `speed` is the largest closing speed (m/s)
+ *  along a push-out normal that was cancelled this call - i.e. how hard the
+ *  capsule was driving INTO a wall before resolution. 0 = no contact / sliding
+ *  along (no inward component). The caller resets it to 0 before the call. */
+export interface ImpactOut {
+  speed: number
+}
+
 /**
  * Collision + terrain following. Two responsibilities:
  *  - resolveHorizontal: push a capsule (treated as a vertical circle) out of the
@@ -174,8 +183,14 @@ export class Physics {
   /**
    * Push a capsule (feet at pos.y, of given radius/height) out of any AABB it
    * overlaps in XZ, and remove the velocity component driving it into the wall.
+   *
+   * If `out` is passed, the largest closing speed cancelled this call is written
+   * to out.speed (the velocity component going INTO the wall, pre-cancellation).
+   * Callers reset out.speed to 0 first; sliding along a wall (no inward velocity)
+   * leaves it 0. Purely additive - the param is optional and unused by existing
+   * callers, and writing it costs only a max() per resolved box.
    */
-  resolveHorizontal(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, height: number) {
+  resolveHorizontal(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, height: number, out?: ImpactOut) {
     if (this.colliders.length !== this.gridCount) this.rebuildGrid()
     const r2 = radius * radius
     const cs = Physics.CELL
@@ -215,6 +230,8 @@ export class Physics {
             pos.z += nz * pen
             const vdot = vel.x * nx + vel.z * nz
             if (vdot < 0) {
+              // -vdot is the closing speed into the wall (vdot<0 means heading in).
+              if (out && -vdot > out.speed) out.speed = -vdot
               vel.x -= vdot * nx
               vel.z -= vdot * nz
             }
@@ -227,16 +244,16 @@ export class Physics {
             const minPen = Math.min(toMinX, toMaxX, toMinZ, toMaxZ)
             if (minPen === toMinX) {
               pos.x = box.min.x - radius
-              if (vel.x > 0) vel.x = 0
+              if (vel.x > 0) { if (out && vel.x > out.speed) out.speed = vel.x; vel.x = 0 }
             } else if (minPen === toMaxX) {
               pos.x = box.max.x + radius
-              if (vel.x < 0) vel.x = 0
+              if (vel.x < 0) { if (out && -vel.x > out.speed) out.speed = -vel.x; vel.x = 0 }
             } else if (minPen === toMinZ) {
               pos.z = box.min.z - radius
-              if (vel.z > 0) vel.z = 0
+              if (vel.z > 0) { if (out && vel.z > out.speed) out.speed = vel.z; vel.z = 0 }
             } else {
               pos.z = box.max.z + radius
-              if (vel.z < 0) vel.z = 0
+              if (vel.z < 0) { if (out && -vel.z > out.speed) out.speed = -vel.z; vel.z = 0 }
             }
           }
         }

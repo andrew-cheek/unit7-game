@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useUnit7UiStyles, U7_UI_CLASS, panelEnter, backdropEnter } from './uiAnims'
 
 /**
  * ParentalGate — the "ask a grown-up" + PIN screen that gates whether typed
@@ -38,6 +39,7 @@ type SetupStep = 'challenge' | 'create' | 'confirm'
 
 export function ParentalGate(props: ParentalGateProps) {
   const { mode, challenge, pinLength, onSetPin, onVerify, onSuccess, onCancel } = props
+  useUnit7UiStyles()
 
   // ---- shared state ----------------------------------------------------
   const [busy, setBusy] = useState(false)
@@ -183,8 +185,8 @@ export function ParentalGate(props: ParentalGateProps) {
   }, [mode, setupStep, pinLength])
 
   return (
-    <div style={wrap} role="dialog" aria-modal="true" aria-label="Grown-ups only — parental gate" onClick={onCancel}>
-      <div style={card} onClick={(e) => e.stopPropagation()}>
+    <div className={U7_UI_CLASS} style={{ ...wrap, ...backdropEnter }} role="dialog" aria-modal="true" aria-label="Grown-ups only — parental gate" onClick={onCancel}>
+      <div style={{ ...card, ...panelEnter }} onClick={(e) => e.stopPropagation()}>
         <div style={headerRow}>
           <span aria-hidden style={lockBadge}>
             🔒
