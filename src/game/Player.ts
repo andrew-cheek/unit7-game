@@ -340,6 +340,41 @@ export class Player {
     this.interpInit = true
   }
 
+  /** Reset to a clean, fully-deterministic baseline. Used by the debug
+   *  determinism probe (Game.installNav) so repeated fixed-step sim runs start
+   *  from byte-identical state — every field the on-foot/flight update reads or
+   *  carries between steps is zeroed here, so two runs of the same scripted input
+   *  must produce the same result iff the simulation is deterministic. Not used in
+   *  normal play. */
+  resetForSim(x: number, y: number, z: number, yaw = 0) {
+    this.object.position.set(x, y, z)
+    this.object.rotation.set(0, yaw, 0)
+    this.velocity.set(0, 0, 0)
+    this.yaw = yaw
+    this.speed = 0
+    this.grounded = true
+    this.mode = 'robot'
+    this.planeTarget = 0
+    this.morphT = 0
+    this.chuteT = 0
+    this.airTime = 0
+    this.prevJet = false
+    this.stamina = config.player.staminaMax
+    this.fuel = config.jetpack.fuelMax
+    this.speedMul = 1
+    this.warpSpeedMul = 1
+    this.shield = false
+    this.dancing = false
+    this.danceT = 0
+    this.boarding = false
+    this.grinding = false
+    this.grappling = false
+    this.grappleAttached = false
+    this.rPrev.set(x, y, z)
+    this.rTrue.set(x, y, z)
+    this.interpInit = true
+  }
+
   /** Render the body at the interpolated position between the last two sim steps
    *  (alpha 0..1 from the engine). Called once per rendered frame. */
   interp(alpha: number) {

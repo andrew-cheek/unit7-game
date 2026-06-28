@@ -1437,6 +1437,75 @@ export class Game {
     return m
   }
 
+  /**
+   * Run the isolated player+physics fixed step over a deterministic scripted
+   * input, twice from an identical seed, and fingerprint the result. Powers
+   * window.__unit7nav.determinism(). Restores all touched state afterward.
+   */
+  private proveDeterminism(steps: number): { steps: number; identical: boolean; hashA: string; hashB: string; finalPos: { x: number; y: number; z: number }; finalVel: { x: number; y: number; z: number } } {
+    const FIXED = config.render.fixedDelta // the one true sim step (1/60)
+    const gravity = config.zones.earth.gravity
+    const p = this.player
+    const inp = this.input
+
+    // Snapshot everything the probe mutates, to restore the live game after.
+    const snap = {
+      pos: p.position.clone(), vel: p.velocity.clone(),
+      yaw: p.yaw, mode: p.mode, grounded: p.grounded, fuel: p.fuel, stamina: p.stamina,
+      iyaw: inp.yaw, ipitch: inp.pitch, jet: inp.held.jet,
+    }
+    const seedY = (this.physics.sampleGround(0, 0, 300)?.y ?? 0) + 1.2
+
+    // FNV-1a over the IEEE-754 bytes of the final transform+velocity — a bit-exact
+    // fingerprint, so any drift in the physics (or any non-determinism) changes it.
+    const fingerprint = (nums: number[]) => {
+      const dv = new DataView(new ArrayBuffer(nums.length * 8))
+      nums.forEach((v, i) => dv.setFloat64(i * 8, v))
+      let h = 0x811c9dc5
+      for (let i = 0; i < dv.byteLength; i++) { h ^= dv.getUint8(i); h = Math.imul(h, 0x01000193) }
+      return (h >>> 0).toString(16).padStart(8, '0')
+    }
+
+    const run = () => {
+      p.resetForSim(0, seedY, 0, 0)
+      inp.yaw = 0; inp.pitch = 0; inp.held.jet = false
+      for (let i = 0; i < steps; i++) {
+        // Deterministic scripted input: run forward, weave with a sine strafe, and
+        // pulse the jetpack in bursts — exercises accel, turn, jump, fly and fall.
+        inp.setVirtualMove(Math.sin(i * 0.07) * 0.6, 1)
+        inp.update()
+        inp.held.jet = (i % 50) < 8
+        if (i % 50 === 0) inp.pressAction('jet', true)
+        p.update(FIXED, inp, this.physics, gravity)
+      }
+      const pos = p.position, vel = p.velocity
+      return { hash: fingerprint([pos.x, pos.y, pos.z, vel.x, vel.y, vel.z]), pos, vel }
+    }
+
+    const a = run()
+    const aHash = a.hash
+    const aPos = { x: a.pos.x, y: a.pos.y, z: a.pos.z }
+    const aVel = { x: a.vel.x, y: a.vel.y, z: a.vel.z }
+    const b = run()
+
+    // Restore the live game's player + input exactly as they were.
+    p.resetForSim(snap.pos.x, snap.pos.y, snap.pos.z, snap.yaw)
+    p.velocity.copy(snap.vel); p.mode = snap.mode; p.grounded = snap.grounded; p.fuel = snap.fuel; p.stamina = snap.stamina
+    inp.yaw = snap.iyaw; inp.pitch = snap.ipitch; inp.held.jet = snap.jet
+    inp.setVirtualMove(0, 0)
+    this.camera.snap(p.position)
+
+    const round = (n: number) => Number(n.toFixed(4))
+    return {
+      steps,
+      identical: aHash === b.hash,
+      hashA: aHash,
+      hashB: b.hash,
+      finalPos: { x: round(aPos.x), y: round(aPos.y), z: round(aPos.z) },
+      finalVel: { x: round(aVel.x), y: round(aVel.y), z: round(aVel.z) },
+    }
+  }
+
   /** Snap the player to a ground position (debug teleport). Crash-safe: clamps
    *  NaN and samples the live terrain for Y when not given. */
   private navTeleport(x: number, z: number, y?: number, faceYaw?: number) {
@@ -1610,6 +1679,16 @@ export class Game {
           objective: this.hud.objective,
         }
       },
+
+      /** Prove the engine's fixed-timestep determinism (CLAUDE.md: "same physics
+       *  outcome at any frame rate"). Runs an identical scripted input through the
+       *  isolated player+physics fixed step TWICE from a byte-identical seed pose
+       *  and fingerprints the resulting transform+velocity. `identical:true` means
+       *  the sim is reproducible → frame-rate independent: the frame rate only
+       *  changes HOW MANY of these identical fixed steps run per rendered frame,
+       *  never their result. `hash` is a stable golden a CI test can pin. Restores
+       *  all state afterwards (a no-op for the live game). */
+      determinism: (steps = 240) => this.proveDeterminism(Math.max(1, Math.min(Number(steps) || 240, 6000))),
     }
 
     const w = window as unknown as { __unit7nav?: typeof nav; __unit7?: { test?: typeof nav } }
