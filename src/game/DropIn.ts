@@ -922,7 +922,9 @@ export class DropIn {
         // into a forward glide (not a hover). Fall speed is the vertical component
         // of the same tilted velocity vector the steering uses, so a full hold is
         // ~2x the flared-glide descent and points dead-down.
-        let diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
+        // Neutral sits at a committed head-down dive so letting go still reads as a
+        // DIVE (and the down-camera keeps looking down); pull back to flatten/flare.
+        let diveAmt = clamp(0.55 + this.input.moveY * 0.45, 0, 1)
         let approach = dt * 3.5
         if (this.plungeT > 0) {
           // Forced head-down nose-over at the start of the dive (see plungeT). Snap
@@ -1453,13 +1455,17 @@ export class DropIn {
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -6.5); want.y += 3.6
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7); lookWant.y -= 2.6
     } else {
-      // Dive: chase from just above-behind. The STEEPER the dive (pitch), the more
-      // the camera tilts DOWN — a full head-down plunge looks nearly straight down
-      // at the city rushing up, while a flared glide keeps the horizon in view.
+      // Dive: an over-the-shoulder DOWN-shot. The STEEPER the dive (pitch), the
+      // higher the camera rises and tucks in over the diver while aiming well below
+      // it — so you look DOWN past the head-down robot at the city rushing up, with
+      // the robot framed in the upper-centre. A flared glide eases back to a level
+      // chase that keeps the horizon.
       const steep = Math.min(1, this.pitch * 1.05)
-      const ahead = THREE.MathUtils.lerp(5.5, 2.4, steep) // look less far forward when steep
-      const down = THREE.MathUtils.lerp(4.5, 13, steep)   // and much further down
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -4.2); want.y += 2.6 + steep * 1.6
+      const back = THREE.MathUtils.lerp(5.0, 2.6, steep)  // pull IN closer behind when steep
+      const up = THREE.MathUtils.lerp(2.6, 6.4, steep)    // rise HIGH above the diver when steep
+      const ahead = THREE.MathUtils.lerp(5.5, 1.0, steep) // look almost straight below when steep
+      const down = THREE.MathUtils.lerp(5.5, 18, steep)   // aim far down past the diver
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -back); want.y += up
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, ahead); lookWant.y -= down
     }
     // Ground/roof clearance: the drop camera has no other collision, so on the
