@@ -10,13 +10,17 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { createRobot, type RobotModel } from './procedural'
 import { config } from './config'
 import { clamp, dampAngle, randRange } from './utils'
+import { tierForRating } from './progression'
 import type { Physics } from './Physics'
 import type { GameSystem } from './System'
-import type { Zone } from './types'
+import type { PlayerProfile, Zone } from './types'
 
 const NAMES = [
   'NeonViper', 'QuasarJet', 'R0boHax', 'VoltRunner', 'PixelGhost', 'MechaKid',
   'Cyb3rWolf', 'AceNova', 'GridLock', 'SkyForge', 'Z3roCool', 'HoloKnight', 'DriftKing', 'ByteReaper',
+  'IonStrike', 'NovaByte', 'PlasmaFox', 'GlitchMob', 'TurboLynx', 'EchoBlade', 'Vortex9', 'CircuitSam',
+  'NeonFury', 'MagnaBot', 'RustWraith', 'SolarFlare', 'BinaryBee', 'ChromeHawk', 'PulseRider', 'DataDemon',
+  'Krypt0n', 'ZenithX', 'FluxCore', 'OmegaByte', 'StaticHaze', 'CobaltJinx', 'AstroPnk', 'HexRunner',
 ]
 const TRIMS = [0x27e7ff, 0xff2bd0, 0x8a5cff, 0xff8a1e, 0x9bff4d, 0xffd24a, 0xff5c5c, 0x4affc1]
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
@@ -45,6 +49,23 @@ interface Bot {
   huntCd: number // cooldown before it hunts again
   style: 'runner' | 'flyer' | 'hunter' // behaviour bias so they don't all act alike
   idleT: number // >0 while pausing to "look around"
+  // Roster identity (drives the "Online Now" panel + leaderboard).
+  level: number
+  rating: number
+  aliens: number
+  badges: number
+}
+
+/** A named pilot that's "online" but not physically rendered (in another district).
+ *  Pads the roster/leaderboard out to a believable count without the draw cost of
+ *  a full extra robot per name. */
+interface RosterEntry {
+  name: string
+  level: number
+  rating: number
+  aliens: number
+  badges: number
+  score: number
 }
 
 export interface BotsOpts {
@@ -59,6 +80,8 @@ export class Bots implements GameSystem {
   private physics: Physics
   private opts: BotsOpts
   private bots: Bot[] = []
+  private rosterExtra: RosterEntry[] = [] // "online elsewhere" pilots (no model)
+  private cachedRoster: PlayerProfile[] = [] // built once; stable ref for the HUD
   private visible = true
   private frame = 0
   // Cached leaderboard rows (reused objects), rebuilt only when a bot's score
@@ -68,17 +91,23 @@ export class Bots implements GameSystem {
   private lbDirty = true
   private lbVersion = 0
 
-  constructor(scene: THREE.Scene, physics: Physics, opts: BotsOpts = {}, count = 8) {
+  constructor(scene: THREE.Scene, physics: Physics, opts: BotsOpts = {}, count?: number) {
     this.scene = scene
     this.physics = physics
     this.opts = opts
-    // Pick distinct names.
+    // How many roaming robots to actually render (a real draw/memory cost each), vs
+    // the total "online" headcount the roster/leaderboard reports. The extra names
+    // are pilots "in other districts" - present in the list, not rendered - so the
+    // world reads as busy (15-30 online) without spawning 30 full robots on a phone.
+    const tier = config.tier.name
+    const visibleCount = count ?? (tier === 'low' ? 9 : tier === 'medium' ? 13 : 16)
+    const totalOnline = Math.min(NAMES.length, 18 + Math.floor(Math.random() * 11)) // 18..28 named pilots
     const pool = [...NAMES]
-    const n = Math.min(count, pool.length)
     const styles: Bot['style'][] = ['runner', 'flyer', 'hunter']
-    for (let i = 0; i < n; i++) {
-      const ni = Math.floor(Math.random() * pool.length)
-      const name = pool.splice(ni, 1)[0]
+    const takeName = () => pool.splice(Math.floor(Math.random() * pool.length), 1)[0]
+    const nVisible = Math.min(visibleCount, pool.length)
+    for (let i = 0; i < nVisible; i++) {
+      const name = takeName()
       const style = styles[i % styles.length]
       const trim = TRIMS[i % TRIMS.length]
       const model = createRobot({ trim, accent: trim })
@@ -98,18 +127,49 @@ export class Bots implements GameSystem {
         runSpeed: (style === 'runner' ? 14 : 10) + Math.random() * 4, flying: false, flyT: 0, cruiseH: 24, lastGround: pos.y,
         rayPhase: i % 2, score: 40 + Math.floor(Math.random() * 220), nextScore: 4 + Math.random() * 10, t: 0,
         huntTarget: null, huntCd: Math.random() * 8, style, idleT: 0,
+        level, rating: 900 + Math.floor(Math.random() * 1500), aliens: Math.floor(Math.random() * 160), badges: Math.floor(Math.random() * 14),
       })
     }
+    // Roster-only pilots fill the rest of the online count (no model).
+    for (let i = nVisible; i < totalOnline && pool.length; i++) {
+      this.rosterExtra.push({
+        name: takeName(),
+        level: 8 + Math.floor(Math.random() * 36),
+        rating: 900 + Math.floor(Math.random() * 1500),
+        aliens: Math.floor(Math.random() * 160),
+        badges: Math.floor(Math.random() * 14),
+        score: 40 + Math.floor(Math.random() * 260),
+      })
+    }
+    this.cachedRoster = this.buildRoster()
+  }
+
+  /** Build the stable PlayerProfile list for the "Online Now" panel (visible bots +
+   *  roster-only pilots). Identity is fixed at spawn, so this is built once. */
+  private buildRoster(): PlayerProfile[] {
+    const make = (name: string, level: number, rating: number, aliens: number, badges: number): PlayerProfile => {
+      const t = tierForRating(rating)
+      return { id: 'bot:' + name, name, self: false, aliens, level, duelTier: t.name, duelTierColor: t.color, rating, badges, games: [] }
+    }
+    const out: PlayerProfile[] = []
+    for (const b of this.bots) out.push(make(b.name, b.level, b.rating, b.aliens, b.badges))
+    for (const e of this.rosterExtra) out.push(make(e.name, e.level, e.rating, e.aliens, e.badges))
+    return out
+  }
+
+  /** Stable roster of all "online" AI pilots for the HUD (built once at spawn). */
+  roster(): PlayerProfile[] {
+    return this.cachedRoster
   }
 
   get count(): number {
     return this.visible ? this.bots.length : 0
   }
 
-  /** Total bots regardless of zone visibility — for a stable "online" count + the
-   *  leaderboard, so the presence illusion doesn't crash to 1 when you go off-world. */
+  /** Total online pilots (rendered bots + roster-only) regardless of zone, for a
+   *  stable "online" count + leaderboard that doesn't crash to 1 off-world. */
   get rosterSize(): number {
-    return this.bots.length
+    return this.bots.length + this.rosterExtra.length
   }
 
   /** Bumps whenever the cached leaderboard rows change (for skip-if-unchanged). */
@@ -122,12 +182,18 @@ export class Bots implements GameSystem {
   leaderboard(): { name: string; score: number }[] {
     if (this.lbDirty) {
       const rows = this.lbRows
-      for (let i = 0; i < this.bots.length; i++) {
+      let i = 0
+      for (; i < this.bots.length; i++) {
         const b = this.bots[i]
         if (rows[i]) { rows[i].name = b.name; rows[i].score = b.score }
         else rows[i] = { name: b.name, score: b.score }
       }
-      rows.length = this.bots.length
+      for (const e of this.rosterExtra) {
+        if (rows[i]) { rows[i].name = e.name; rows[i].score = e.score }
+        else rows[i] = { name: e.name, score: e.score }
+        i++
+      }
+      rows.length = i
       rows.sort((a, b) => b.score - a.score)
       this.lbDirty = false
       this.lbVersion++

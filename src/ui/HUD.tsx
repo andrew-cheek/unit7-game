@@ -332,15 +332,15 @@ export function HUD({
       {/* pilots roster: open profiles + stats for yourself and everyone online.
           On touch they move to the bottom-center so they clear the thumb-stick
           (bottom-left) and the action cluster (bottom-right) in any orientation. */}
-      {/* PILOTS / STORE / SAVE / CHAT. On TOUCH they live in one centered flex dock
-          so they space evenly and never overlap (the old per-button translateX
+      {/* ONLINE NOW / STORE / SAVE / CHAT. On TOUCH they live in one centered flex
+          dock so they space evenly and never overlap (the old per-button translateX
           offsets collided once labels differed in width). On desktop they keep
           their fixed right-anchored slots. CHAT only when a parent enabled it. */}
       {!hud.minigame && !hud.intro && !hud.onPlatform && (
         touch ? (
           <div style={bottomDock}>
             <button style={dockBtnStyle(pilotsBtn)} onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}>
-              PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
+              ONLINE NOW{hud.online > 1 ? ` · ${hud.online}` : ''}
             </button>
             {onSave && (
               <button style={dockBtnStyle(saveBtn)} onClick={onSave}>SAVE</button>
@@ -355,7 +355,7 @@ export function HUD({
         ) : (
           <>
             <button style={pilotsBtn} onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}>
-              PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
+              ONLINE NOW{hud.online > 1 ? ` · ${hud.online}` : ''}
             </button>
             <button style={storeBtn} onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}>
               STORE
@@ -370,12 +370,15 @@ export function HUD({
         )
       )}
       {storeOpen && !hud.minigame && (
-        <CosmeticsStore p={hud.progress} onBuy={onBuy} onEquip={onEquip} onClose={() => setStoreOpen(false)} />
+        <div style={modalBackdrop} onClick={() => setStoreOpen(false)}>
+          <CosmeticsStore p={hud.progress} onBuy={onBuy} onEquip={onEquip} onClose={() => setStoreOpen(false)} />
+        </div>
       )}
       {rosterOpen && !hud.minigame && (
-        <div style={rosterPanel}>
+        <div style={modalBackdrop} onClick={() => setRosterOpen(false)}>
+        <div style={rosterPanel} onClick={(e) => e.stopPropagation()}>
           <div style={rosterHead}>
-            <span>PILOTS · {hud.online}</span>
+            <span>ONLINE NOW · {hud.online}</span>
             <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <button style={{ ...sortTab, ...(rosterSort === 'rank' ? sortTabOn : {}) }} onClick={() => setRosterSort('rank')}>RANK</button>
               <button style={{ ...sortTab, ...(rosterSort === 'caught' ? sortTabOn : {}) }} onClick={() => setRosterSort('caught')}>CAUGHT</button>
@@ -399,6 +402,7 @@ export function HUD({
               </button>
             ))}
           {hud.online <= 1 && <div style={rosterHint}>Solo right now. Others appear here when they join the shared world.</div>}
+        </div>
         </div>
       )}
       {viewed && (
@@ -585,7 +589,7 @@ function CosmeticsStore({
   onClose: () => void
 }) {
   return (
-    <div style={rosterPanel}>
+    <div style={rosterPanel} onClick={(e) => e.stopPropagation()}>
       <div style={rosterHead}>
         <span>COLORS · {p.credits}c</span>
         <button style={closeX} onClick={onClose}>✕</button>
@@ -1072,27 +1076,37 @@ const swatch: CSSProperties = {
   borderRadius: 8,
   font: '600 10px/1.2 ui-monospace, Menlo, monospace',
 }
-const rosterPanel: CSSProperties = {
+// Shared dim backdrop behind the ONLINE NOW + COLORS popups: a tap anywhere
+// outside the card closes it (the card stops propagation), and it sits centered
+// over the screen so it no longer overlaps the bottom action cluster.
+const modalBackdrop: CSSProperties = {
   position: 'absolute',
-  right: 14,
-  bottom: 54,
-  // Cap to the viewport on narrow phones so the panel never overflows offscreen;
-  // long player names already ellipsis in the roster row name span.
-  width: 'min(280px, calc(100vw - 28px))',
-  maxHeight: '52vh',
+  inset: 0,
+  pointerEvents: 'auto',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+  background: 'rgba(2,4,10,0.55)',
+  zIndex: 30,
+}
+// Centered modal card used by both the ONLINE NOW roster and the COLORS store
+// (sized to the viewport; the parent modalBackdrop centers it).
+const rosterPanel: CSSProperties = {
+  width: 'min(320px, 92vw)',
+  maxHeight: '74vh',
   overflowY: 'auto',
   pointerEvents: 'auto',
   display: 'flex',
   flexDirection: 'column',
   gap: 4,
-  padding: 12,
-  background: 'rgba(5,10,25,0.88)',
+  padding: 14,
+  background: 'rgba(5,10,25,0.94)',
   border: '1px solid rgba(90,255,255,0.4)',
-  borderRadius: 12,
+  borderRadius: 14,
   boxShadow: '0 0 26px rgba(0,255,255,0.18)',
   backdropFilter: 'blur(8px)',
   WebkitBackdropFilter: 'blur(8px)',
-  zIndex: 25,
 }
 const rosterHead: CSSProperties = {
   display: 'flex',

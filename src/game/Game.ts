@@ -344,6 +344,10 @@ export class Game {
   private soloLb: { name: string; score: number }[] = []
   private soloLbVersion = -1
   private soloLbScore = NaN
+  // Cached solo "Online Now" roster (self + named bots); rebuilt only when the
+  // self profile snapshot reference changes.
+  private soloProfiles: import('./types').PlayerProfile[] = []
+  private lastSelfProfiles: import('./types').PlayerProfile[] | null = null
   // Style-combo scoring for expressive traversal (air / board / jet / glide).
   private traversal!: TraversalScore
   // Capture chain multiplier (rapid captures scale score + credits).
@@ -4142,7 +4146,19 @@ export class Game {
       }
       this.hud.leaderboard = this.soloLb
     }
-    this.hud.profiles = mp.profiles
+    // Solo: list the cosmetic bots as the "Online Now" roster (self first, from the
+    // mp snapshot, then the named AI pilots). Cache it - mp.profiles keeps a stable
+    // ref between self-stat changes and the bot roster is fixed, so we only rebuild
+    // when the self profile actually changes (no per-poll garbage).
+    if (this.mp.connected) {
+      this.hud.profiles = mp.profiles
+    } else {
+      if (mp.profiles !== this.lastSelfProfiles) {
+        this.lastSelfProfiles = mp.profiles
+        this.soloProfiles = [...mp.profiles, ...this.bots.roster()]
+      }
+      this.hud.profiles = this.soloProfiles
+    }
     this.hud.challenge = mp.challenge
     this.hud.match = mp.match
     this.hud.progress = this.buildProgressHud()
