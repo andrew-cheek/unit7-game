@@ -59,6 +59,9 @@ import { HostileDrones } from './HostileDrones'
 import { StuntScore } from './StuntScore'
 import { UpgradePylons } from './UpgradePylons'
 import { NeonCrates } from './NeonCrates'
+import { DroneSiege } from './DroneSiege'
+import { BountyHunt } from './BountyHunt'
+import { CargoRun } from './CargoRun'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -572,6 +575,28 @@ export class Game {
       focus: () => this.player.position,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onSmash: (x, y, z, credits) => { this.addCredits(credits); this.popups.pop(x, y, z, `+${credits}c`, '#9bff6a'); this.audio.play('ui') },
+    }))
+    // Drone siege: walk into the beacon for an opt-in escalating wave-defense fight.
+    this.systems.register(new DroneSiege(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onReward: (credits, xp) => { this.addCredits(credits); this.awardXp(xp) },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.4 },
+      notify: (x, y, z, label, color) => this.popups.pop(x, y, z, label, color),
+    }))
+    // Bounty hunt: a rare evasive elite target worth a big bounty when caught.
+    this.systems.register(new BountyHunt(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onCaught: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `BOUNTY +${credits}c`, '#ffd24a') },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.6 },
+    }))
+    // Cargo run: a repeatable timed delivery job that gives traversal a purpose.
+    this.systems.register(new CargoRun(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onDeliver: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `DELIVERED +${credits}c`, '#9bff6a') },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.4 },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
