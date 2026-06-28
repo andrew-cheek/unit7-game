@@ -76,7 +76,9 @@ export class Megastructure implements GameSystem {
 
     // Beacons: one InstancedMesh, per-instance color drives the running wave.
     const beaconGeo = this.ownG(new THREE.SphereGeometry(3.2, 8, 6))
-    this.marsBeaconN = low ? 6 : 10
+    // Low drops to 4 beacons (from 6) to shrink the instance buffer; high stays 10.
+    // Still one InstancedMesh; the per-frame wave loop reads marsBeaconN, so it follows.
+    this.marsBeaconN = low ? 4 : 10
     this.marsBeaconBase = new THREE.Color(warm)
     const beaconMat = this.own(new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     this.marsBeacons = new THREE.InstancedMesh(beaconGeo, beaconMat, this.marsBeaconN)

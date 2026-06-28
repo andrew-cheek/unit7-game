@@ -544,13 +544,18 @@ export class CityLife implements GameSystem {
     if (this.racer && this.gates.length > 1) {
       const r = this.racer
       const target = this.gates[r.idx]
-      this.v.copy(target).sub(r.g.position)
-      const dist = this.v.length()
-      if (dist < 4) {
+      // Inline squared-distance: gate radius^2 first, defer sqrt to the move branch only.
+      const dx = target.x - r.g.position.x
+      const dy = target.y - r.g.position.y
+      const dz = target.z - r.g.position.z
+      const d2 = dx * dx + dy * dy + dz * dz
+      if (d2 < 16) { // 4^2 arrival radius
         r.idx = (r.idx + 1) % this.gates.length
       } else {
-        this.v.multiplyScalar((r.speed * dt) / dist)
-        r.g.position.add(this.v)
+        const k = (r.speed * dt) / Math.sqrt(d2)
+        r.g.position.x += dx * k
+        r.g.position.y += dy * k
+        r.g.position.z += dz * k
         r.g.lookAt(target) // nose toward the gate (banks through the weave)
       }
     }

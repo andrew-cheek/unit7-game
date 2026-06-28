@@ -348,11 +348,12 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     floor.receiveShadow = true
     scene.add(floor)
 
-    // Interior lighting so the room + doors read (cheap, no shadows). The main
-    // cool key always lights the hall; the two colored fills are accent-only, so
-    // the low/mobile tier sheds them like World's accent lights do.
-    const lampA = new THREE.PointLight(0x9fe8ff, 2.2, 60, 2); lampA.position.set(CX, gy + 11, CZ); scene.add(lampA)
+    // Interior lighting so the room + doors read (cheap, no shadows). All three
+    // are dynamic PointLights; high/medium keep the cool key + two colored fills,
+    // but the low/mobile tier sheds every interior dynamic light (matching World's
+    // accent gating) and leans on the emissive trim + IBL alone. (PERF: tier-gate.)
     if (config.tier.accentLights) {
+      const lampA = new THREE.PointLight(0x9fe8ff, 2.2, 60, 2); lampA.position.set(CX, gy + 11, CZ); scene.add(lampA)
       const lampB = new THREE.PointLight(0xff2bd0, 1.1, 40, 2); lampB.position.set(CX, gy + 6, frontZ + 6); scene.add(lampB)
       const lampC = new THREE.PointLight(0x27e7ff, 1.1, 40, 2); lampC.position.set(CX, gy + 6, backZ - 6); scene.add(lampC)
     }

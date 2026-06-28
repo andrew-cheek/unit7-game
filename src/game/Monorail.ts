@@ -13,9 +13,16 @@ import type { GameSystem } from './System'
 import type { Zone } from './types'
 
 interface Car {
-  group: THREE.Group
   /** Fractional offset behind the lead car along the loop (0..1). */
   offset: number
+}
+
+/** Local (car-space) transforms of the 8 lit windows, baked once. */
+interface WinLocal {
+  x: number
+  y: number
+  z: number
+  yaw: number
 }
 
 export class Monorail implements GameSystem {
@@ -27,6 +34,14 @@ export class Monorail implements GameSystem {
   private zone: Zone = 'earth'
   private progress = 0
 
+  // Instanced car bodies + windows (filled in buildTrain). The headlight stays a
+  // single mesh on the lead car. winLocal holds each window's car-space transform
+  // (same for every car), so window world matrices = carMatrix * localMatrix.
+  private bodyInst: THREE.InstancedMesh | null = null
+  private winInst: THREE.InstancedMesh | null = null
+  private head: THREE.Mesh | null = null
+  private winLocal: WinLocal[] = []
+
   // Ellipse params (x/z radii), height, and travel speed in loop-fractions/sec.
   private readonly rx: number
   private readonly rz: number
@@ -36,6 +51,13 @@ export class Monorail implements GameSystem {
   // Pre-allocated scratch reused every frame (no per-frame heap allocation).
   private pos = new THREE.Vector3()
   private tan = new THREE.Vector3()
+  // Scratch for building per-instance matrices each frame.
+  private carMat = new THREE.Matrix4()   // a car's world transform
+  private winMat = new THREE.Matrix4()    // a window's world transform (car * local)
+  private localMat = new THREE.Matrix4()  // a window's car-space transform
+  private quat = new THREE.Quaternion()
+  private euler = new THREE.Euler()
+  private one = new THREE.Vector3(1, 1, 1)
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
@@ -111,7 +133,10 @@ export class Monorail implements GameSystem {
     this.group.add(pylons)
   }
 
-  /** Build `n` cars sharing geometry/materials and add them to the group. */
+  /** Build `n` cars as two InstancedMeshes (bodies + windows) plus the lead-car
+   *  headlight. Identical geometry/materials as before — purely a draw-call win
+   *  (~5 draws/car -> 2 shared draws + 1 headlight). Per-car/window world
+   *  matrices are written each frame in update() from the shared motion path. */
   private buildTrain(n: number) {
     // Shared geometries.
     const bodyGeo = this.ownG(new THREE.BoxGeometry(2.4, 2.2, 6.4))
@@ -132,34 +157,39 @@ export class Monorail implements GameSystem {
       blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
     }))
 
+    // Bake the per-car-space window layout once (same for every car): a row of
+    // lit windows down each side, matching the original per-mesh placement.
+    for (const sx of [-1.21, 1.21]) {
+      for (let w = 0; w < 4; w++) {
+        this.winLocal.push({
+          x: sx, y: 0.25, z: -2.2 + w * 1.5,
+          yaw: sx < 0 ? -Math.PI / 2 : Math.PI / 2,
+        })
+      }
+    }
+    const winsPerCar = this.winLocal.length
+
     // Car spacing as a fraction of the loop (so cars sit nose-to-tail).
     const spacing = 0.018
 
     for (let i = 0; i < n; i++) {
-      const car = new THREE.Group()
-      const body = new THREE.Mesh(bodyGeo, bodyMat)
-      car.add(body)
-
-      // A row of lit windows down each side.
-      for (const sx of [-1.21, 1.21]) {
-        for (let w = 0; w < 4; w++) {
-          const win = new THREE.Mesh(winGeo, winMat)
-          win.position.set(sx, 0.25, -2.2 + w * 1.5)
-          win.rotation.y = sx < 0 ? -Math.PI / 2 : Math.PI / 2
-          car.add(win)
-        }
-      }
-
-      // The lead car gets a glowing headlight up front.
-      if (i === 0) {
-        const head = new THREE.Mesh(lightGeo, headMat)
-        head.position.set(0, 0, 3.3)
-        car.add(head)
-      }
-
-      this.group.add(car)
-      this.cars.push({ group: car, offset: i * spacing })
+      this.cars.push({ offset: i * spacing })
     }
+
+    // One InstancedMesh for all car bodies, one for all windows. Matrices are
+    // filled per frame in update(); frustumCulled off since the train spans the
+    // whole ring and instances move independently of the shared bounding box.
+    this.bodyInst = new THREE.InstancedMesh(bodyGeo, bodyMat, n)
+    this.bodyInst.frustumCulled = false
+    this.winInst = new THREE.InstancedMesh(winGeo, winMat, n * winsPerCar)
+    this.winInst.frustumCulled = false
+    this.instanced.push(this.bodyInst, this.winInst)
+    this.group.add(this.bodyInst, this.winInst)
+
+    // The lead car gets a glowing headlight up front (kept a single mesh).
+    this.head = new THREE.Mesh(lightGeo, headMat)
+    this.head.position.set(0, 0, 3.3)
+    this.group.add(this.head)
   }
 
   setZone(zone: Zone) {
@@ -176,15 +206,41 @@ export class Monorail implements GameSystem {
 
     this.progress = (this.progress + this.speed * dt) % 1
 
-    for (const car of this.cars) {
+    const winsPerCar = this.winLocal.length
+    for (let i = 0; i < this.cars.length; i++) {
+      const car = this.cars[i]
       let u = this.progress - car.offset
       u -= Math.floor(u) // wrap into 0..1 without allocation
       this.sample(u)
-      car.group.position.copy(this.pos)
-      // Face along the travel tangent; a slight bank into the curve adds life.
+      // Build the car's world transform: position + yaw along the tangent + a
+      // slight bank into the curve (matches the old Group rotation order XYZ).
       const yaw = Math.atan2(this.tan.x, this.tan.z)
-      car.group.rotation.set(0, yaw, -0.06)
+      this.euler.set(0, yaw, -0.06)
+      this.quat.setFromEuler(this.euler)
+      this.carMat.compose(this.pos, this.quat, this.one)
+      this.bodyInst!.setMatrixAt(i, this.carMat)
+
+      // Each window = carMatrix * its baked car-space transform.
+      for (let w = 0; w < winsPerCar; w++) {
+        const wl = this.winLocal[w]
+        this.pos.set(wl.x, wl.y, wl.z)
+        this.euler.set(0, wl.yaw, 0)
+        this.quat.setFromEuler(this.euler)
+        this.localMat.compose(this.pos, this.quat, this.one)
+        this.winMat.multiplyMatrices(this.carMat, this.localMat)
+        this.winInst!.setMatrixAt(i * winsPerCar + w, this.winMat)
+      }
+
+      // Lead car carries the headlight at car-space (0,0,3.3). The sphere is
+      // rotationally symmetric, so only its world position needs the car transform.
+      if (i === 0 && this.head) {
+        this.localMat.makeTranslation(0, 0, 3.3)
+        this.winMat.multiplyMatrices(this.carMat, this.localMat)
+        this.head.position.setFromMatrixPosition(this.winMat)
+      }
     }
+    this.bodyInst!.instanceMatrix.needsUpdate = true
+    this.winInst!.instanceMatrix.needsUpdate = true
   }
 
   dispose() {
@@ -196,5 +252,9 @@ export class Monorail implements GameSystem {
     this.geos = []
     this.mats = []
     this.cars = []
+    this.bodyInst = null
+    this.winInst = null
+    this.head = null
+    this.winLocal = []
   }
 }

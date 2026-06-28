@@ -43,6 +43,11 @@ export class CameraController {
   private blockers: THREE.Object3D[] = []
   private nearBlockers: THREE.Object3D[] = [] // scratch reused each frame (no alloc)
   private raycaster = new THREE.Raycaster()
+  // Collision probe offsets [side, up] pairs, flattened. Built once from the tier
+  // + padding (both fixed) instead of allocating the nested array literal every
+  // frame — desktop sweeps a full cross, mobile drops the bottom probe but keeps
+  // the up-probe so it stops clipping roofs/overheads. Behavior identical.
+  private probeOffsets: number[]
 
   private currentTarget = new THREE.Vector3()
   private dist = config.camera.distance
@@ -79,6 +84,11 @@ export class CameraController {
   constructor(cam: THREE.PerspectiveCamera, solids: THREE.Object3D[]) {
     this.cam = cam
     this.solids = solids
+    // Pre-build the collision probe offsets once (tier + padding are both fixed).
+    const pad = config.camera.collisionPadding
+    this.probeOffsets = config.tier.name === 'high'
+      ? [0, 0, pad, 0, -pad, 0, 0, pad, 0, -pad] // full cross on desktop
+      : [0, 0, pad, 0, -pad, 0, 0, pad] // mobile keeps the up-probe, drops the bottom one
     // Accelerate the per-frame collision rays against the merged building shells.
     // firstHitOnly returns just the nearest BVH hit per mesh — exactly what every
     // camera probe wants (nearest wall / any ceiling) — for a further speed-up.
@@ -156,13 +166,13 @@ export class CameraController {
     this.up.set(0, 1, 0)
     const pad = config.camera.collisionPadding
     let nearest = want
-    // Desktop sweeps a full cross; other tiers use a 3-probe horizontal cross
-    // (center + left/right) so the camera stops clipping through building edges
-    // on mobile. The two extra rays are cheap next to a visible wall break.
-    const probes = config.tier.name === 'high'
-      ? [[0, 0], [pad, 0], [-pad, 0], [0, pad], [0, -pad]]
-      : [[0, 0], [pad, 0], [-pad, 0], [0, pad]] // mobile gains the up-probe so it stops clipping roofs/overheads
-    for (const [s, u] of probes) {
+    // Sweep the pre-built probe offsets (see constructor): desktop = full cross,
+    // mobile = center + left/right + up. Stride-2 over the flat [s,u,...] array so
+    // there's no per-frame array allocation.
+    const offs = this.probeOffsets
+    for (let p = 0; p < offs.length; p += 2) {
+      const s = offs[p]
+      const u = offs[p + 1]
       this.probeOrigin.copy(this.currentTarget).addScaledVector(this.side, s).addScaledVector(this.up, u)
       this.raycaster.set(this.probeOrigin, this.offsetDir)
       this.raycaster.far = want + pad

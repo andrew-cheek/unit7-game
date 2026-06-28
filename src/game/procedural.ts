@@ -603,8 +603,12 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
 
 /** Tileable lit-window facade pattern, used as an emissiveMap so towers glow. */
 export function createWindowTexture(seed = 1): THREE.CanvasTexture {
-  const w = 128
-  const h = 192
+  // Low tier gets a smaller facade canvas (its anisotropy is only 2, so the extra
+  // resolution is invisible) — a real VRAM/upload win since this texture is cloned
+  // across many buildings. The grid is derived from w/h, so it scales cleanly.
+  const low = config.tier.name === 'low'
+  const w = low ? 96 : 128
+  const h = low ? 144 : 192
   const cv = document.createElement('canvas')
   cv.width = w
   cv.height = h

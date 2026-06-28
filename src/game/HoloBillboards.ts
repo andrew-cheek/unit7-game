@@ -107,10 +107,16 @@ export class HoloBillboards implements GameSystem {
 
   /** Draw a neon ad to a canvas ONCE; returns a CanvasTexture. */
   private drawAd(text: string, sub: string, tint: string): THREE.CanvasTexture {
-    const w = 512, h = 288
+    // Low tier halves the ad canvas (256x144) to cut VRAM; high/medium keep 512x288.
+    // We scale the 2D context so the rest of the draw keeps using the original
+    // 512x288 coordinate space — identical layout, just rasterized at half res.
+    const lowTex = config.tier.name === 'low'
+    const k = lowTex ? 0.5 : 1
+    const w = 512, h = 288 // logical draw space (unchanged on every tier)
     const cv = document.createElement('canvas')
-    cv.width = w; cv.height = h
+    cv.width = w * k; cv.height = h * k
     const ctx = cv.getContext('2d')!
+    ctx.scale(k, k)
     // Dark, mostly-transparent backdrop so the additive material reads as glow.
     ctx.clearRect(0, 0, w, h)
     ctx.fillStyle = 'rgba(6,10,22,0.55)'
@@ -155,7 +161,9 @@ export class HoloBillboards implements GameSystem {
 
     const tex = new THREE.CanvasTexture(cv)
     tex.colorSpace = THREE.SRGBColorSpace
-    tex.anisotropy = 4
+    // Lower anisotropy on low only (fewer mip samples on mobile); medium/high keep
+    // the prior 4 so their billboards stay byte-for-byte unchanged.
+    tex.anisotropy = config.tier.name === 'low' ? config.tier.anisotropy : 4
     tex.needsUpdate = true
     return tex
   }
