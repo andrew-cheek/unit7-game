@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-28T18:49:54.597Z",
+  "generatedAt": "2026-06-28T18:58:16.433Z",
   "baseUrl": "http://localhost:4173",
   "note": "Per-tier render-cost regression baseline. The COUNTS (drawCalls, triangles, geometries, textures) are the meaningful, hardware-independent signal. Absolute frame times under headless swiftshader are meaningless vs real hardware and are recorded for drift visibility only, never gated.",
   "budgets": {
@@ -22,31 +22,31 @@
       "zones": {
         "earth": {
           "fps": 22,
-          "drawCalls": 800,
-          "triangles": 144918,
+          "drawCalls": 911,
+          "triangles": 157656,
           "renderScale": 1,
-          "geometries": 554,
-          "textures": 45,
+          "geometries": 662,
+          "textures": 47,
           "zone": "earth",
           "raidActive": false
         },
         "moon": {
           "fps": 15,
-          "drawCalls": 909,
-          "triangles": 80569,
+          "drawCalls": 940,
+          "triangles": 83257,
           "renderScale": 1,
-          "geometries": 944,
-          "textures": 51,
+          "geometries": 1077,
+          "textures": 53,
           "zone": "moon",
           "raidActive": false
         },
         "mars": {
           "fps": 10,
-          "drawCalls": 840,
-          "triangles": 98197,
+          "drawCalls": 837,
+          "triangles": 100513,
           "renderScale": 1,
-          "geometries": 1119,
-          "textures": 55,
+          "geometries": 1258,
+          "textures": 58,
           "zone": "mars",
           "raidActive": false
         }
@@ -56,17 +56,17 @@
         "reducedMotion": false,
         "zone": "earth",
         "renderScale": 1,
-        "drawCalls": 784,
-        "triangles": 143676,
+        "drawCalls": 895,
+        "triangles": 156346,
         "perf": {
-          "frames": 3,
-          "avgMs": 837.1,
-          "medianMs": 829.1,
-          "p95Ms": 853.2,
-          "p99Ms": 853.2,
-          "maxMs": 853.2,
+          "frames": 2,
+          "avgMs": 840.7,
+          "medianMs": 847.5,
+          "p95Ms": 847.5,
+          "p99Ms": 847.5,
+          "maxMs": 847.5,
           "avgFps": 1.19,
-          "onePercentLowFps": 1.17
+          "onePercentLowFps": 1.18
         }
       }
     },
@@ -75,31 +75,31 @@
       "zones": {
         "earth": {
           "fps": 24,
-          "drawCalls": 1053,
-          "triangles": 294382,
+          "drawCalls": 986,
+          "triangles": 274616,
           "renderScale": 1,
-          "geometries": 745,
+          "geometries": 673,
           "textures": 53,
           "zone": "earth",
           "raidActive": false
         },
         "moon": {
           "fps": 16,
-          "drawCalls": 995,
-          "triangles": 93866,
+          "drawCalls": 972,
+          "triangles": 93770,
           "renderScale": 1,
-          "geometries": 1153,
-          "textures": 59,
+          "geometries": 1085,
+          "textures": 60,
           "zone": "moon",
           "raidActive": false
         },
         "mars": {
           "fps": 11,
-          "drawCalls": 864,
-          "triangles": 112004,
+          "drawCalls": 888,
+          "triangles": 121236,
           "renderScale": 1,
-          "geometries": 1339,
-          "textures": 63,
+          "geometries": 1289,
+          "textures": 65,
           "zone": "mars",
           "raidActive": false
         }
@@ -109,17 +109,17 @@
         "reducedMotion": false,
         "zone": "earth",
         "renderScale": 1,
-        "drawCalls": 1044,
-        "triangles": 293888,
+        "drawCalls": 1004,
+        "triangles": 275248,
         "perf": {
           "frames": 3,
-          "avgMs": 1315.67,
-          "medianMs": 1314.1,
-          "p95Ms": 1330.2,
-          "p99Ms": 1330.2,
-          "maxMs": 1330.2,
-          "avgFps": 0.76,
-          "onePercentLowFps": 0.75
+          "avgMs": 1332.9,
+          "medianMs": 1332.2,
+          "p95Ms": 1354.1,
+          "p99Ms": 1354.1,
+          "maxMs": 1354.1,
+          "avgFps": 0.75,
+          "onePercentLowFps": 0.74
         }
       }
     },
@@ -128,31 +128,31 @@
       "zones": {
         "earth": {
           "fps": 24,
-          "drawCalls": 1239,
-          "triangles": 558491,
+          "drawCalls": 1300,
+          "triangles": 566231,
           "renderScale": 1,
-          "geometries": 899,
-          "textures": 47,
+          "geometries": 954,
+          "textures": 49,
           "zone": "earth",
           "raidActive": false
         },
         "moon": {
           "fps": 18,
-          "drawCalls": 1036,
-          "triangles": 105021,
+          "drawCalls": 1063,
+          "triangles": 110001,
           "renderScale": 1,
-          "geometries": 1353,
-          "textures": 53,
+          "geometries": 1423,
+          "textures": 55,
           "zone": "moon",
           "raidActive": false
         },
         "mars": {
           "fps": 13,
-          "drawCalls": 959,
-          "triangles": 133705,
+          "drawCalls": 926,
+          "triangles": 138055,
           "renderScale": 1,
-          "geometries": 1558,
-          "textures": 57,
+          "geometries": 1626,
+          "textures": 60,
           "zone": "mars",
           "raidActive": false
         }
@@ -162,23 +162,23 @@
         "reducedMotion": false,
         "zone": "earth",
         "renderScale": 1,
-        "drawCalls": 1222,
-        "triangles": 557489,
+        "drawCalls": 1284,
+        "triangles": 565249,
         "perf": {
           "frames": 2,
-          "avgMs": 2079.05,
-          "medianMs": 2080.8,
-          "p95Ms": 2080.8,
-          "p99Ms": 2080.8,
-          "maxMs": 2080.8,
-          "avgFps": 0.48,
-          "onePercentLowFps": 0.48
+          "avgMs": 2039.95,
+          "medianMs": 2052.8,
+          "p95Ms": 2052.8,
+          "p99Ms": 2052.8,
+          "maxMs": 2052.8,
+          "avgFps": 0.49,
+          "onePercentLowFps": 0.49
         }
       }
     }
   },
   "consoleErrors": [],
   "pageErrors": [],
-  "ignoredLocal404Count": 62,
+  "ignoredLocal404Count": 61,
   "pass": true
 }
