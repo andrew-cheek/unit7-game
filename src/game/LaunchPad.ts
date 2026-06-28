@@ -1022,9 +1022,19 @@ export class LaunchPad {
 
   colliderBoxes(): THREE.Box3[] {
     const cx = (this.beltX0 + this.beltX1) / 2
+    // Assembly hangar footprint (must match buildAssemblyHangar): spans +/-HW on x,
+    // depth on z centred at beltZ, eave-tall walls.
+    const HW = 22, depth = 24, eave = 9
+    const Z = this.beltZ, backZ = Z + depth / 2
     return [
-      // The assembly line (belt + arms): walk around either end to reach the ledge.
-      this.worldBox(cx, 1.6, this.beltZ, this.lenX / 2 + 1.5, 1.8, 5.5),
+      // The assembly line (belt + arms): a low solid bar - walk around either end.
+      this.worldBox(cx, 1.6, Z, this.lenX / 2 + 1.5, 1.8, 5.5),
+      // Hangar shell: the two glass side walls + the back wall are solid (the front,
+      // toward spawn, stays open so you walk in - not through). The interior stays
+      // walkable so you can still reach the line; you just can't clip the shell.
+      this.worldBox(-HW, eave / 2, Z, 0.8, eave / 2, depth / 2),
+      this.worldBox(HW, eave / 2, Z, 0.8, eave / 2, depth / 2),
+      this.worldBox(cx, eave / 2, backZ, HW, eave / 2, 0.8),
     ]
   }
 
