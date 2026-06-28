@@ -114,27 +114,49 @@ function saveBlobToStorage(blob: SaveBlob): void {
 //  - arrays (unlocks, owned cosmetics, achievements): take the UNION (deduped).
 //  - per-key maps (games / highScores / bestTimes): merge per key, recursing,
 //    so each individual high score / best time takes its own max.
-//  - genuinely-current fields (equipped cosmetic, callsign, mission idx): take
-//    the side from the most-recently-updated blob (higher updatedAt). These are
-//    "what is the kid using right now", not "how much have they earned".
+//  - genuinely-current fields (equipped cosmetic, callsign, mission idx,
+//    spendable credit balance): take the side from the most-recently-updated
+//    blob (higher updatedAt). These are "what is the kid using / has right now",
+//    not "how much have they earned". Critically this includes the spendable
+//    `credits` balance: MAX-merging it would silently refund any spend on the
+//    next reconcile (spend 400 -> reload -> credits restored), an exploit. The
+//    newer side must win so a spend sticks.
 
-/** Keys whose VALUE is the player's current selection rather than accumulated
- *  progress. For these we prefer the most-recently-updated side wholesale
- *  instead of max/union merging, so e.g. un-equipping a cosmetic actually
- *  sticks. Matched on the leaf key name anywhere in the tree. */
-const CURRENT_FIELD_KEYS = new Set<string>([
-  'equipped',
-  'equippedCosmetic',
-  'cosmetic',
+/** Exact data PATHS whose VALUE is the player's current state / spendable
+ *  balance rather than accumulated progress. For these we prefer the
+ *  most-recently-updated side wholesale instead of max/union merging, so e.g.
+ *  re-equipping a cosmetic or spending credits actually sticks.
+ *
+ *  Matched by FULL PATH (dot-joined from the `data` root), NOT by leaf key name
+ *  at any depth — a path match can't be triggered by an unrelated nested object
+ *  that happens to reuse one of these key names (which would otherwise drop data
+ *  by resolving the whole sub-tree "newer wins" instead of merging it).
+ *
+ *  Paths confirmed against the real shapes in storage.ts / progression.ts:
+ *   - `callsign`                     top-level sanitized callsign (string)
+ *   - `profile.credits`             spendable credit balance (Profile.credits)
+ *   - `missions.idx`                guided objective-chain position (MissionProgress.idx)
+ *   - `progression.cosmetics.trail` equipped trail color (Progression.cosmetics.trail)
+ *   - `progression.cosmetics.accent` equipped accent color (Progression.cosmetics.accent)
+ */
+const CURRENT_FIELD_PATHS = new Set<string>([
   'callsign',
-  'name',
-  'idx',
-  'missionIdx',
-  'active',
-  'activeMission',
-  'selected',
-  'skin',
+  'profile.credits',
+  'missions.idx',
+  'progression.cosmetics.trail',
+  'progression.cosmetics.accent',
 ])
+
+/** True when `path` (dot-joined from the data root) names a current-state /
+ *  spendable field that should resolve newer-wins instead of max/union. */
+function isCurrentFieldPath(path: string): boolean {
+  return CURRENT_FIELD_PATHS.has(path)
+}
+
+/** Extend a parent path with a child key (root keys have no leading dot). */
+function joinPath(parent: string, key: string): string {
+  return parent ? `${parent}.${key}` : key
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -156,16 +178,20 @@ function unionArrays(a: unknown[], b: unknown[]): unknown[] {
 
 /**
  * Deep-merge two save-data values with the never-lose rule. `aNewer` says which
- * side is the more-recently-updated blob, used only to resolve current-selection
- * fields. `key` is the leaf key this value sits under (for current-field detection).
+ * side is the more-recently-updated blob, used only to resolve current-state
+ * fields. `path` is the full dot-joined path (from the data root) this value
+ * sits at, used for current-field detection by exact path.
  */
-function mergeValue(a: unknown, b: unknown, aNewer: boolean, key: string | null): unknown {
+function mergeValue(a: unknown, b: unknown, aNewer: boolean, path: string): unknown {
   // One side missing — take whatever exists.
   if (a === undefined) return b
   if (b === undefined) return a
 
-  // Current-selection field: take the newer side wholesale (don't max/union).
-  if (key !== null && CURRENT_FIELD_KEYS.has(key)) {
+  // Current-state / spendable field at a known path: take the newer side
+  // wholesale (don't max/union), so a spend or a re-equip sticks. Matched by
+  // exact path, so an unrelated nested object reusing one of these key names
+  // elsewhere in the tree is unaffected and still merges normally.
+  if (isCurrentFieldPath(path)) {
     return aNewer ? a : b
   }
 
@@ -186,7 +212,7 @@ function mergeValue(a: unknown, b: unknown, aNewer: boolean, key: string | null)
 
   // Maps (games / highScores / bestTimes, or any nested object): merge per key.
   if (isPlainObject(a) && isPlainObject(b)) {
-    return mergeRecords(a, b, aNewer)
+    return mergeRecords(a, b, aNewer, path)
   }
 
   // Type mismatch or strings: take the newer side (most-recently-updated wins).
@@ -197,11 +223,12 @@ function mergeRecords(
   a: Record<string, unknown>,
   b: Record<string, unknown>,
   aNewer: boolean,
+  path = '',
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   const keys = new Set<string>([...Object.keys(a), ...Object.keys(b)])
   for (const k of keys) {
-    out[k] = mergeValue(a[k], b[k], aNewer, k)
+    out[k] = mergeValue(a[k], b[k], aNewer, joinPath(path, k))
   }
   return out
 }
@@ -230,8 +257,10 @@ function applyPatch(blob: SaveBlob, patch: Record<string, unknown>): SaveBlob {
     const incoming = patch[k]
     const existing = data[k]
     if (isPlainObject(incoming) && isPlainObject(existing)) {
-      // Deep-merge sub-trees; the patch wins ties (it's the live change).
-      data[k] = mergeRecords(existing, incoming, false)
+      // Deep-merge sub-trees; the patch wins ties (it's the live change). Pass
+      // the top-level key as the path root so current-field paths (e.g.
+      // profile.credits) resolve newer-wins from the patch rather than max-merge.
+      data[k] = mergeRecords(existing, incoming, false, k)
     } else {
       data[k] = incoming
     }

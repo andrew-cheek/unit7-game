@@ -271,7 +271,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onToggleMute={() => controlsRef.current?.toggleMute()}
           onCycleNeon={() => controlsRef.current?.cycleNeon()}
           onOpenChatGate={() => openChatGate()}
-          onDisableChat={() => { disableChat(); controlsRef.current?.refreshChatEnabled() }}
+          onDisableChat={() => { disableChat(); controlsRef.current?.refreshChatEnabled(); setMessages([]) }}
         />
       )}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
