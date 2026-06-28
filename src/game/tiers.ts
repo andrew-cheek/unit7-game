@@ -54,6 +54,16 @@ export interface QualityTier {
   // --- materials ---
   /** Env-map intensity multiplier; desktop reflects neon harder. */
   envMapIntensity: number
+  /** Procedural detail normal map on ground + building facades. Breaks up the
+   *  flat, even shading on big primitive faces so surfaces read as material
+   *  under light instead of untextured solids. Adds a texture fetch + VRAM, so
+   *  desktop only. */
+  surfaceDetail: boolean
+  /** Chamfer the box-built hero models (player robot etc.) via RoundedBox geo
+   *  instead of razor-sharp BoxGeometry. Kills the "untextured CAD" read on the
+   *  closest-viewed objects. Adds vertices, so desktop only (mobile is the most
+   *  geometry-sensitive tier and keeps plain boxes). */
+  bevelEdges: boolean
 
   // --- ambient FX (world events, exploration sparkle, extra background motion) ---
   /** Multiplier on particle/event element counts. Scaled down on weaker tiers. */
@@ -84,6 +94,8 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     anisotropy: 16,
     drawDistance: 560, // see further across the bigger district on desktop
     envMapIntensity: 1.22,
+    surfaceDetail: true,
+    bevelEdges: true,
     fxScale: 1,
   },
   // Mid preset for capable laptops / tablets: desktop look, lighter post + density.
@@ -106,6 +118,8 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     anisotropy: 8,
     drawDistance: 340,
     envMapIntensity: 1.12,
+    surfaceDetail: false, // detail maps + bevels are the desktop-only look pass
+    bevelEdges: false,
     fxScale: 0.65,
   },
   low: {
@@ -127,6 +141,8 @@ export const TIERS: Record<AssetQuality, QualityTier> = {
     anisotropy: 2,
     drawDistance: 210,
     envMapIntensity: 1.0,
+    surfaceDetail: false,
+    bevelEdges: false,
     fxScale: 0.4,
   },
 }
@@ -244,27 +260,49 @@ export function resolveTier(override?: AssetQuality): QualityTier {
 
   const lite = hasLiteParam || cores <= 2 || mem <= 2
 
-  if (!lite) return base
+  let result: QualityTier = !lite
+    ? base
+    : {
+        ...base,
+        name: base.name,
+        bloom: false,
+        ssao: false,
+        dof: false,
+        smaa: false,
+        shadows: false,
+        buildingShadows: false,
+        softShadows: false,
+        accentLights: false,
+        maxSubSteps: 2,
+        pixelRatioCap: Math.min(base.pixelRatioCap, 1),
+        densityScale: base.densityScale * 0.55,
+        drawDistance: Math.round(Math.min(base.drawDistance, 150)),
+        starCount: Math.round(Math.min(base.starCount, 120)),
+        fxScale: base.fxScale * 0.5,
+        anisotropy: 1,
+        shadowMapSize: 256,
+        envMapIntensity: base.envMapIntensity,
+        surfaceDetail: false, // potato path: skip the look pass entirely
+        bevelEdges: false,
+      }
 
-  return {
-    ...base,
-    name: base.name,
-    bloom: false,
-    ssao: false,
-    dof: false,
-    smaa: false,
-    shadows: false,
-    buildingShadows: false,
-    softShadows: false,
-    accentLights: false,
-    maxSubSteps: 2,
-    pixelRatioCap: Math.min(base.pixelRatioCap, 1),
-    densityScale: base.densityScale * 0.55,
-    drawDistance: Math.round(Math.min(base.drawDistance, 150)),
-    starCount: Math.round(Math.min(base.starCount, 120)),
-    fxScale: base.fxScale * 0.5,
-    anisotropy: 1,
-    shadowMapSize: 256,
-    envMapIntensity: base.envMapIntensity,
+  // Look-pass test overrides so the detail-map + bevel pass can be forced ON on a
+  // phone (?detail&bevel) or OFF on desktop (?detail=off) to A/B the cost without
+  // editing code. Any value but off/0/false/no reads as "on".
+  const params =
+    typeof location !== 'undefined' ? new URLSearchParams(location.search) : null
+  if (params && (params.has('detail') || params.has('bevel'))) {
+    const flag = (k: string, cur: boolean) => {
+      if (!params.has(k)) return cur
+      const v = (params.get(k) || '').toLowerCase()
+      return !(v === 'off' || v === '0' || v === 'false' || v === 'no')
+    }
+    result = {
+      ...result,
+      surfaceDetail: flag('detail', result.surfaceDetail),
+      bevelEdges: flag('bevel', result.bevelEdges),
+    }
   }
+
+  return result
 }

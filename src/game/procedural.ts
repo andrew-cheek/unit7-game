@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { config } from './config'
 
 /**
@@ -40,8 +41,28 @@ export interface VehicleModel {
   setMorph?(amount: number): void
 }
 
-const box = (w: number, h: number, d: number, mat: THREE.Material) =>
-  new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
+// On the desktop look pass (`tier.bevelEdges`) the box-built models get a small
+// chamfer instead of razor-sharp 90° edges. Perfectly sharp primitive corners
+// are the strongest "untextured CAD" tell on the close-viewed hero models, and a
+// 2-3cm bevel that catches a highlight reads as machined metal for very little
+// vertex cost. Radius is proportional to the part's smallest side so thin panels
+// don't blow out, capped so chunky blocks stay crisp. Mobile keeps plain boxes
+// (geometry is the tier it's most sensitive to).
+const box = (w: number, h: number, d: number, mat: THREE.Material) => {
+  if (config.tier.bevelEdges) {
+    const r = Math.min(Math.min(w, h, d) * 0.16, 0.09)
+    const g = new RoundedBoxGeometry(w, h, d, 2, r)
+    // RoundedBoxGeometry is NON-indexed, but the primitives it's merged with in the
+    // crowd/prop bucketing (Bots/NightMarket/Events) are indexed — mixing the two
+    // makes mergeGeometries() bail ("index among some, not all"). Give it a trivial
+    // sequential index so it's merge-compatible. NOT mergeVertices(): welding the
+    // duplicated corner verts would average the chamfer normals and round it off.
+    const n = g.attributes.position.count
+    g.setIndex(Array.from({ length: n }, (_, i) => i))
+    return new THREE.Mesh(g, mat)
+  }
+  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
+}
 
 /**
  * A dark, neon-tinted image-based-lighting probe. Without an environment, PBR

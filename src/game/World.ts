@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { config, type ZoneCfg, type District } from './config'
 import { hash01 } from './utils'
 import { createSky, createWindowTexture, type SkyModel } from './procedural'
+import { createDetailNormalMap } from './surface'
 import { NeonManager } from './NeonManager'
 import type { Zone } from './types'
 
@@ -130,6 +131,11 @@ export class World {
   private crownGeo = new THREE.TorusGeometry(0.5, 0.12, 6, 16) // glowing roof ring
   private tankGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12) // rooftop water tank
   private groundMat!: THREE.MeshStandardMaterial
+  // Shared procedural detail normal map (desktop 'high' only). One instance is
+  // reused across every facade/dark tower material so it stays a single texture;
+  // the ground gets its own clone with a coarser repeat. Both are owned/disposed
+  // with the World. Undefined on the mobile tiers (cheap flat shading).
+  private detailNormal?: THREE.Texture
   private windowTex: THREE.CanvasTexture[] = []
   // Pools so lit towers SHARE window textures + materials instead of cloning one
   // per building (which uploaded a separate GPU texture each). Keyed by base
@@ -338,6 +344,10 @@ export class World {
     this.ownedGeos.push(g)
     return g
   }
+  private ownT<T extends THREE.Texture>(t: T): T {
+    this.ownedTex.push(t)
+    return t
+  }
   // Pool glow materials by (emissive colour + intensity) so identical neon caps,
   // antenna tips and trim SHARE one material. Sharing is what lets caps/antenna
   // parts of the same colour bucket into a single InstancedMesh (the renderer
@@ -467,12 +477,29 @@ export class World {
   }
 
   private buildMaterials() {
+    // Desktop look pass: one shared procedural detail normal map for the facades
+    // (set on each pooled tower material in addBuilding) + a coarser-tiled clone
+    // for the ground. Created once here, owned/disposed with the World.
+    if (config.tier.surfaceDetail) {
+      const dn = this.ownT(createDetailNormalMap())
+      dn.repeat.set(3, 5) // tile the fine detail within each (0..1 UV) tower face
+      this.detailNormal = dn
+    }
+
     this.groundMat = this.own(
       // Slightly lifted off pure asphalt (was config.palette.asphalt 0x14161d) so the
       // off-avenue ground isn't a pitch-black void you can't read; keeps the wet sheen.
       new THREE.MeshStandardMaterial({ color: 0x191d28, roughness: 0.3, metalness: 0.55 }),
     )
     this.groundMat.envMapIntensity = config.tier.envMapIntensity
+    if (this.detailNormal) {
+      // Separate clone so the ground can tile the same detail far coarser than the
+      // facades (it's a huge plane); shares the GPU image, own texture transform.
+      const gn = this.ownT(this.detailNormal.clone())
+      gn.repeat.set(48, 48)
+      this.groundMat.normalMap = gn
+      this.groundMat.normalScale.set(0.4, 0.4)
+    }
     this.windowTex = [3, 11, 27, 54, 71, 96, 123, 158].map((s) => createWindowTexture(s))
     this.windowTex.forEach((t) => {
       t.anisotropy = config.tier.anisotropy
@@ -592,6 +619,10 @@ export class World {
       let dm = this.darkPool.get(dcolor)
       if (!dm) {
         dm = this.own(new THREE.MeshStandardMaterial({ color: dcolor, metalness: 0.5, roughness: 0.72, envMapIntensity: config.tier.envMapIntensity }))
+        if (this.detailNormal) {
+          dm.normalMap = this.detailNormal
+          dm.normalScale.set(0.5, 0.5)
+        }
         this.darkPool.set(dcolor, dm)
       }
       mat = dm
@@ -628,6 +659,12 @@ export class World {
           emissiveIntensity: WINDOW_NIGHT_I,
           envMapIntensity: config.tier.envMapIntensity,
         }))
+        if (this.detailNormal) {
+          // Shares the single detail map; its own UV repeat differs from the
+          // emissive window map's, which three handles per-texture-channel.
+          lm.normalMap = this.detailNormal
+          lm.normalScale.set(0.35, 0.35) // gentler than the dark towers so it doesn't fight the window grid
+        }
         this.litMatPool.set(mkey, lm)
         this.facadeMats.push(lm) // only lit towers dim with the day cycle
       }
