@@ -33,6 +33,7 @@ import { Boundary } from './Boundary'
 import { GuideBot } from './GuideBot'
 import { LandingFx } from './LandingFx'
 import { LaunchPad } from './LaunchPad'
+import { SkyPortals, type SkyDest } from './SkyPortals'
 import { type NetState } from './Net'
 import { MultiplayerManager, type MultiplayerHost } from './Multiplayer'
 import { SystemRegistry } from './System'
@@ -288,6 +289,8 @@ export class Game {
   private launchCineT = -1 // >=0 while the opening establishing-orbit cinematic plays
   private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
   private dropVehicle: Vehicle | null = null // the car/bike you rode off the pad edge, falling with the dive
+  private skyPortals: SkyPortals | null = null // persistent floating destination portals in the Earth sky
+  private freefalling = false // stepped off the pad into a seamless free-roam fall (no scripted skydive)
   private raidActive = false // the post-skydive city raid is live
   private raidDone = false // the opening raid only ever happens once
   private raidWaveShown = 0 // last wave number announced via banner
@@ -922,6 +925,16 @@ export class Game {
     // and frees in its own dispose(); the arcade arrays hold only landmark resources).
     this.arcade = new ArcadeSystem(this.engine.scene)
 
+    // Persistent floating destination portals stacked in the sky above the plaza:
+    // step off the launch pad (or jetpack up) and steer through one to travel. They
+    // replace the old scripted skydive's pads. Earth only - hidden off-world.
+    {
+      const px = 0, pz = 20 // plaza touchdown point, matches the drop target
+      const gy = this.physics.sampleGround(px, pz, 120)?.y ?? 0
+      this.skyPortals = new SkyPortals(this.engine.scene, new THREE.Vector3(px, gy, pz))
+      this.skyPortals.setVisible(this.zone === 'earth')
+    }
+
     // Soft world edge: a ring of jiggly alien blobs just inside the city rim that
     // bounce you back toward the arcade instead of an abrupt invisible wall. Earth
     // only; count + eyes scale down on the mobile tier.
@@ -996,8 +1009,12 @@ export class Game {
       skipIntro: () => {
         if ((this.intro && !this.intro.done) || (this.dropIn && !this.dropIn.done) || this.launchPad) trackEvent('intro_skipped')
         this.intro?.skip()
-        // Skipping from the launch pad starts the dive, then immediately lands it.
-        if (this.launchPad) { this.endLaunchPad(); this.beginDropIn() }
+        // Skipping from the launch pad sets you straight down in the city plaza.
+        if (this.launchPad) {
+          this.beginFreefall()
+          this.player.exitVehicle(this.dropLand.clone())
+          this.finishFreefall() // normal city arrival at the plaza
+        }
         this.dropIn?.skip()
       },
       dropDeploy: () => this.dropIn?.deploy(),
@@ -1132,8 +1149,12 @@ export class Game {
   private beginLaunchPad() {
     const tx = 0, tz = 20
     this.dropLand.set(tx, this.physics.sampleGround(tx, tz, 120)?.y ?? 0, tz)
-    const start = new THREE.Vector3(tx + 30, 1320, tz - 300) // matches DropIn's default high-altitude start
-    const faceYaw = Math.atan2(tx - start.x, tz - start.z) // local +Z (the ledge) points at the city
+    // Directly above the plaza, high up: a straight free-fall now lands you in the
+    // city (through the stacked sky portals) instead of the old scripted dive that
+    // flew you forward from a far-offset start. Keeps you inside the world ring the
+    // whole way down, so the boundary never flings you mid-fall.
+    const start = new THREE.Vector3(tx, 1320, tz)
+    const faceYaw = 0 // face +Z (north) - the arcade hall + city hub sit below/ahead
     this.launchPad = new LaunchPad(this.engine.scene, start, faceYaw)
     this.physics.addGroundMesh(this.launchPad.collider)
     // Make the assembly line solid so you walk around it, not through it.
@@ -1252,6 +1273,70 @@ export class Game {
     this.bannerTimer = 2
     this.hud.missionPopup = { title: 'VEHICLE DIVE', body: 'You rode off in the ' + v.name + '! Press O for the chute to ride it down safe - or press G to bail out and skydive.' }
     this.missionPopupTimer = 6
+  }
+
+  /** Stepped (or drove) off the launch pad: tear down the pad and drop into a
+   *  seamless free-roam fall under the normal Player/vehicle physics - no scripted
+   *  skydive, no mode switch. The altitude fog/resolution the pad pinned are kept
+   *  for the descent and restored on touchdown (finishFreefall). */
+  private beginFreefall(banner?: string) {
+    if (this.freefalling) return
+    // Keep the ride you drove off the edge (if any); endLaunchPad returns the others.
+    this.dropVehicle = this.vehicles.current
+    this.endLaunchPad()
+    this.dropVehicle = null
+    this.freefalling = true
+    if (!this.vehicles.current) this.player.setVisible(true) // keep the robot hidden inside a ride
+    this.input.setLockEnabled(true)
+    this.hud.banner = banner ?? 'FREE FALL'
+    this.bannerTimer = 2
+    this.hud.missionPopup = { title: 'FREE FALL', body: 'Hold SPACE to fly the jetpack; press O for the chute before you land. Steer through a glowing portal to travel.' }
+    this.missionPopupTimer = 6
+    this.audio.play('portal')
+    vibrate(30)
+  }
+
+  /** End a seamless fall: restore the altitude fog/resolution, then either travel
+   *  (a sky-portal pick) or settle into normal city play (natural landing / skip).
+   *  Also the routing used when you fly a sky portal during ordinary free roam, in
+   *  which case there's no in-progress fall to clean up. */
+  private finishFreefall(dest: SkyDest | null = null) {
+    const wasFalling = this.freefalling
+    this.freefalling = false
+    const fog = this.engine.scene.fog
+    if (fog instanceof THREE.FogExp2 && this.savedFogDensity != null) { fog.density = this.savedFogDensity; this.savedFogDensity = null }
+    this.engine.setAdaptive(true)
+    if (dest === 'mars' || dest === 'moon') {
+      // Off-world pick: doTravel handles the vehicle (mechs follow, cars are parked).
+      this.requestTravel(dest)
+      this.hud.banner = `PORTAL · ${dest.toUpperCase()}`
+      this.bannerTimer = 2
+      return
+    }
+    // arcade / city / natural landing -> come down on Earth.
+    if (this.dropVehicle) {
+      const v = this.dropVehicle; this.dropVehicle = null
+      v.position.copy(v.home); v.model.group.position.copy(v.home); this.vehicles.current = null
+    }
+    let land = this.player.position.clone()
+    if (dest === 'arcade') { land = new THREE.Vector3(0, this.physics.sampleGround(0, 24, 60)?.y ?? 0, 24); this.input.yaw = 0 }
+    else if (dest === 'city') land = this.dropLand.clone()
+    if (dest) {
+      // Portal pick: set you down at the chosen spot.
+      this.player.exitVehicle(land)
+      this.player.setVisible(true)
+      this.player.setBoard(false)
+      this.camera.snap(this.player.position)
+      this.audio.play('portal')
+    }
+    this.landingFx.trigger(land, dest === 'arcade' ? 0xff2bd0 : 0x27e7ff, true)
+    this.travelCooldown = 3
+    this.hud.banner = dest === 'arcade' ? 'ARCADE' : dest === 'city' ? 'CITY' : 'UNIT 7 ONLINE'
+    this.bannerTimer = 2
+    this.hud.missionPopup = { title: 'UNIT 7 ONLINE', body: 'Follow the green beacon to your objective - the OBJECTIVE readout shows the distance.' }
+    this.missionPopupTimer = 6
+    // First touchdown on Earth kicks off the one-time city raid (on foot only).
+    if (wasFalling && !this.raidDone && this.zone === 'earth' && !this.vehicles.current) this.beginCityRaid(land)
   }
 
   private finishDrop() {
@@ -2155,6 +2240,7 @@ export class Game {
     // (their groups live on the scene, not the swappable world group).
     if (this.boundary) this.boundary.group.visible = zone === 'earth'
     if (this.guide) this.guide.group.visible = zone === 'earth'
+    if (this.skyPortals) this.skyPortals.setVisible(zone === 'earth')
     // Activate the matching course only after the zone's terrain is the live
     // physics surface, so its rings build/sample on the right ground.
     this.races.forEach((r) => r.setActive(zone))
@@ -3243,11 +3329,7 @@ export class Game {
       // On foot: walk off the ledge -> normal skydive. (Driving off in a vehicle is
       // handled after vehicles.update, below, so the car becomes the diver.)
       if (!this.vehicles.current && this.launchPad.steppedOff(p.x, p.y, p.z)) {
-        const off = p.clone()
-        this.endLaunchPad()
-        this.beginDropIn(off, true) // dive begins where you stepped off, camera eases in
-        this.pushHud(dt)
-        return
+        this.beginFreefall() // seamless: keep on-foot control + physics, just fall
       }
     }
 
@@ -3295,19 +3377,21 @@ export class Game {
     // feeds the rover's ramp launches (weaker off-world = bigger hops).
     this.vehicles.update(dt, this.input, gravity, this.player.position)
 
-    // Drove a vehicle off the launch-pad edge: the car becomes the diver and falls.
+    // Drove a vehicle off the launch-pad edge: keep piloting and let the car fall
+    // seamlessly under normal vehicle physics (steer through a sky portal or land it).
     if (this.launchPad && this.vehicles.current) {
       const v = this.vehicles.current
       const c = this.launchPad.group.position
       if (Math.hypot(v.position.x - c.x, v.position.z - c.z) > this.launchPad.radius - 1) {
-        // Undo any ground-snap toward the city far below; start the dive from pad height.
+        // Undo any ground-snap toward the city far below; start the fall from pad height.
         v.position.y = this.launchPad.topY + v.hoverHeight
         v.model.group.position.copy(v.position)
-        this.beginVehicleDrop(v.position.clone())
-        this.pushHud(dt)
-        return
+        this.beginFreefall(`${v.name} OFF THE EDGE`)
       }
     }
+
+    // Spin/float the persistent sky portals (no-op off-world / when hidden).
+    this.skyPortals?.update(dt)
 
     if (this.vehicles.current) {
       // Keep vehicles inside the same blob ring (no launch - a fling makes no sense
@@ -3329,6 +3413,17 @@ export class Game {
         this.focus.y += this.vehicles.current.size * 3.2
         this.updateMechFx(dt)
       }
+      // Free-falling in the ride: steer through a sky portal to travel, or finish
+      // the fall once the car settles back onto the ground.
+      if (this.freefalling) {
+        const v = this.vehicles.current
+        const dest = this.skyPortals?.flyThrough(v.position) ?? null
+        if (dest) this.finishFreefall(dest)
+        else {
+          const gy = this.physics.sampleGround(v.position.x, v.position.z, 80)?.y ?? 0
+          if (v.position.y - gy < 2.5 + v.size * 0.6) this.finishFreefall()
+        }
+      }
     } else {
       this.mechAirborne = false
       // Low-G bubbles scale the player's gravity down locally (floaty triple-hops).
@@ -3341,6 +3436,10 @@ export class Game {
       const wasAirborne = !this.player.grounded
       this.player.update(dt, this.input, this.physics, pg)
       if (wasAirborne && this.player.grounded) this.onPlayerLanded(fallSpeed)
+      // Seamless free-fall: once you touch down, settle into normal city play
+      // (restores fog/res, fires the first-landing raid). Portal fly-through is
+      // handled by the general airborne check below (works in free roam too).
+      if (this.freefalling && wasAirborne && this.player.grounded) this.finishFreefall()
       if (this.zone === 'earth' && !this.launchPad) {
         // Bouncy alien-blob edge (replaces the old hard square clamp on Earth): it
         // shoves you back inside the ring and, on foot/flying, flings you up and
@@ -3410,6 +3509,13 @@ export class Game {
         if (dl > 0) { this.player.rideUpdraft(dl * dt); this.camera.shake(0.04) }
       }
       if (this.trans.phase === 'none' && this.travelCooldown === 0) this.checkPortals()
+      // Sky portals: while airborne (the opening fall, or any later jetpack climb),
+      // steer through a floating ring to travel. Routed through finishFreefall so
+      // it also cleanly ends an in-progress seamless fall.
+      if (this.zone === 'earth' && this.skyPortals && !this.player.grounded && this.trans.phase === 'none' && this.travelCooldown === 0) {
+        const dest = this.skyPortals.flyThrough(this.player.position)
+        if (dest) this.finishFreefall(dest)
+      }
     }
 
     // Let the peaceful morning - sunrise, shuttle arrival, the crew filing into
@@ -3919,6 +4025,7 @@ export class Game {
     this.citySpectacle.dispose()
     this.intro?.dispose()
     this.dropIn?.dispose()
+    this.skyPortals?.dispose()
     this.assets.dispose()
     const m = this.netLine.material as THREE.Material
     this.netLine.geometry.dispose()

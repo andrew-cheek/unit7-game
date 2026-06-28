@@ -369,7 +369,7 @@ export class Vehicles {
       if (v.drive === 'rail') {
         this.driveRail(v, dt) // the tram loops its route whether or not you're aboard
       } else if (v === this.current) {
-        if (v.drive === 'hover') this.driveHover(v, dt, input)
+        if (v.drive === 'hover') this.driveHover(v, dt, input, gravity)
         else if (v.drive === 'fly') this.driveFly(v, dt, input)
         else if (v.drive === 'rover') this.driveRover(v, dt, input, gravity)
       } else {
@@ -448,7 +448,7 @@ export class Vehicles {
     v.model.group.rotation.set(0, v.yaw, 0)
   }
 
-  private driveHover(v: Vehicle, dt: number, input: Input) {
+  private driveHover(v: Vehicle, dt: number, input: Input, gravity = -24) {
     const cfg = v.kind === 'speeder' ? config.vehicle.speeder : config.vehicle.hovercar
     const boost = input.held.boost ? 1.4 : 1
     const maxSpeed = cfg.maxSpeed * boost
@@ -465,7 +465,9 @@ export class Vehicles {
 
     this.fwd.set(Math.sin(v.yaw), 0, Math.cos(v.yaw))
     this.right.set(Math.cos(v.yaw), 0, -Math.sin(v.yaw))
+    const fallY = v.velocity.y // preserve any vertical fall speed across the horizontal rebuild
     v.velocity.copy(this.fwd).multiplyScalar(fs).addScaledVector(this.right, ls)
+    v.velocity.y = fallY
     v.position.x += v.velocity.x * dt
     v.position.z += v.velocity.z * dt
     this.physics.resolveHorizontal(v.position, v.velocity, v.radius, 2)
@@ -473,10 +475,21 @@ export class Vehicles {
     const g = this.physics.sampleGround(v.position.x, v.position.z, v.position.y + 6)
     const gy = g ? g.y : 0
     v.bob += dt
-    const targetY = gy + v.hoverHeight + Math.sin(v.bob * 2) * 0.06
-    // Crisper vertical tracking so the car stays planted on ramps/loops instead
-    // of floating up behind the terrain.
-    v.position.y = damp(v.position.y, targetY, 14, dt)
+    const restY = gy + v.hoverHeight
+    if (v.position.y > restY + 6) {
+      // Dropped from a height (e.g. driven off the launch pad): real gravity, so the
+      // ride genuinely free-falls toward the city instead of snapping down to hover
+      // height. You can still steer in the air, and the hover settle resumes on arrival.
+      v.velocity.y += gravity * dt
+      v.position.y += v.velocity.y * dt
+      if (v.position.y <= restY) { v.position.y = restY; v.velocity.y = 0 }
+    } else {
+      v.velocity.y = 0
+      const targetY = restY + Math.sin(v.bob * 2) * 0.06
+      // Crisper vertical tracking so the car stays planted on ramps/loops instead
+      // of floating up behind the terrain.
+      v.position.y = damp(v.position.y, targetY, 14, dt)
+    }
 
     this.orient(v, g ? g.normal : UP, -input.moveX * 0.25 * Math.min(1, Math.abs(fs) / 12), dt, 12)
     this.speed01 = Math.min(1, Math.abs(fs) / maxSpeed)
