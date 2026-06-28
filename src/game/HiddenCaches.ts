@@ -158,9 +158,18 @@ export class HiddenCaches implements GameSystem {
     scene.add(this.group)
   }
 
-  /** Claim the next seeded spot in the cycling stream. */
+  /** Claim the next seeded spot in the cycling stream that no active cache already
+   *  occupies, so two caches never overlap (there are ~3x more spots than caches, so
+   *  a free one always exists). Allocation-free: scans the small caches array. */
   private takeSpot(): number {
-    const i = this.nextSpot
+    for (let tries = 0; tries < this.spots.length; tries++) {
+      const i = this.nextSpot
+      this.nextSpot = (this.nextSpot + 1) % this.spots.length
+      let taken = false
+      for (let k = 0; k < this.caches.length; k++) { if (this.caches[k].spot === i) { taken = true; break } }
+      if (!taken) return i
+    }
+    const i = this.nextSpot // fallback (unreachable: spots > caches)
     this.nextSpot = (this.nextSpot + 1) % this.spots.length
     return i
   }

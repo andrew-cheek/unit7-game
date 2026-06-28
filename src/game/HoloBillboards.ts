@@ -161,8 +161,9 @@ export class HoloBillboards implements GameSystem {
 
     const tex = new THREE.CanvasTexture(cv)
     tex.colorSpace = THREE.SRGBColorSpace
-    // Tier-gated anisotropy (low=2, med=8, high=16) so low samples fewer mips.
-    tex.anisotropy = config.tier.anisotropy
+    // Lower anisotropy on low only (fewer mip samples on mobile); medium/high keep
+    // the prior 4 so their billboards stay byte-for-byte unchanged.
+    tex.anisotropy = config.tier.name === 'low' ? config.tier.anisotropy : 4
     tex.needsUpdate = true
     return tex
   }
