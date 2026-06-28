@@ -6,6 +6,12 @@ import type { Zone } from './types'
 interface Deps {
   /** Player focus, so the network buzzes around wherever you are in the city. */
   focus: () => THREE.Vector3
+  /**
+   * Optional: latest ambient world event. When present and recent, a few nearby
+   * drones briefly divert to rubberneck the spectacle, then ease back to focus.
+   * Back-compatible: if absent, behavior is exactly as today.
+   */
+  latestEvent?: () => { x: number; z: number; age: number } | null
 }
 
 interface Drone {
@@ -17,6 +23,7 @@ interface Drone {
   blink: number // nav-light phase offset
   bank: number // eased roll into turns
   rotorSpin: number // accumulated rotor angle (shared across both discs)
+  divert: number // 0..1 eased blend of this drone's waypoints toward an event epicenter
 }
 
 /** Deterministic PRNG so routes/layout are identical each load. */
@@ -69,6 +76,27 @@ export class CourierDrones implements GameSystem {
   private rotorPos = new THREE.Vector3()
   private col = new THREE.Color()
 
+  // Scratch reused by the event-diversion pass (no per-frame heap allocation).
+  private evCenter = new THREE.Vector3() // event epicenter at the drone's mid-height
+  private evScratch = new THREE.Vector3() // blended effective center for one drone
+  // Last valid epicenter, retained so drones can ease *back* smoothly even after
+  // the event ages out (their divert blend decays toward this, then to 0 weight).
+  private lastEvCenter = new THREE.Vector3()
+  // Per-drone selection marker: holds the frame stamp at which a drone was last
+  // chosen to rubberneck. Compared against `selStamp` to read selection without
+  // clearing an array each frame. Sized in the constructor once `count` is known.
+  private divertSel!: Int32Array
+  private selStamp = 1
+
+  // Aerial-theater tuning. An event within RANGE of a drone, fresher than WINDOW,
+  // pulls a SUBSET (the nearest few) to circle its epicenter; everyone eases back
+  // after. Blends are frame-rate-independent via 1 - exp(-k*dt).
+  private static EVENT_WINDOW = 3.0 // seconds an event stays "fresh" enough to divert
+  private static EVENT_RANGE = 140 // metres: drones beyond this ignore the event
+  private static EVENT_MAX_DRONES = 3 // how many drones may rubberneck at once
+  private static DIVERT_IN_K = 0.9 // ease-in rate toward the epicenter
+  private static DIVERT_OUT_K = 1.6 // faster ease-out back to player focus
+
   // Static local offsets, baked once. Rotor discs share the spin angle.
   private static ROTOR_OFFSETS = [-0.75, 0.75]
 
@@ -80,6 +108,7 @@ export class CourierDrones implements GameSystem {
     const low = config.tier.name === 'low'
     const count = low ? 4 : 8
     this.count = count
+    this.divertSel = new Int32Array(count) // 0 = never selected (selStamp starts at 1)
 
     // Shared geometries reused across every drone.
     const bodyGeo = this.ownG(new THREE.BoxGeometry(1.1, 0.4, 0.7))
@@ -127,6 +156,7 @@ export class CourierDrones implements GameSystem {
         blink: this.rnd() * 6.28,
         bank: 0,
         rotorSpin: 0,
+        divert: 0,
       })
     }
 
@@ -215,15 +245,74 @@ export class CourierDrones implements GameSystem {
     let navDirty = false
     let cargoDirty = false
 
+    // --- Aerial-theater event diversion (once per frame, not per drone) ---------
+    // Read the latest ambient event. If it's fresh and inside the network's reach,
+    // pick the nearest few drones to rubberneck its epicenter; the rest (and these,
+    // once it ages out) ease back to the player focus. Selection is a flag bit on
+    // `divertSel`, applied below as a per-drone eased blend. Pure scratch reuse.
+    let evValid = false
+    const ev = this.deps.latestEvent?.()
+    if (ev && ev.age < CourierDrones.EVENT_WINDOW) {
+      // Centre at the network's working mid-height so the orbit sits among the fleet.
+      this.evCenter.set(ev.x, 14, ev.z)
+      this.lastEvCenter.copy(this.evCenter) // retain for a smooth ease-back later
+      const r2 = CourierDrones.EVENT_RANGE * CourierDrones.EVENT_RANGE
+      // Select up to EVENT_MAX_DRONES nearest in-range drones, by repeated min-scan
+      // over a tiny fleet (count<=8) - cheap and allocation-free.
+      let picked = 0
+      const want = Math.min(CourierDrones.EVENT_MAX_DRONES, this.count)
+      for (let s = 0; s < want; s++) {
+        let best = -1
+        let bestD = r2
+        for (let i = 0; i < this.count; i++) {
+          if (this.divertSel[i] === this.selStamp) continue // already picked this frame
+          const d = this.drones[i]
+          const dx = d.pos.x - this.evCenter.x
+          const dz = d.pos.z - this.evCenter.z
+          const dd = dx * dx + dz * dz
+          if (dd < bestD) { bestD = dd; best = i }
+        }
+        if (best < 0) break
+        this.divertSel[best] = this.selStamp
+        picked++
+      }
+      evValid = picked > 0
+    }
+    // Bump the stamp so unselected drones read as "not selected this frame".
+    const sel = this.selStamp
+    this.selStamp++
+
     for (let i = 0; i < this.count; i++) {
       const d = this.drones[i]
+      // Ease this drone's diversion blend toward 1 (selected) or 0 (back to focus),
+      // frame-rate-independently. Out is faster so the fleet recovers promptly.
+      const selected = evValid && this.divertSel[i] === sel
+      const k = selected ? CourierDrones.DIVERT_IN_K : CourierDrones.DIVERT_OUT_K
+      const targetDivert = selected ? 1 : 0
+      d.divert += (targetDivert - d.divert) * (1 - Math.exp(-k * dt))
+      if (d.divert < 1e-3 && !selected) d.divert = 0
+
+      // Effective steering target: blend the drone's own waypoint toward the last
+      // known epicenter by its eased divert amount. Using lastEvCenter (not the
+      // live one) lets the blend ease *back* smoothly after the event ages out -
+      // a gentle drift, never a snap. Dwell/scatter wandering and all
+      // rotor/bob/bank behavior stay untouched.
+      let tx = d.target.x, ty = d.target.y, tz = d.target.z
+      if (d.divert > 0) {
+        const b = d.divert
+        tx += (this.lastEvCenter.x - tx) * b
+        ty += (this.lastEvCenter.y - ty) * b
+        tz += (this.lastEvCenter.z - tz) * b
+      }
+      this.evScratch.set(tx, ty, tz)
+
       let turn = 0
       if (d.dwell > 0) {
         // Paused at a waypoint, then pick a new destination + height.
         d.dwell -= dt
         if (d.dwell <= 0) this.scatter(d.target)
       } else {
-        this.dir.subVectors(d.target, d.pos)
+        this.dir.subVectors(this.evScratch, d.pos)
         const dist = this.dir.length()
         if (dist < 1.2) {
           d.dwell = 0.5 + this.rnd() * 1.0
