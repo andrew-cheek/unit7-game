@@ -591,6 +591,7 @@ export class Game {
     // Autonomous courier drones buzzing along routes over the city streets.
     this.systems.register(new CourierDrones(this.engine.scene, {
       focus: () => this.focus,
+      latestEvent: () => this.lastEvent,
     }))
     // Intermittent neon rain weather that drifts through the roam.
     this.systems.register(new NeonRain(this.engine.scene, {
