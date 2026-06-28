@@ -1,8 +1,9 @@
-// RaceActivity - a street race you can run on foot or (better) in any car: drive
-// into the START gate near spawn, then blast through the glowing checkpoint rings
+// RaceActivity - a time-trial you can run on foot or (better) in any vehicle:
+// reach the START gate near spawn, then blast through the glowing checkpoint rings
 // in order before the clock stops at the finish. Beat your best time for credits
-// + XP. Self-contained; Earth-only; the next ring always glows brightest so the
-// route reads at a glance.
+// + XP. Self-contained and course-driven: one instance per zone (the neon city
+// circuit on Earth, low-gravity courses on the Moon/Mars). The next ring always
+// glows brightest so the route reads at a glance.
 
 import * as THREE from 'three'
 import { config } from './config'
@@ -19,17 +20,26 @@ export interface RaceHud {
   near: boolean // player is at the start gate (idle) - show the "drive through to race" hint
 }
 
+/** A self-contained course: which zone it lives in, the start gate, the ordered
+ *  checkpoints, persistence key and rewards. Earth's values reproduce the original
+ *  city circuit exactly; the off-world courses reuse the same machinery. */
+export interface RaceCourse {
+  zone: string
+  gate: [number, number]
+  circuit: Array<[number, number]>
+  storageKey: string
+  accent: number // ring + gate colour (zone-themed)
+  baseCredits: number
+  bestBonus: number
+  xp: number
+}
+
 interface Ring {
   pos: THREE.Vector3
   group: THREE.Group
   mat: THREE.MeshBasicMaterial
 }
 
-// A circuit looping the inner city, ending back at the start gate.
-const GATE = new THREE.Vector3(64, 0, 8)
-const CIRCUIT: Array<[number, number]> = [
-  [64, -60], [10, -104], [-70, -84], [-104, -10], [-78, 70], [-8, 104], [78, 84], [104, 16],
-]
 const DETECT = 8 // xz distance to "hit" a ring / the gate
 
 export class RaceActivity {
@@ -40,12 +50,18 @@ export class RaceActivity {
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
   private sampleGround: (x: number, z: number) => number
+  private course: RaceCourse
+  private gate: THREE.Vector3
+  // Geometry is built lazily on first activation: off-world terrain isn't the
+  // active physics surface at boot (it's generated on first travel), so the rings
+  // must sample the ground only once their zone is live.
+  private built = false
 
   private state: RaceHud['state'] = 'idle'
   private cp = 0
   private time = 0
   private countdown = 0
-  private best = loadBestTime('race')
+  private best: number
   private result = 0
   private cooldown = 0
   private stray = 0
@@ -54,28 +70,43 @@ export class RaceActivity {
   onFinish?: (credits: number, xp: number, isBest: boolean) => void
   onSfx?: (kind: 'start' | 'cp' | 'finish') => void
 
-  constructor(scene: THREE.Scene, sampleGround: (x: number, z: number) => number) {
+  constructor(scene: THREE.Scene, sampleGround: (x: number, z: number) => number, course: RaceCourse) {
     this.scene = scene
     this.sampleGround = sampleGround
+    this.course = course
+    this.gate = new THREE.Vector3(course.gate[0], 0, course.gate[1])
+    this.best = loadBestTime(course.storageKey)
     this.gateMat = this.own(new THREE.MeshBasicMaterial({ color: config.palette.lime, fog: false }))
-    this.buildGate()
-    for (const [x, z] of CIRCUIT) this.buildRing(x, z)
-    this.refreshRingGlow()
+    this.group.visible = false
     scene.add(this.group)
   }
+
+  /** Which zone this course belongs to (so the orchestrator can pick the active one). */
+  get zone(): string { return this.course.zone }
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
 
+  /** Show/hide for the active zone, building the geometry the first time its zone
+   *  becomes active (when the matching terrain is the live physics surface). */
   setActive(zone: string) {
-    this.group.visible = zone === 'earth'
-    if (zone !== 'earth' && this.state !== 'idle') this.reset()
+    const on = zone === this.course.zone
+    if (on && !this.built) this.build()
+    this.group.visible = on
+    if (!on && this.state !== 'idle') this.reset()
+  }
+
+  private build() {
+    this.buildGate()
+    for (const [x, z] of this.course.circuit) this.buildRing(x, z)
+    this.refreshRingGlow()
+    this.built = true
   }
 
   private buildGate() {
-    const y = this.sampleGround(GATE.x, GATE.z)
+    const y = this.sampleGround(this.gate.x, this.gate.z)
     const g = new THREE.Group()
-    g.position.set(GATE.x, y, GATE.z)
+    g.position.set(this.gate.x, y, this.gate.z)
     const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0a1018, emissive: config.palette.lime, emissiveIntensity: 1.6, roughness: 0.5 }))
     for (const sx of [-6, 6]) {
       const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.8, 9, 0.8)), postMat)
@@ -104,7 +135,7 @@ export class RaceActivity {
     for (let i = 0; i < this.rings.length; i++) {
       const next = this.state === 'racing' && i === this.cp
       const done = this.state === 'racing' && i < this.cp
-      this.rings[i].mat.color.setHex(next ? config.palette.lime : done ? 0x294055 : config.palette.cyan)
+      this.rings[i].mat.color.setHex(next ? config.palette.lime : done ? 0x294055 : this.course.accent)
       this.rings[i].mat.opacity = next ? 1 : done ? 0.3 : 0.8
       this.rings[i].group.scale.setScalar(next ? 1.08 : 1)
     }
@@ -121,7 +152,7 @@ export class RaceActivity {
   /** Drive the race from the player's ground position. Returns HUD state. */
   update(dt: number, px: number, pz: number): RaceHud {
     this.cooldown = Math.max(0, this.cooldown - dt)
-    const distGate = Math.hypot(px - GATE.x, pz - GATE.z)
+    const distGate = Math.hypot(px - this.gate.x, pz - this.gate.z)
     // Spin the rings a little for life.
     for (const r of this.rings) r.group.rotation.z += dt * 0.6
 
@@ -153,7 +184,7 @@ export class RaceActivity {
       }
       // Abandon if the player strays far from the next target for a while (left
       // the race) instead of leaving the clock running forever.
-      const tgt = this.cp >= this.rings.length ? GATE : this.rings[this.cp].pos
+      const tgt = this.cp >= this.rings.length ? this.gate : this.rings[this.cp].pos
       const off = Math.hypot(px - tgt.x, pz - tgt.z) > 120
       this.stray = off ? this.stray + dt : 0
       if (this.stray > 8 || this.time > 240) { this.stray = 0; this.reset() }
@@ -168,10 +199,10 @@ export class RaceActivity {
   private finish() {
     this.result = this.time
     const isBest = this.best === 0 || this.time < this.best
-    if (isBest) { this.best = Math.round(this.time * 10) / 10; saveBestTime('race', this.time) }
-    // Reward scales with how clean the run was; a best run pays a bonus.
-    const credits = 150 + (isBest ? 150 : 0)
-    this.onFinish?.(credits, 120, isBest)
+    if (isBest) { this.best = Math.round(this.time * 10) / 10; saveBestTime(this.course.storageKey, this.time) }
+    // A best run pays a bonus on top of the base finish reward.
+    const credits = this.course.baseCredits + (isBest ? this.course.bestBonus : 0)
+    this.onFinish?.(credits, this.course.xp, isBest)
     this.onSfx?.('finish')
     this.state = 'done'
     this.countdown = 4 // show the result banner a moment
