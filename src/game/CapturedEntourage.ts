@@ -11,14 +11,12 @@ interface Deps {
   count: () => number
 }
 
-/** One pooled captured-alien follower: its meshes plus spring-follow state. */
+/** One captured-alien follower: spring-follow state + bake into instances. */
 interface Follower {
-  group: THREE.Group
-  core: THREE.MeshBasicMaterial
-  halo: THREE.MeshBasicMaterial
   pos: THREE.Vector3
   vel: THREE.Vector3
   phase: number
+  tint: THREE.Color
   placed: boolean
 }
 
@@ -27,17 +25,40 @@ interface Follower {
  * player as a flex/progression display - the more you've caught, the bigger your
  * posse. Cute glowing orbs trail in a loose V with spring-follow lag, bob, spin
  * and pulse. Pure character; no gameplay, no colliders. Shows in every zone.
+ *
+ * Rendered as three InstancedMeshes (body / core / halo) so the whole posse is
+ * three draw calls regardless of how many you've captured, instead of three per
+ * follower. Each follower's transform and per-instance tint are written every
+ * frame via setMatrixAt / setColorAt from reused scratch objects (no per-frame
+ * allocation). Inactive followers are hidden with a zero-scale matrix.
  */
 export class CapturedEntourage implements GameSystem {
   private group = new THREE.Group()
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
   private followers: Follower[] = []
-  private scratch = new THREE.Vector3()
+  private body!: THREE.InstancedMesh
+  private core!: THREE.InstancedMesh
+  private halo!: THREE.InstancedMesh
   private t = 0
+
+  // Reused scratch - never allocate per frame.
+  private scratch = new THREE.Vector3()
+  private mtx = new THREE.Matrix4()
+  private quat = new THREE.Quaternion()
+  private sclV = new THREE.Vector3()
+  private euler = new THREE.Euler()
+  private col = new THREE.Color()
+  private spin = 0
 
   // A small neon palette to tint each captured alien from.
   private static readonly PALETTE = [0x49e0ff, 0xff5fd2, 0x7cff5f, 0xffd24a, 0xb37cff, 0xff8a5f]
+  private static readonly ZERO_SCALE = new THREE.Vector3(0, 0, 0)
+
+  // Local part offsets/scales matching the original group children.
+  private static readonly BODY_SCALE = new THREE.Vector3(1, 0.9, 1)
+  private static readonly CORE_OFFSET = new THREE.Vector3(0, 0.04, 0.16)
+  private static readonly HALO_OFFSET = new THREE.Vector3(0, 0.04, 0.17)
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
@@ -50,37 +71,76 @@ export class CapturedEntourage implements GameSystem {
     const coreGeo = this.ownG(new THREE.SphereGeometry(0.1, 10, 8))
     const haloGeo = this.ownG(new THREE.RingGeometry(0.18, 0.28, 16))
 
+    // One material per part type, shared across all instances. Per-follower tint
+    // is delivered through the per-instance color (instanceColor), which multiplies
+    // the material color. We keep the material color white so the instance color is
+    // the tint directly. For the body's emissive glow we patch the shader so the
+    // instance color also tints emissive, preserving the original look where the
+    // body both diffuse-colors AND emissive-glows in its tint.
+    const bodyMat = this.own(new THREE.MeshStandardMaterial({
+      color: 0xffffff, metalness: 0.2, roughness: 0.5,
+      emissive: 0xffffff, emissiveIntensity: 0.6,
+      transparent: true, opacity: 0.85,
+    }))
+    bodyMat.onBeforeCompile = (shader) => {
+      // Multiply emissive by the per-instance color so each follower glows its tint.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n#ifdef USE_INSTANCING_COLOR\n totalEmissiveRadiance *= vColor;\n#endif',
+      )
+    }
+    // core/halo are additive; tint+pulse-brightness are baked into the instance color.
+    const coreMat = this.own(new THREE.MeshBasicMaterial({
+      color: 0xffffff, blending: THREE.AdditiveBlending, fog: false,
+    }))
+    const haloMat = this.own(new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide, fog: false,
+    }))
+
+    this.body = new THREE.InstancedMesh(bodyGeo, bodyMat, max)
+    this.core = new THREE.InstancedMesh(coreGeo, coreMat, max)
+    this.halo = new THREE.InstancedMesh(haloGeo, haloMat, max)
+    for (const im of [this.body, this.core, this.halo]) {
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      // The posse spring-follows behind the player, so the instanced bounding
+      // sphere (built at the local origin) doesn't reflect the trailing world
+      // position - disable frustum culling so a follower never pops out when it's
+      // behind you. (Property preserved from the pre-instancing per-mesh fix.)
+      im.frustumCulled = false
+      im.count = max
+      this.group.add(im)
+    }
+    // Allocate the per-instance color buffers (setColorAt needs them present).
+    this.col.set(0xffffff)
+    for (let i = 0; i < max; i++) {
+      this.body.setColorAt(i, this.col)
+      this.core.setColorAt(i, this.col)
+      this.halo.setColorAt(i, this.col)
+    }
+
     for (let i = 0; i < max; i++) {
       const tint = CapturedEntourage.PALETTE[i % CapturedEntourage.PALETTE.length]
-      const bodyMat = this.own(new THREE.MeshStandardMaterial({
-        color: tint, metalness: 0.2, roughness: 0.5, emissive: tint, emissiveIntensity: 0.6,
-        transparent: true, opacity: 0.85,
-      }))
-      const coreMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffffff, blending: THREE.AdditiveBlending, fog: false }))
-      const haloMat = this.own(new THREE.MeshBasicMaterial({
-        color: tint, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending,
-        depthWrite: false, side: THREE.DoubleSide, fog: false,
-      }))
-
-      const g = new THREE.Group()
-      const body = new THREE.Mesh(bodyGeo, bodyMat); body.scale.set(1, 0.9, 1); g.add(body)
-      const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(0, 0.04, 0.16); g.add(core)
-      const halo = new THREE.Mesh(haloGeo, haloMat); halo.position.set(0, 0.04, 0.17); g.add(halo)
-      // The posse spring-follows behind the player, so the child bounding spheres
-      // (computed at the local origin) don't reflect the trailing world position -
-      // disable frustum culling so a follower never pops out when it's behind you.
-      body.frustumCulled = false; core.frustumCulled = false; halo.frustumCulled = false
-
-      g.visible = false
-      this.group.add(g)
-      this.followers.push({ group: g, core: coreMat, halo: haloMat, pos: new THREE.Vector3(), vel: new THREE.Vector3(), phase: i * 1.7, placed: false })
+      // Start every instance hidden (zero-scale) until activated by capture count.
+      this.mtx.makeScale(0, 0, 0)
+      this.body.setMatrixAt(i, this.mtx)
+      this.core.setMatrixAt(i, this.mtx)
+      this.halo.setMatrixAt(i, this.mtx)
+      this.followers.push({
+        pos: new THREE.Vector3(), vel: new THREE.Vector3(),
+        phase: i * 1.7, tint: new THREE.Color(tint), placed: false,
+      })
     }
+    this.body.instanceMatrix.needsUpdate = true
+    this.core.instanceMatrix.needsUpdate = true
+    this.halo.instanceMatrix.needsUpdate = true
 
     scene.add(this.group)
   }
 
   update(dt: number) {
     this.t += dt
+    this.spin += dt * 0.9 // slow spin shared by all (matches per-follower rotation.y rate)
     const p = this.deps.focus()
     const yaw = this.deps.yaw()
     const n = Math.max(0, Math.min(this.followers.length, Math.floor(this.deps.count())))
@@ -92,10 +152,16 @@ export class CapturedEntourage implements GameSystem {
     for (let i = 0; i < this.followers.length; i++) {
       const f = this.followers[i]
       if (i >= n) {
-        if (f.group.visible) { f.group.visible = false; f.placed = false }
+        if (f.placed) {
+          // Hide with a zero-scale matrix across all three parts.
+          this.mtx.compose(this.scratch.set(0, 0, 0), this.quat.identity(), CapturedEntourage.ZERO_SCALE)
+          this.body.setMatrixAt(i, this.mtx)
+          this.core.setMatrixAt(i, this.mtx)
+          this.halo.setMatrixAt(i, this.mtx)
+          f.placed = false
+        }
         continue
       }
-      f.group.visible = true
 
       // Formation slot: rows fall back in a loose V, alternating left/right.
       const row = Math.floor(i / 2)
@@ -119,18 +185,52 @@ export class CapturedEntourage implements GameSystem {
         f.pos.addScaledVector(f.vel, Math.min(1, dt * 9))
       }
 
-      f.group.position.copy(f.pos)
-      f.group.rotation.y += dt * 0.9 // slow spin
-      f.group.rotation.z = Math.sin(this.t * 1.4 + f.phase) * 0.18
-      // Gentle pulse on the bright core + halo.
+      // Per-follower orientation: slow spin (y) + sway (z), matching the original.
+      const rotZ = Math.sin(this.t * 1.4 + f.phase) * 0.18
+      this.euler.set(0, this.spin, rotZ)
+      this.quat.setFromEuler(this.euler)
+
+      // Body: scaled (1, 0.9, 1), centered on the follower position.
+      this.mtx.compose(f.pos, this.quat, CapturedEntourage.BODY_SCALE)
+      this.body.setMatrixAt(i, this.mtx)
+      this.col.copy(f.tint)
+      this.body.setColorAt(i, this.col)
+
+      // Core + halo: local offsets rotated by the follower orientation, then placed.
       const pulse = 0.6 + 0.4 * Math.sin(this.t * 3 + f.phase)
-      f.core.opacity = 0.7 + pulse * 0.3
-      f.core.transparent = true
-      f.halo.opacity = 0.3 + pulse * 0.3
+
+      this.scratch.copy(CapturedEntourage.CORE_OFFSET).applyQuaternion(this.quat).add(f.pos)
+      this.mtx.compose(this.scratch, this.quat, this.sclV.set(1, 1, 1))
+      this.core.setMatrixAt(i, this.mtx)
+      // Core was white at per-follower opacity 0.7+pulse*0.3 (additive). Fold that
+      // brightness into the instance color so it pulses identically without a
+      // per-instance material opacity (which InstancedMesh can't vary).
+      const coreB = 0.7 + pulse * 0.3
+      this.col.setRGB(coreB, coreB, coreB)
+      this.core.setColorAt(i, this.col)
+
+      this.scratch.copy(CapturedEntourage.HALO_OFFSET).applyQuaternion(this.quat).add(f.pos)
+      this.mtx.compose(this.scratch, this.quat, this.sclV.set(1, 1, 1))
+      this.halo.setMatrixAt(i, this.mtx)
+      // Halo: tint at material opacity 0.45, pulsed 0.3+pulse*0.3 (additive). Bake
+      // the (pulsedOpacity / baseOpacity) scalar into the tint's brightness.
+      const haloB = (0.3 + pulse * 0.3) / 0.45
+      this.col.copy(f.tint).multiplyScalar(haloB)
+      this.halo.setColorAt(i, this.col)
     }
+
+    this.body.instanceMatrix.needsUpdate = true
+    this.core.instanceMatrix.needsUpdate = true
+    this.halo.instanceMatrix.needsUpdate = true
+    if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true
+    if (this.core.instanceColor) this.core.instanceColor.needsUpdate = true
+    if (this.halo.instanceColor) this.halo.instanceColor.needsUpdate = true
   }
 
   dispose() {
+    this.body.dispose()
+    this.core.dispose()
+    this.halo.dispose()
     for (const g of this.geos) g.dispose()
     for (const m of this.mats) m.dispose()
   }

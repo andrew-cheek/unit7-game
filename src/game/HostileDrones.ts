@@ -10,6 +10,14 @@ import type { Capturable } from './Game'
  * register as Capturables, so the existing net/missiles destroy them for a bounty
  * with no special-casing. In contact range a drone does a quick zap-lunge that
  * knocks the player back (onZap impulse), then recoils. Earth only; respawns.
+ *
+ * Rendering: the fleet is instanced per part. Every drone shares one InstancedMesh
+ * per part (body / shell / eye / scan / thruster), so the whole fleet is ~5 draw
+ * calls instead of ~6 per drone. Per-frame each drone's world matrix is composed
+ * once and combined with each part's static local matrix via setMatrixAt (scratch
+ * reused, no per-frame heap allocation). Inactive drones are hidden by writing a
+ * zero-scale matrix. The eye's per-drone glow pulse rides on per-instance color
+ * (setColorAt), which MeshBasicMaterial multiplies against its white base.
  */
 
 interface Deps {
@@ -24,9 +32,9 @@ interface Deps {
 type DroneState = 'patrol' | 'chase'
 
 interface Drone {
-  group: THREE.Group
+  index: number // instance slot
   cap: Capturable
-  eyeMat: THREE.MeshBasicMaterial // pulsed per-drone
+  eyeColor: THREE.Color // per-drone eye glow, written to the eye InstancedMesh
   pos: THREE.Vector3 // shared with cap.position
   vel: THREE.Vector3
   home: THREE.Vector3
@@ -38,6 +46,7 @@ interface Drone {
   recoil: number // >0 while recoiling after a zap
   destroyed: boolean
   respawn: number // >0 while destroyed, counting down to respawn
+  visible: boolean // currently rendered (drives zero-scale hide)
 }
 
 const AREA = 130 // drones home within a +/-AREA square around origin
@@ -54,10 +63,30 @@ export class HostileDrones implements GameSystem {
   private drones: Drone[] = []
   private zone: Zone = 'earth'
 
+  // Instanced parts. One InstancedMesh per part type; thrusters pack 2 per drone.
+  private bodyMesh!: THREE.InstancedMesh
+  private shellMesh!: THREE.InstancedMesh
+  private eyeMesh!: THREE.InstancedMesh
+  private scanMesh!: THREE.InstancedMesh
+  private thrusterMesh!: THREE.InstancedMesh
+
+  // Static per-part local offsets (relative to the drone group). Built once.
+  private shellLocal = new THREE.Matrix4()
+  private eyeLocal = new THREE.Matrix4()
+  private scanLocal = new THREE.Matrix4()
+  private thrusterLocalL = new THREE.Matrix4()
+  private thrusterLocalR = new THREE.Matrix4()
+
   // scratch - reused every frame, no per-frame allocation
   private toPlayer = new THREE.Vector3()
   private toHome = new THREE.Vector3()
   private desired = new THREE.Vector3()
+  private mWorld = new THREE.Matrix4() // drone group world matrix
+  private mPart = new THREE.Matrix4() // world * local, per part
+  private qScratch = new THREE.Quaternion()
+  private eScratch = new THREE.Euler()
+  private sUnit = new THREE.Vector3(1, 1, 1)
+  private mHidden = new THREE.Matrix4().makeScale(0, 0, 0)
 
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
@@ -74,27 +103,46 @@ export class HostileDrones implements GameSystem {
 
     const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a1d24, metalness: 0.85, roughness: 0.35, emissive: 0x140404, emissiveIntensity: 0.4 }))
     const shellMat = this.own(new THREE.MeshStandardMaterial({ color: 0x3a3f4a, metalness: 0.7, roughness: 0.4 }))
+    // Eye base is white so the per-instance color (the glow pulse) shows through unmodified.
+    const eyeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }))
     const scanMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
     const thrusterMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffae3a, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
 
-    for (let i = 0; i < n; i++) {
-      const grp = new THREE.Group()
-      const body = new THREE.Mesh(bodyGeo, bodyMat); grp.add(body)
-      const shell = new THREE.Mesh(shellGeo, shellMat); shell.rotation.x = Math.PI / 2; grp.add(shell)
-      // Per-drone eye material so chasing drones can pulse independently.
-      const eyeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3322, fog: false }))
-      const eye = new THREE.Mesh(eyeGeo, eyeMat); eye.position.set(0, 0.04, 0.55); grp.add(eye)
-      const scan = new THREE.Mesh(scanGeo, scanMat); scan.rotation.x = Math.PI / 2; grp.add(scan)
-      for (const sx of [-0.55, 0.55]) {
-        const t = new THREE.Mesh(thrusterGeo, thrusterMat); t.position.set(sx, -0.3, 0); grp.add(t)
-      }
-      grp.visible = false
-      this.group.add(grp)
+    // Static local transforms, matching the original per-mesh setup.
+    this.shellLocal.makeRotationX(Math.PI / 2)
+    this.eyeLocal.makeTranslation(0, 0.04, 0.55)
+    this.scanLocal.makeRotationX(Math.PI / 2)
+    this.thrusterLocalL.makeTranslation(-0.55, -0.3, 0)
+    this.thrusterLocalR.makeTranslation(0.55, -0.3, 0)
 
+    this.bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, n)
+    this.shellMesh = new THREE.InstancedMesh(shellGeo, shellMat, n)
+    this.eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, n)
+    this.scanMesh = new THREE.InstancedMesh(scanGeo, scanMat, n)
+    this.thrusterMesh = new THREE.InstancedMesh(thrusterGeo, thrusterMat, n * 2)
+    for (const im of [this.bodyMesh, this.shellMesh, this.eyeMesh, this.scanMesh, this.thrusterMesh]) {
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      im.frustumCulled = false // drones roam a wide area; cull per-instance is moot here
+      this.group.add(im)
+    }
+    // Seed eye instance colors (enables instanceColor buffer) and start hidden.
+    const seed = new THREE.Color(1, 0.18, 0.13)
+    for (let i = 0; i < n; i++) {
+      this.eyeMesh.setColorAt(i, seed)
+      this.bodyMesh.setMatrixAt(i, this.mHidden)
+      this.shellMesh.setMatrixAt(i, this.mHidden)
+      this.eyeMesh.setMatrixAt(i, this.mHidden)
+      this.scanMesh.setMatrixAt(i, this.mHidden)
+      this.thrusterMesh.setMatrixAt(i * 2, this.mHidden)
+      this.thrusterMesh.setMatrixAt(i * 2 + 1, this.mHidden)
+    }
+    if (this.eyeMesh.instanceColor) this.eyeMesh.instanceColor.needsUpdate = true
+
+    for (let i = 0; i < n; i++) {
       const pos = new THREE.Vector3()
       const drone: Drone = {
-        group: grp,
-        eyeMat,
+        index: i,
+        eyeColor: new THREE.Color(1, 0.18, 0.13),
         pos,
         vel: new THREE.Vector3(),
         home: new THREE.Vector3(),
@@ -106,15 +154,66 @@ export class HostileDrones implements GameSystem {
         recoil: 0,
         destroyed: false,
         respawn: 0,
+        visible: false,
         cap: { position: pos, alive: true, capture: () => this.onCaptured(drone) },
       }
       this.placeFar(drone)
       this.drones.push(drone)
       capturables.push(drone.cap)
     }
+    // placeFar leaves drones positioned; write their matrices once so the first
+    // frame (and any frame where update early-returns) renders them correctly.
+    for (const d of this.drones) this.writeDrone(d, true, 0, d.spin)
 
     this.group.visible = false
     scene.add(this.group)
+  }
+
+  /**
+   * Compose a drone's group world matrix from its position + heading (faceY) +
+   * spin (spinZ) and stamp every instanced part. Pass visible=false to hide the
+   * drone by writing zero-scale matrices into all its instance slots.
+   */
+  private writeDrone(d: Drone, visible: boolean, faceY = 0, spinZ = 0) {
+    if (!visible) {
+      if (!d.visible) return // already hidden
+      d.visible = false
+      this.bodyMesh.setMatrixAt(d.index, this.mHidden)
+      this.shellMesh.setMatrixAt(d.index, this.mHidden)
+      this.eyeMesh.setMatrixAt(d.index, this.mHidden)
+      this.scanMesh.setMatrixAt(d.index, this.mHidden)
+      this.thrusterMesh.setMatrixAt(d.index * 2, this.mHidden)
+      this.thrusterMesh.setMatrixAt(d.index * 2 + 1, this.mHidden)
+      this.flagMatrices()
+      return
+    }
+    d.visible = true
+
+    // Group transform: position + rotation.y (face) + rotation.z (spin).
+    this.eScratch.set(0, faceY, spinZ, 'XYZ')
+    this.qScratch.setFromEuler(this.eScratch)
+    this.mWorld.compose(d.pos, this.qScratch, this.sUnit)
+
+    this.bodyMesh.setMatrixAt(d.index, this.mWorld) // body has no local offset
+    this.mPart.multiplyMatrices(this.mWorld, this.shellLocal)
+    this.shellMesh.setMatrixAt(d.index, this.mPart)
+    this.mPart.multiplyMatrices(this.mWorld, this.eyeLocal)
+    this.eyeMesh.setMatrixAt(d.index, this.mPart)
+    this.mPart.multiplyMatrices(this.mWorld, this.scanLocal)
+    this.scanMesh.setMatrixAt(d.index, this.mPart)
+    this.mPart.multiplyMatrices(this.mWorld, this.thrusterLocalL)
+    this.thrusterMesh.setMatrixAt(d.index * 2, this.mPart)
+    this.mPart.multiplyMatrices(this.mWorld, this.thrusterLocalR)
+    this.thrusterMesh.setMatrixAt(d.index * 2 + 1, this.mPart)
+    this.flagMatrices()
+  }
+
+  private flagMatrices() {
+    this.bodyMesh.instanceMatrix.needsUpdate = true
+    this.shellMesh.instanceMatrix.needsUpdate = true
+    this.eyeMesh.instanceMatrix.needsUpdate = true
+    this.scanMesh.instanceMatrix.needsUpdate = true
+    this.thrusterMesh.instanceMatrix.needsUpdate = true
   }
 
   /** Drop a drone at a fresh home point, away from the player (spawn + respawn). */
@@ -130,7 +229,6 @@ export class HostileDrones implements GameSystem {
     d.home.set(x, 0, z)
     d.pos.set(x, this.deps.groundY(x, z) + HOVER, z)
     d.vel.set(0, 0, 0)
-    d.group.position.copy(d.pos)
     d.state = 'patrol'
   }
 
@@ -138,9 +236,9 @@ export class HostileDrones implements GameSystem {
   private onCaptured(d: Drone): number {
     d.destroyed = true
     d.cap.alive = false
-    d.group.visible = false
     d.vel.set(0, 0, 0)
     d.respawn = 6 + Math.random() * 3
+    this.writeDrone(d, false)
     return 60
   }
 
@@ -164,9 +262,10 @@ export class HostileDrones implements GameSystem {
           d.destroyed = false
           this.placeFar(d)
           d.cap.alive = true
-          d.group.visible = true
+          // re-show on next write below
+        } else {
+          continue
         }
-        continue
       }
 
       if (d.zapCd > 0) d.zapCd -= dt
@@ -232,23 +331,30 @@ export class HostileDrones implements GameSystem {
       const target = d.state === 'chase' ? Math.max(ground, focus.y + 1.2) : ground
       d.pos.y += (target + Math.sin(d.bob * 2.2) * 0.18 - d.pos.y) * Math.min(1, dt * 4)
 
-      d.group.position.copy(d.pos)
       // Face the player while chasing, else heading.
-      const face = d.state === 'chase'
+      const faceY = d.state === 'chase'
         ? Math.atan2(this.toPlayer.x, this.toPlayer.z)
         : Math.atan2(d.vel.x, d.vel.z)
-      d.group.rotation.y = face
-      d.group.rotation.z = d.spin // spinning shell/scanner
+      const spinZ = d.spin // spinning shell/scanner
 
       // Eye glow: pulse brighter and faster while chasing.
       const targetGlow = d.state === 'chase' ? 1.6 + 0.4 * Math.sin(d.spin * 3) : 0.7
       d.glow += (targetGlow - d.glow) * Math.min(1, dt * 6)
-      d.eyeMat.color.setRGB(Math.min(1, d.glow), Math.min(0.4, d.glow * 0.18), 0.13)
+      d.eyeColor.setRGB(Math.min(1, d.glow), Math.min(0.4, d.glow * 0.18), 0.13)
+      this.eyeMesh.setColorAt(d.index, d.eyeColor)
+
+      this.writeDrone(d, true, faceY, spinZ)
     }
+    if (this.eyeMesh.instanceColor) this.eyeMesh.instanceColor.needsUpdate = true
   }
 
   dispose() {
     for (const g of this.geos) g.dispose()
     for (const m of this.mats) m.dispose()
+    this.bodyMesh.dispose()
+    this.shellMesh.dispose()
+    this.eyeMesh.dispose()
+    this.scanMesh.dispose()
+    this.thrusterMesh.dispose()
   }
 }

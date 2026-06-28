@@ -17,13 +17,23 @@ interface Deps {
  * them. On contact a crate vanishes, fires a pooled additive shard-burst, and
  * pays a few credits via a Game callback, then respawns after a cooldown so the
  * streets stay populated. Earth-gated; shared geo + pooled bursts, disposed together.
+ *
+ * Every crate is the same two boxes (dark body + neon wireframe edge), so both
+ * are drawn as a single InstancedMesh each: ~36 per-crate draws collapse to 2.
+ * Crates bob/spin, so per-instance matrices are rebuilt each frame from cheap
+ * scratch objects (no per-frame heap allocation). Per-crate edge tint rides on
+ * instanceColor; the global neon pulse rides on the (single) edge material's
+ * opacity, identical to the old per-child opacity write. Smashed/cooled crates
+ * are hidden by writing a zero-scale matrix.
  */
 
 interface Crate {
-  group: THREE.Group
   x: number
   y: number // ground height the crate sits on
   z: number
+  rot: number // current spin angle
+  scale: number // current uniform scale (respawn pop-in grow-back)
+  visible: boolean // hidden while smashed/cooling
   credits: number
   cooldown: number // >0 = smashed, counting down to respawn
 }
@@ -59,6 +69,16 @@ export class NeonCrates implements GameSystem {
   private zone: Zone = 'earth'
   private t = 0
 
+  private bodyMesh!: THREE.InstancedMesh
+  private edgeMesh!: THREE.InstancedMesh
+  private edgeMat!: THREE.MeshBasicMaterial
+  // Scratch reused every frame to avoid per-frame heap allocation.
+  private mtx = new THREE.Matrix4()
+  private pos = new THREE.Vector3()
+  private quat = new THREE.Quaternion()
+  private scl = new THREE.Vector3()
+  private up = new THREE.Vector3(0, 1, 0)
+
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
 
@@ -71,29 +91,35 @@ export class NeonCrates implements GameSystem {
     // Shared geometry across every crate: a dark body box + a wireframe edge box.
     const bodyGeo = this.ownG(new THREE.BoxGeometry(SIZE, SIZE, SIZE))
     const edgeGeo = this.ownG(new THREE.BoxGeometry(SIZE * 1.02, SIZE * 1.02, SIZE * 1.02))
-    // Shared dark body material; edge materials are per-tint (a small palette).
+    // Shared dark body material; one edge material whose tint varies per instance.
     const bodyMat = this.own(new THREE.MeshBasicMaterial({ color: 0x0a0e1a, fog: true }))
+    this.edgeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     const tints = [0x49e0ff, 0x9bff6a, 0xffd24a, 0xb07cff, 0xff5ad0]
-    const edgeMats = tints.map((t) =>
-      this.own(new THREE.MeshBasicMaterial({ color: t, wireframe: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
-    )
+    const tintColors = tints.map((t) => new THREE.Color(t))
+
+    // Two InstancedMeshes carry all crates: collapses 2*n per-crate draws to 2.
+    this.bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, n)
+    this.edgeMesh = new THREE.InstancedMesh(edgeGeo, this.edgeMat, n)
+    this.bodyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.edgeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.group.add(this.bodyMesh)
+    this.group.add(this.edgeMesh)
 
     for (let i = 0; i < n; i++) {
       const x = (rnd() * 2 - 1) * reach
       const z = (rnd() * 2 - 1) * reach
       const gy = this.deps.groundY(x, z)
-      const edgeMat = edgeMats[(rnd() * edgeMats.length) | 0]
+      const tint = tintColors[(rnd() * tintColors.length) | 0]
 
-      const group = new THREE.Group()
-      group.position.set(x, gy + SIZE * 0.5, z)
-      group.rotation.y = rnd() * Math.PI * 2
-      group.add(new THREE.Mesh(bodyGeo, bodyMat))
-      group.add(new THREE.Mesh(edgeGeo, edgeMat))
-      this.group.add(group)
+      const rot = rnd() * Math.PI * 2
+      this.crates.push({ x, y: gy, z, rot, scale: 1, visible: true, credits: 8 + ((rnd() * 8) | 0) /* 8..15 */, cooldown: 0 })
 
-      const credits = 8 + ((rnd() * 8) | 0) // 8..15
-      this.crates.push({ group, x, y: gy, z, credits, cooldown: 0 })
+      // Per-crate edge tint via instanceColor (body stays the shared dark mat).
+      this.edgeMesh.setColorAt(i, tint)
     }
+    if (this.edgeMesh.instanceColor) this.edgeMesh.instanceColor.needsUpdate = true
+    // Seed initial matrices so crates render correctly before the first update.
+    this.writeMatrices()
 
     // Pooled shard bursts: relocated to wherever the latest smash happens. A small
     // pool covers two crates popping close together; never allocate per smash.
@@ -120,6 +146,27 @@ export class NeonCrates implements GameSystem {
 
     this.group.visible = false
     scene.add(this.group)
+  }
+
+  /** Rebuild every crate's instance matrix from its current state (scratch-only). */
+  private writeMatrices() {
+    this.scl.set(1, 1, 1)
+    for (let i = 0; i < this.crates.length; i++) {
+      const c = this.crates[i]
+      if (!c.visible || c.scale <= 0) {
+        // Hide by collapsing to zero scale; no separate visibility flag on instances.
+        this.mtx.makeScale(0, 0, 0)
+      } else {
+        this.pos.set(c.x, c.y + SIZE * 0.5 + Math.sin(this.t * 1.6 + c.x) * 0.12, c.z)
+        this.quat.setFromAxisAngle(this.up, c.rot)
+        this.scl.setScalar(c.scale)
+        this.mtx.compose(this.pos, this.quat, this.scl)
+      }
+      this.bodyMesh.setMatrixAt(i, this.mtx)
+      this.edgeMesh.setMatrixAt(i, this.mtx)
+    }
+    this.bodyMesh.instanceMatrix.needsUpdate = true
+    this.edgeMesh.instanceMatrix.needsUpdate = true
   }
 
   setZone(zone: Zone) {
@@ -166,26 +213,28 @@ export class NeonCrates implements GameSystem {
     for (const c of this.crates) {
       if (c.cooldown > 0) {
         c.cooldown -= dt
-        if (c.cooldown <= 0) { c.group.visible = true; c.group.scale.setScalar(0.01) } // pop back in
+        if (c.cooldown <= 0) { c.visible = true; c.scale = 0.01 } // pop back in
         else continue
       }
       // Grow back to full size after a respawn pop-in.
-      if (c.group.scale.x < 1) c.group.scale.setScalar(Math.min(1, c.group.scale.x + dt * 4))
-      // Idle hover + neon pulse (drive opacity via the edge child only).
-      c.group.position.y = c.y + SIZE * 0.5 + Math.sin(this.t * 1.6 + c.x) * 0.12
-      c.group.rotation.y += dt * 0.4
-      const edge = c.group.children[1] as THREE.Mesh
-      ;(edge.material as THREE.MeshBasicMaterial).opacity = pulse
+      if (c.scale < 1) c.scale = Math.min(1, c.scale + dt * 4)
+      // Idle spin (hover is folded into the per-frame matrix in writeMatrices).
+      c.rot += dt * 0.4
 
       // Smash on contact: close in XZ and within a vertical band at ground level.
       const dx = c.x - f.x, dz = c.z - f.z
-      if (dx * dx + dz * dz < REACH * REACH && Math.abs(f.y - c.y) < VBAND) {
+      if (c.visible && dx * dx + dz * dz < REACH * REACH && Math.abs(f.y - c.y) < VBAND) {
         this.burst(c.x, c.y + SIZE * 0.6, c.z)
         this.deps.onSmash(c.x, c.y + SIZE * 0.6, c.z, c.credits)
         c.cooldown = RESPAWN
-        c.group.visible = false
+        c.visible = false
       }
     }
+
+    // Global neon pulse, applied once to the shared edge material.
+    this.edgeMat.opacity = pulse
+    // Rebuild instance matrices for hover/spin/scale/visibility this frame.
+    this.writeMatrices()
 
     // Animate every live burst: fly out, fall, fade.
     for (const b of this.bursts) {
@@ -205,6 +254,8 @@ export class NeonCrates implements GameSystem {
   }
 
   dispose() {
+    this.bodyMesh.dispose()
+    this.edgeMesh.dispose()
     for (const g of this.geos) g.dispose()
     for (const m of this.mats) m.dispose()
   }
