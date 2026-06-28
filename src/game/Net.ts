@@ -99,6 +99,22 @@ export const PROD_HOST = ENV_HOST || 'party.humanoidrobots.com'
 /** A real production host is configured (not a placeholder). */
 export const HAS_PROD_HOST = !!PROD_HOST
 
+/** A stable per-browser id, persisted in localStorage, so a reconnecting player
+ *  reclaims their server-side score row instead of being treated as brand new. */
+function clientUid(): string {
+  try {
+    if (typeof localStorage === 'undefined') return ''
+    let u = localStorage.getItem('u7_uid')
+    if (!u) {
+      u = 'u' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36)
+      localStorage.setItem('u7_uid', u)
+    }
+    return u
+  } catch {
+    return ''
+  }
+}
+
 export class Net {
   private ws: WebSocket | null = null
   private url: string
@@ -107,6 +123,7 @@ export class Net {
   private closed = false
   private retry = 0
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private uid = clientUid()
   /** Our own connection id (known after `welcome`); used to spot our own claims. */
   myId = ''
 
@@ -134,7 +151,7 @@ export class Net {
     ws.onopen = () => {
       this.retry = 0
       this.handlers.onStatus(true)
-      this.send({ t: 'join', name: this.name })
+      this.send({ t: 'join', name: this.name, uid: this.uid })
     }
     ws.onmessage = (ev) => this.onMessage(ev.data)
     ws.onclose = () => {
