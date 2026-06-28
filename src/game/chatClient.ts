@@ -30,6 +30,9 @@ export interface ChatClient {
 
 const DEFAULT_ROOM = 'global'
 const DEFAULT_POLL_MS = 1500
+// Soft cap on the dedupe set before it is pruned back to boundary keys. Picked
+// to be well above any single poll batch so the prune is a rare, cheap O(n) sweep.
+const SEEN_CAP = 400
 
 /** Generate a stable-per-session id: 'c' + 12 base36 chars. Not an identity —
  *  just enough to dedupe and to tag the sender's own messages for the UI. */
@@ -89,6 +92,18 @@ export function netlifyChatClient(opts?: { room?: string; pollMs?: number; selfI
         if (m.t > lastTs) lastTs = m.t // advance the cursor
         handler?.(m)
       }
+      // Bound `seen`: the next poll asks `since=lastTs`, so the server can only
+      // re-return messages with t === lastTs (the inclusive boundary). Anything
+      // with t < lastTs will never be refetched, so its dedupe key is dead weight.
+      // Prune to just the boundary keys (t === lastTs) — this is the minimal set
+      // that still prevents duplicate delivery and cannot drop a future message.
+      // Guard with a cap so the rebuild only runs when the set has actually grown.
+      if (seen.size > SEEN_CAP) {
+        const boundary = `:${lastTs}`
+        for (const key of seen) {
+          if (!key.endsWith(boundary)) seen.delete(key)
+        }
+      }
     } catch {
       // Network blip — the next tick retries from the same cursor. Chat is
       // best-effort; a dropped poll is harmless.
@@ -126,6 +141,11 @@ export function netlifyChatClient(opts?: { room?: string; pollMs?: number; selfI
         timer = null
       }
       handler = null
+      // Release the dedupe set so it does not survive between sessions. A later
+      // start() re-seeds lastTs to Date.now(), so the empty set is correct: there
+      // is no prior boundary to guard once polling restarts from a fresh cursor.
+      seen.clear()
+      lastTs = 0
     },
   }
 }

@@ -965,19 +965,20 @@ export class Game {
       toggleWarp: () => this.toggleWarp(),
       warpInto: (id: string) => this.warpInto(id),
       warpRevert: () => this.warpRevert(),
-      // Kid-safe chat: SEND gate (parent flag) + filter, then relay to the net.
+      // Kid-safe chat: SEND gate (parent flag) + filter + a safe display name.
       sendChat: (text: string) => {
         if (!this.chatEnabled) return
         const v = filterChat(text)
         if (!v.allowed) return
-        this.chat().send(loadCallsign() || 'PILOT', v.text)
+        this.chat().send(this.safeChatName(loadCallsign() || 'PILOT'), v.text)
       },
       setChatSink: (fn: (m: ChatMessage) => void) => { this.chatSink = fn },
       refreshChatEnabled: () => {
         this.chatEnabled = isChatEnabled()
-        // Poll only while a parent has chat on; the receive gate is double-checked
-        // when a line arrives so a mid-poll disable hides it immediately.
-        if (this.chatEnabled) this.chat().start((m) => { if (this.chatEnabled) this.chatSink?.(m) })
+        // Poll only while a parent has chat on; deliverChat double-checks the gate
+        // AND re-filters every received line, so a mid-poll disable hides it and no
+        // unsafe text can ever reach the UI even if the server filter regressed.
+        if (this.chatEnabled) this.chat().start((m) => this.deliverChat(m))
         else this.chatClient?.stop()
       },
       // Anonymous cloud save surface for the save / recovery panel.
@@ -2720,8 +2721,25 @@ export class Game {
    * disabled never sees other players' lines, even if the room relays them.
    */
   private onNetChat(m: ChatMessage) {
+    this.deliverChat(m)
+  }
+
+  /** Clamp a display name to something safe (server already sanitizes, but a
+   *  callsign set via restore/localStorage could bypass the join-time check). */
+  private safeChatName(name: string): string {
+    const n = (name || '').slice(0, 16)
+    if (!n || /\d{4,}/.test(n) || !filterChat(n).allowed) return 'PILOT'
+    return n
+  }
+
+  /** Single receive path for chat from any source. Enforces the parent gate AND
+   *  re-runs the safety filter client-side (defense-in-depth: the UI never shows
+   *  unfiltered text even if the server filter ever weakened). */
+  private deliverChat(m: ChatMessage) {
     if (!this.chatEnabled) return
-    this.chatSink?.(m)
+    const v = filterChat(m.text)
+    if (!v.allowed) return
+    this.chatSink?.({ ...m, name: this.safeChatName(m.name), text: v.text })
   }
 
   /** The callback surface the MultiplayerManager uses to read player state and
