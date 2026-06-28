@@ -45,6 +45,12 @@ export class Zones {
   // The zone the world is currently showing. Seeded to the constructor default so
   // the initial setActive('earth') is a no-op and never emits a transition event.
   private activeZone: Zone = 'earth'
+  // CanvasTextures (portal labels + the Moon's Earth globe) aren't reached by
+  // disposePlanet's geo/material traversal, so track every one here and free them
+  // in dispose() (matches the AdBlimps/CitySpectacle pattern). All three dispose
+  // paths funnel through dispose(), so this is the single owner - no double-free.
+  private texs: THREE.Texture[] = []
+  private ownT<T extends THREE.Texture>(t: T): T { this.texs.push(t); return t }
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -200,7 +206,7 @@ export class Zones {
     ctx.shadowBlur = 22
     ctx.fillStyle = '#eaf6ff'
     ctx.fillText(text, cv.width / 2, cv.height / 2)
-    const tex = new THREE.CanvasTexture(cv)
+    const tex = this.ownT(new THREE.CanvasTexture(cv))
     tex.colorSpace = THREE.SRGBColorSpace
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
     sprite.scale.set(6.5, 1.6, 1)
@@ -245,7 +251,7 @@ export class Zones {
     for (let i = 0; i < 30; i++) { ctx.beginPath(); ctx.ellipse(Math.random() * 512, Math.random() * 256, 12 + Math.random() * 34, 5 + Math.random() * 12, 0, 0, 6.28); ctx.fill() }
     ctx.globalAlpha = 1; ctx.fillStyle = '#dfeaff'
     ctx.fillRect(0, 0, 512, 16); ctx.fillRect(0, 240, 512, 16)
-    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    const tex = this.ownT(new THREE.CanvasTexture(cv)); tex.colorSpace = THREE.SRGBColorSpace
     const earth = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 32), new THREE.MeshBasicMaterial({ map: tex, fog: false }))
     earth.position.copy(pos); earth.rotation.z = 0.32
     group.add(earth)
@@ -732,11 +738,6 @@ export class Zones {
 
   private buildMoon(): PlanetEnv {
     const craters: Array<[number, number, number, number]> = []
-    let seed = 1234
-    const rnd = () => {
-      seed = (seed * 9301 + 49297) % 233280
-      return seed / 233280
-    }
     for (let i = 0; i < 14; i++) craters.push([randRange(-160, 160), randRange(-160, 160), randRange(12, 34), randRange(2.5, 6)])
     const displace = (x: number, z: number) => {
       const rad = Math.hypot(x, z)
@@ -759,7 +760,6 @@ export class Zones {
     group.add(terrain)
     // Iconic Earthrise: a big, detailed Earth low over the regolith horizon.
     const earthSpin = this.buildEarthGlobe(group, new THREE.Vector3(150, 96, -260), 64)
-    void rnd
 
     const portals = [
       this.makePortal('earth', config.palette.lime, new THREE.Vector3(-8, 0, 0)),
@@ -979,6 +979,10 @@ export class Zones {
     for (const p of this.earthPortals) disposePlanet(p.group)
     this.mars?.dispose()
     this.moon?.dispose()
+    // CanvasTextures live outside the geo/material graph disposePlanet walks; free
+    // them here (whether or not the planet groups were ever built).
+    for (const t of this.texs) t.dispose()
+    this.texs.length = 0
   }
 }
 

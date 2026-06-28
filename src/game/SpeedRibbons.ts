@@ -49,8 +49,9 @@ export class SpeedRibbons implements GameSystem {
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
 
   constructor(scene: THREE.Scene, private deps: Deps) {
-    const low = config.tier.name === 'low'
-    this.segN = low ? 16 : 24
+    // Segment count scales with tier: medium gets a trimmed count between low and high.
+    const tier = config.tier.name
+    this.segN = tier === 'low' ? 16 : tier === 'medium' ? 20 : 24
 
     const head = new THREE.Color(0x49e0ff)
     for (const side of [-1, 1]) {

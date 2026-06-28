@@ -347,7 +347,11 @@ export class Vehicles {
       if (focus && v !== this.current && (v.kind === 'hovercar' || v.kind === 'speeder') && v.drive !== 'rail') {
         const dx = v.position.x - focus.x, dz = v.position.z - focus.z
         const near = dx * dx + dz * dz < VEHICLE_CULL_SQ
-        if (v.model.group.visible !== near && v.zoneShown) v.model.group.visible = near
+        // Effective visibility depends on BOTH zone membership and the near test, so
+        // re-entering the zone (zoneShown flips true) re-syncs to the cull state
+        // instead of popping in at whatever stale visibility it carried out.
+        const wantVisible = v.zoneShown && near
+        if (v.model.group.visible !== wantVisible) v.model.group.visible = wantVisible
       }
       // Skip vehicles hidden in the current zone (e.g. the dozens of rockets/cars
       // that aren't on this world). The one you're piloting is always visible, so
@@ -355,7 +359,9 @@ export class Vehicles {
       if (v !== this.current && !v.model.group.visible) continue
       // Ease the mech transform and drive the model's morph pose.
       if (v.morph !== v.morphTarget) {
-        v.morph += (v.morphTarget - v.morph) * Math.min(1, dt * 6)
+        // Frame-rate-independent exponential damping (a linear dt-lerp eases at
+        // different speeds per frame rate); snap once it's close to avoid lingering.
+        v.morph += (v.morphTarget - v.morph) * (1 - Math.exp(-6 * dt))
         if (Math.abs(v.morph - v.morphTarget) < 0.01) v.morph = v.morphTarget
       }
       v.model.setMorph?.(v.morph)
@@ -522,9 +528,12 @@ export class Vehicles {
     if (v.position.y <= restY + 0.06) {
       // On the surface (or climbing it): glue down and bank the climb rate as
       // upward velocity, so the lip of a ramp turns the climb into a launch.
-      const climb = (restY - prevY) / Math.max(dt, 1e-4)
+      // Floor dt at 1/120 so a tiny frame can't divide the climb into a huge
+      // spike off terrain noise, then ease velocity.y toward the (non-negative)
+      // climb so a one-frame bump can't hijack the launch before the hard clamp.
+      const climb = Math.max(0, (restY - prevY) / Math.max(dt, 1 / 120))
       v.position.y = restY
-      v.velocity.y = Math.max(0, Math.min(climb, cfg.maxLaunch))
+      v.velocity.y = Math.min(damp(v.velocity.y, climb, 18, dt), cfg.maxLaunch)
       v.grounded = true
     } else {
       v.grounded = false

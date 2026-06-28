@@ -50,8 +50,15 @@ export class Missiles {
   constructor(scene: THREE.Scene) {
     this.scene = scene
     scene.add(this.group)
+    // Tier-scale the pool preallocation: phones over-allocated VRAM by building
+    // the full desktop pools. Pools already drop emissions when exhausted, so
+    // smaller pools just cap concurrent visuals on weaker hardware.
+    const tier = config.tier.name
+    const ringCap = tier === 'low' ? 6 : tier === 'medium' ? 10 : 14
+    const missileCap = tier === 'low' ? 10 : tier === 'medium' ? 18 : 24
+    const blastCap = tier === 'low' ? 8 : tier === 'medium' ? 12 : 16
     // Pre-build a small ring pool (footsteps + shockwaves reuse these).
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < ringCap; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
       const mesh = new THREE.Mesh(this.ringGeo, mat)
       mesh.rotation.x = -Math.PI / 2 // lie flat on the ground
@@ -62,7 +69,7 @@ export class Missiles {
     // Pre-build the missile pool: each is a body sharing one material, with two
     // exhaust cones sharing the glow material. Reused across shots (sustained
     // mech fire used to allocate a fresh Mesh trio per shot and churn the GC).
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < missileCap; i++) {
       const mesh = new THREE.Mesh(this.bodyGeo, this.bodyMat)
       const head = new THREE.Mesh(this.headGeo, this.glowMat)
       head.position.y = 0.9
@@ -77,7 +84,7 @@ export class Missiles {
     }
     // Pre-build the blast pool: each keeps its own material so several blasts can
     // fade independently. Reused instead of allocated+disposed per detonation.
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < blastCap; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: 0xffb24d, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
       const mesh = new THREE.Mesh(this.blastGeo, mat)
       mesh.visible = false

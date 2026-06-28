@@ -39,7 +39,8 @@ export class GlowMotes implements GameSystem {
 
   constructor(scene: THREE.Scene, private deps: Deps) {
     const low = config.tier.name === 'low'
-    this.n = low ? 90 : 220
+    // Medium (iPad-class) sits ~65% of high, matching the tier's reduced fxScale.
+    this.n = low ? 90 : (config.tier.name === 'medium' ? 145 : 220)
     const rnd = mulberry32(740011)
 
     this.pos = new Float32Array(this.n * 3)

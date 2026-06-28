@@ -90,7 +90,10 @@ export class OrbitalTraffic implements GameSystem {
 
   constructor(scene: THREE.Scene, private deps: Deps) {
     const low = config.tier.name === 'low'
-    const count = low ? 4 : 7
+    const medium = config.tier.name === 'medium'
+    // Three-step fleet size so mid-range devices sit between the trimmed mobile
+    // fleet and the full desktop one rather than jumping straight to it.
+    const count = low ? 4 : medium ? 6 : 7
 
     // Shared geometries reused across every shuttle.
     const noseGeo = this.ownG(new THREE.ConeGeometry(0.9, 2.4, 12))

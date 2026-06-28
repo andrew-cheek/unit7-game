@@ -148,7 +148,11 @@ export function detectTier(override?: AssetQuality): AssetQuality {
     if (q === 'low' || q === 'medium' || q === 'high') return q
   }
 
-  if (isTouchDevice()) return 'low'
+  // Capable tablets — most notably the iPad Pro/Air — are powerful enough for the
+  // 'medium' preset, but the blanket touch check used to lump them in with phones at
+  // 'low'. Probe for an Apple-GPU, tablet-class, multi-core device and give it
+  // 'medium'; phones and weaker tablets still fall through to 'low'.
+  if (isTouchDevice()) return detectTabletTier()
 
   // GPU string probe. Software / mobile families -> low.
   try {
@@ -173,6 +177,34 @@ export function detectTier(override?: AssetQuality): AssetQuality {
   if ((navigator.hardwareConcurrency ?? 8) <= 2) return 'low'
 
   return 'high'
+}
+
+/**
+ * Touch-device sub-classifier. Capable tablets (iPad Pro/Air/mini on Apple silicon)
+ * comfortably run the 'medium' preset and look far better for it; the old blanket
+ * `touch -> low` left them on the phone-grade path. We require a tablet-class
+ * viewport, enough logical cores, and an Apple GPU before promoting to 'medium' —
+ * phones (small viewport) and weaker tablets stay at 'low'. SSR/feature-safe: any
+ * probe failure falls back to 'low'. Adaptive resolution still protects the frame
+ * rate at runtime, so a borderline device degrades sharpness rather than hitching.
+ */
+function detectTabletTier(): AssetQuality {
+  try {
+    if (typeof screen === 'undefined' || typeof navigator === 'undefined') return 'low'
+    const minEdge = Math.min(screen.width || 0, screen.height || 0) // CSS px; phones are < ~700
+    const cores = navigator.hardwareConcurrency ?? 0
+    if (minEdge < 740 || cores < 5) return 'low' // phone-sized or low-core -> stay cheap
+    const canvas = document.createElement('canvas')
+    const gl = (canvas.getContext('webgl2') || canvas.getContext('webgl')) as WebGLRenderingContext | null
+    if (!gl) return 'low'
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info')
+    const renderer = ((dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '') as string || '').toLowerCase()
+    // "Apple" GPU on a tablet-class device == an iPad on Apple silicon -> 'medium'.
+    if (renderer.includes('apple')) return 'medium'
+  } catch {
+    /* probe failed - stay on the safe cheap path */
+  }
+  return 'low'
 }
 
 /**

@@ -1081,10 +1081,12 @@ export class Game {
     // warp while you're up here.
     this.hud.intro = false
     this.hud.onPlatform = true
-    // Keep the opening clean: the in-world DROP ZONE sign + the one-line objective
-    // carry it. No center banner (it just doubled the sign) and no story card.
-    this.hud.banner = null
-    this.bannerTimer = 0
+    // Greet the player with the pad's destination name. The in-world DROP ZONE sign
+    // + the one-line objective still carry the "step off" call to action. The
+    // district crossing-toast is suppressed while on the pad (see updateEarth) so it
+    // can't overwrite this with the underlying city district's name.
+    this.hud.banner = 'RED PLANET'
+    this.bannerTimer = 4
     this.hud.missionPopup = null
     this.missionPopupTimer = 0
     if (!this.multiplayerEnabled) this.emitGameStart('solo') // controls live now (solo); MP starts on the join pick
@@ -2139,6 +2141,7 @@ export class Game {
     if (this.vehicles.current) {
       const exitPos = this.vehicles.exit()
       this.player.exitVehicle(exitPos)
+      this.audio.play('exit_vehicle')
       trackEvent('ability_used', { ability: 'vehicle' }) // G = exit
       return
     }
@@ -2173,6 +2176,7 @@ export class Game {
       this.warpRevert() // step out of the warp form to pilot
       this.player.enterVehicle()
       this.vehicles.enter(v)
+      this.audio.play('enter_vehicle')
       trackEvent('ability_used', { ability: 'vehicle' }) // G = enter
       trackEvent('vehicle_entered', { type: v.kind })
       // Mech / titan boot-up moment: name banner, camera shake + an energy/steam
@@ -2545,6 +2549,7 @@ export class Game {
     } else if (kind === 'shield') {
       this.fx.shield = 10
       this.player.shield = true
+      this.audio.play('buff_shield')
     } else if (kind === 'score') {
       this.fx.score = 10
       this.scoreMul = 2
@@ -3283,6 +3288,7 @@ export class Game {
       this.heroLight.color.setHex(0x9fd8ff)
     }
     this.hud.objective = this.launchPad ? 'Step off the edge to skydive' : this.raidActive ? this.raidObjective() : this.missions.update({
+      dt,
       zone: this.zone,
       playerPos: this.player.position,
       captured: this.hud.captured,
@@ -3348,7 +3354,7 @@ export class Game {
 
     // District crossing toast: a brief label as you pass between themed sectors,
     // so the map reads as named neighborhoods. Only when nothing else is banner'd.
-    if (onEarth) {
+    if (onEarth && !this.launchPad) {
       const dn = this.world.districtNameAt(this.focus.x, this.focus.z)
       if (dn !== this.currentDistrict) {
         this.currentDistrict = dn

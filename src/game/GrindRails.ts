@@ -128,7 +128,11 @@ export class GrindRails implements GameSystem {
    *  Returns a reused object - copy the fields if you keep them. */
   querySnap(x: number, y: number, z: number): GrindHit | null {
     if (this.zone !== 'earth') return null
-    const r2 = config.grind.snapRadius * config.grind.snapRadius
+    // Latch with a small margin over the configured snapRadius so fast lateral
+    // passes (hoverboard ~22 m/s) still catch the rail between frames; without it
+    // the test needs near-frame-perfect alignment and high-speed passes miss.
+    const r = config.grind.snapRadius + 0.35
+    const r2 = r * r
     let best = Infinity, bi = -1, bt = 0
     for (let i = 0; i < this.segs.length; i++) {
       const s = this.segs[i]

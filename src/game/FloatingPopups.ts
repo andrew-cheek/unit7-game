@@ -24,7 +24,9 @@ export class FloatingPopups implements GameSystem {
   private pool: Popup[] = []
 
   constructor(scene: THREE.Scene) {
-    const n = config.tier.name === 'low' ? 8 : 16
+    // Pool size scales with tier: medium gets a trimmed count between low and high.
+    const tier = config.tier.name
+    const n = tier === 'low' ? 8 : tier === 'medium' ? 12 : 16
     for (let i = 0; i < n; i++) {
       const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 128
       const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace

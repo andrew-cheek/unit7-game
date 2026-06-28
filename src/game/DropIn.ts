@@ -742,6 +742,7 @@ export class DropIn {
     const cv = document.createElement('canvas')
     cv.width = 256; cv.height = 96
     const ctx = cv.getContext('2d')!
+    ctx.clearRect(0, 0, 256, 96) // start from a transparent canvas so text stays crisp
     ctx.font = '800 56px ui-monospace, Menlo, monospace'
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     ctx.shadowColor = '#' + color.toString(16).padStart(6, '0')
@@ -1322,7 +1323,9 @@ export class DropIn {
       this.vaporT = Math.min(1, this.vaporT + dt * 2.2)
       this.vapor.position.copy(this.pos)
       this.vapor.scale.setScalar(2 + this.vaporT * 46)
-      this.vaporMat.opacity = 0.7 * (1 - this.vaporT)
+      // Eased (quadratic) fade alongside the scale growth so the burst blooms in
+      // softly instead of popping to full opacity on the first mobile frame.
+      this.vaporMat.opacity = Math.max(0, 0.7 * (1 - this.vaporT * this.vaporT))
       if (this.vaporT >= 1) this.vapor.visible = false
     }
 

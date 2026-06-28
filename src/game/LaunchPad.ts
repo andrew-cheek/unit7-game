@@ -517,7 +517,12 @@ export class LaunchPad {
     const navy = this.own(new THREE.MeshStandardMaterial({ color: 0x141d33, metalness: 0.6, roughness: 0.42, emissive: 0x0a1430, emissiveIntensity: 0.4 }))
     const navyDark = this.own(new THREE.MeshStandardMaterial({ color: 0x0b1124, metalness: 0.55, roughness: 0.6 }))
     const deck = this.own(new THREE.MeshStandardMaterial({ color: 0x101a30, metalness: 0.5, roughness: 0.6 }))
-    const glass = this.own(new THREE.MeshStandardMaterial({ color: 0x0a2b4a, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.32, emissive: 0x0a3a5e, emissiveIntensity: 0.5, side: THREE.DoubleSide }))
+    // Light steel frame for the pillars + airy blue glass for the walls, so the
+    // hangar reads as a see-through glass plant like the HUMANOID ROBOTS tower
+    // instead of a solid dark block. (Was opaque navy walls with a token glass band
+    // that sat in front of a navy wall, so the glass never actually read.)
+    const frame = this.own(new THREE.MeshStandardMaterial({ color: 0xdfe6f2, metalness: 0.5, roughness: 0.4 }))
+    const glass = this.own(new THREE.MeshStandardMaterial({ color: 0x9fd8ff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.2, emissive: 0x2a6ea0, emissiveIntensity: 0.3, side: THREE.DoubleSide }))
     const cyan = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     this.towerStripMats.push(cyan)
     const box = (w: number, h: number, d: number, m: THREE.Material) => new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w, h, d)), m)
@@ -526,24 +531,25 @@ export class LaunchPad {
     const upperFloor = box(HW * 2, 0.5, depth, deck); upperFloor.position.set(0, FH0, Z); this.group.add(upperFloor)
     const roof = box(HW * 2 + 1, 0.6, depth + 1, navy); roof.position.set(0, roofY + 0.3, Z); roof.castShadow = true; this.group.add(roof)
 
-    // Solid navy side walls (full height) with a glass band on the upper floor.
+    // See-through side walls: full-height glass panels. The cyan edge-trim added
+    // below doubles as mullions; the invisible colliders (colliderBoxes()) still
+    // block you, so it reads as glass you can't walk through.
     for (const sx of [-1, 1]) {
-      const wall = box(0.7, roofY, depth, navy); wall.position.set(sx * HW, roofY / 2, Z); wall.castShadow = true; this.group.add(wall)
-      const g = box(0.25, FH1 - 1.4, depth - 3, glass); g.position.set(sx * HW - sx * 0.45, FH0 + FH1 / 2, Z); this.group.add(g)
+      const wall = box(0.5, roofY, depth, glass); wall.position.set(sx * HW, roofY / 2, Z); this.group.add(wall)
     }
-    // Back + front: upper floor is walled (glass front), ground floor is an open
-    // archway you walk through (flanking posts + a lintel, central gap clear).
+    // Front + back: the upper assembly floor is fully glazed and the ground floor is
+    // an open archway you walk through (glass flanks + a glowing cyan lintel, central
+    // gap clear). Glass all the way down so you can see straight through the plant.
     for (const sz of [frontZ, backZ]) {
-      const upperWall = box(HW * 2, FH1, 0.6, navy); upperWall.position.set(0, FH0 + FH1 / 2, sz); this.group.add(upperWall)
-      for (const sx of [-1, 1]) { const post = box(HW * 0.58, FH0, 0.7, navy); post.position.set(sx * (HW * 0.71), FH0 / 2, sz); this.group.add(post) }
+      const upperWall = box(HW * 2, FH1, 0.4, glass); upperWall.position.set(0, FH0 + FH1 / 2, sz); this.group.add(upperWall)
+      for (const sx of [-1, 1]) { const post = box(HW * 0.58, FH0, 0.4, glass); post.position.set(sx * (HW * 0.71), FH0 / 2, sz); this.group.add(post) }
       const lintel = box(HW * 2, 0.7, 0.9, cyan); lintel.position.set(0, FH0 - 0.2, sz); this.group.add(lintel)
     }
-    // Glass front of the upper assembly floor (between the side glass bands).
-    const frontGlass = box(HW * 2 - 4, FH1 - 1.4, 0.2, glass); frontGlass.position.set(0, FH0 + FH1 / 2, frontZ - 0.2); this.group.add(frontGlass)
 
-    // Chunky corner light-pillars with vertical cyan strips + glowing caps.
+    // Slim corner frame-pillars (light steel) with vertical cyan strips + glowing
+    // caps - the structural frame that holds the glass box together.
     for (const sx of [-1, 1]) for (const sz of [frontZ, backZ]) {
-      const pil = box(2.2, roofY + 1.6, 2.2, navy); pil.position.set(sx * (HW + 0.6), (roofY + 1.6) / 2, sz); pil.castShadow = true; this.group.add(pil)
+      const pil = box(1.8, roofY + 1.6, 1.8, frame); pil.position.set(sx * (HW + 0.6), (roofY + 1.6) / 2, sz); pil.castShadow = true; this.group.add(pil)
       const strip = box(0.32, roofY - 1, 0.32, cyan); strip.position.set(sx * (HW + 0.6) + sx * 1.15, roofY / 2, sz); this.group.add(strip)
       const cap = box(2.6, 0.4, 2.6, cyan); cap.position.set(sx * (HW + 0.6), roofY + 1.7, sz); this.group.add(cap)
     }
@@ -597,7 +603,12 @@ export class LaunchPad {
     ctx.beginPath(); oct.forEach(([x, y], i) => { const px = cx + x, py = cy + y; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) }); ctx.closePath(); ctx.stroke()
     ctx.shadowBlur = 18; ctx.lineWidth = 12
     const hw = 46
-    ctx.beginPath(); ctx.roundRect(cx - hw, cy - hw + 8, hw * 2, hw * 2, 16); ctx.stroke()
+    // roundRect is unsupported on older browsers; fall back to a square rect so the
+    // hangar logo never renders blank.
+    ctx.beginPath()
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(cx - hw, cy - hw + 8, hw * 2, hw * 2, 16)
+    else ctx.rect(cx - hw, cy - hw + 8, hw * 2, hw * 2)
+    ctx.stroke()
     ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(cx, cy - hw + 8); ctx.lineTo(cx, cy - hw - 18); ctx.stroke()
     ctx.beginPath(); ctx.arc(cx, cy - hw - 24, 8, 0, Math.PI * 2); ctx.fill()
     ctx.beginPath(); ctx.arc(cx - 20, cy + 12, 13, 0, Math.PI * 2); ctx.fill()
@@ -1169,7 +1180,8 @@ export class LaunchPad {
     ctx.fillStyle = '#070b14'; ctx.fillRect(0, 0, 1024, 384)
     ctx.fillStyle = 'rgba(39,231,255,0.05)'; for (let y = 0; y < 384; y += 6) ctx.fillRect(0, y, 1024, 2)
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 30; ctx.fillStyle = '#ff2bd0'
+    // Tighter glow keeps 'DROP ZONE' legible on small screens (was 30; same neon color).
+    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 16; ctx.fillStyle = '#ff2bd0'
     ctx.font = '900 150px ui-monospace, Menlo, monospace'; ctx.fillText('DROP ZONE', 512, 150)
     ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 18; ctx.fillStyle = '#bfefff'
     ctx.font = '800 62px ui-monospace, Menlo, monospace'; ctx.fillText('STEP OFF TO SKYDIVE  ▼', 512, 285)

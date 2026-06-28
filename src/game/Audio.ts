@@ -11,11 +11,15 @@ import { loadHighScore, saveHighScore } from './storage'
 export type Sfx =
   | 'capture' | 'explosion' | 'fire' | 'mechOnline' | 'land' | 'step'
   | 'soak' | 'portal' | 'objective' | 'ui'
+  | 'buff_shield' | 'enter_vehicle' | 'exit_vehicle'
 
 export class AudioManager {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
   private padGain: GainNode | null = null
+  // Long-lived pad oscillators + swell LFO; tracked so dispose() can stop them
+  // before closing the context (otherwise they leak running audio nodes).
+  private padNodes: OscillatorNode[] = []
   private muted: boolean
   private unlocked = false
   private lastStep = 0
@@ -71,6 +75,7 @@ export class AudioManager {
       o.detune.value = (Math.random() - 0.5) * 8
       o.connect(pad)
       o.start()
+      this.padNodes.push(o) // track so dispose() can stop it
     }
     // Slow swell on the pad gain via an LFO.
     const lfo = this.ctx.createOscillator()
@@ -80,6 +85,7 @@ export class AudioManager {
     lfo.connect(lfoGain)
     lfoGain.connect(pad.gain)
     lfo.start()
+    this.padNodes.push(lfo) // track the LFO too
     this.padGain = pad
   }
 
@@ -144,10 +150,17 @@ export class AudioManager {
       case 'portal': this.tone(330, 0.5, 'sine', 0.25, 880); this.tone(495, 0.5, 'sine', 0.15, 1320); break
       case 'objective': this.tone(523, 0.12, 'square', 0.22); setTimeout(() => this.tone(784, 0.18, 'square', 0.22), 110); break
       case 'ui': this.tone(880, 0.06, 'square', 0.18); break
+      case 'buff_shield': this.tone(330, 0.15, 'sine', 0.25, 660); break // short rising shield-up sweep
+      case 'enter_vehicle': this.tone(1200, 0.08, 'square', 0.18, 2000); break // short rising boot-up beep
+      case 'exit_vehicle': this.tone(660, 0.12, 'square', 0.18, 330); break // short falling power-down beep
     }
   }
 
   dispose() {
+    // Stop the long-lived pad oscillators + LFO before closing the context so
+    // no running audio nodes are left behind.
+    for (const o of this.padNodes) { try { o.stop() } catch { /* ignore */ } }
+    this.padNodes = []
     try { this.ctx?.close() } catch { /* ignore */ }
     this.ctx = null
     this.master = null

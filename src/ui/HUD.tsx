@@ -186,6 +186,13 @@ export function HUD({
       {hud.race && hud.race.near && !hud.minigame && (
         <div style={{ ...promptStyle, bottom: '28%', borderColor: 'rgba(155,255,77,0.6)' }}>
           <span style={{ color: NEON.lime }}>DRIVE THROUGH THE GATE TO RACE</span>
+          {/* Tease the best-time speed bonus before the race (display-only; values
+              come straight from RaceActivity's idle HUD). */}
+          {hud.race.bestTime && hud.race.bestTime > 0 ? (
+            <span style={{ color: NEON.dim, marginLeft: 10, fontSize: 11 }}>
+              ⚡ BEST {hud.race.bestTime.toFixed(1)}s{hud.race.bestBonus ? ` +${hud.race.bestBonus}c` : ''}
+            </span>
+          ) : null}
         </div>
       )}
 
@@ -237,7 +244,9 @@ export function HUD({
           so drop the objective below both so it never collides with the PAUSE button. */}
       {hud.objective && !hud.minigame && !hideTopCenter && (
         <div style={{ ...objectiveStyle, top: touch ? 'calc(env(safe-area-inset-top) + 84px)' : objectiveStyle.top }}>
-          <span style={{ color: NEON.dim, marginRight: 8 }}>OBJECTIVE</span>
+          {/* Brighter label (NEON.text, not dim) so the OBJECTIVE prefix stays
+              legible in bright light; the value keeps its lime highlight. */}
+          <span style={{ color: NEON.text, marginRight: 8 }}>OBJECTIVE</span>
           <span style={{ color: NEON.lime }}>{hud.objective}</span>
         </div>
       )}
@@ -245,15 +254,19 @@ export function HUD({
       {/* city-raid wave tracker (post-skydive assault) */}
       {hud.raid && !hud.minigame && !hideTopCenter && (
         <div style={{ ...raidStyle, top: touch ? 'calc(env(safe-area-inset-top) + 120px)' : '54px' }}>
-          <span style={{ color: '#ff5a6a' }}>⚠ CITY RAID</span>
-          {hud.raid.boss ? (
-            <span style={{ margin: '0 10px', color: '#ffd24a', fontWeight: 700 }}>MOTHERSHIP</span>
-          ) : (
-            <span style={{ margin: '0 10px', color: NEON.dim }}>WAVE {Math.max(1, hud.raid.wave)}/{hud.raid.waves}</span>
-          )}
-          <span style={{ color: hud.raid.boss ? '#ffd24a' : hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
-            {hud.raid.boss ? 'HIT THE CORE' : hud.raid.incoming ? 'NEXT WAVE INCOMING' : `${hud.raid.alive} HOSTILE${hud.raid.alive === 1 ? '' : 'S'} LEFT`}
-          </span>
+          {/* The wave header stays a single inline row (its own nowrap flex), so
+              stacking the CORE/SHIELD bars below doesn't break the header text up. */}
+          <div style={{ display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
+            <span style={{ color: '#ff5a6a' }}>⚠ CITY RAID</span>
+            {hud.raid.boss ? (
+              <span style={{ margin: '0 10px', color: '#ffd24a', fontWeight: 700 }}>MOTHERSHIP</span>
+            ) : (
+              <span style={{ margin: '0 10px', color: NEON.dim }}>WAVE {Math.max(1, hud.raid.wave)}/{hud.raid.waves}</span>
+            )}
+            <span style={{ color: hud.raid.boss ? '#ffd24a' : hud.raid.incoming ? NEON.orange : '#ff9aa6' }}>
+              {hud.raid.boss ? 'HIT THE CORE' : hud.raid.incoming ? 'NEXT WAVE INCOMING' : `${hud.raid.alive} HOSTILE${hud.raid.alive === 1 ? '' : 'S'} LEFT`}
+            </span>
+          </div>
           {hud.raid.boss && (
             <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: NEON.dim, fontSize: 10 }}>CORE</span>
@@ -503,7 +516,7 @@ function WarpChip({ w, touch, onTap }: { w: HudState['warp']; touch: boolean; on
   const color = w.active ? NEON.magenta : w.ready ? NEON.lime : NEON.dim
   return (
     <button
-      style={{ ...chip, marginTop: 4, color, borderColor: color, pointerEvents: 'auto', cursor: 'pointer', background: 'transparent', letterSpacing: '0.08em', position: 'relative', overflow: 'hidden', minWidth: 96, textAlign: 'left' }}
+      style={{ ...chip, marginTop: 4, color, borderColor: color, pointerEvents: 'auto', cursor: 'pointer', background: 'transparent', letterSpacing: '0.08em', position: 'relative', overflow: 'hidden', minWidth: 96, maxWidth: '120px', textAlign: 'left' }}
       onClick={() => onTap?.()}
     >
       {!w.ready && !w.active && (
@@ -755,8 +768,11 @@ const raidStyle: CSSProperties = {
   position: 'absolute',
   left: '50%',
   transform: 'translateX(-50%)',
+  // Stack the header row above the CORE / SHIELD bars (the header keeps its own
+  // nowrap); the old container-level nowrap fought the bar divs and is dropped.
+  display: 'flex',
+  flexDirection: 'column',
   padding: '5px 16px',
-  whiteSpace: 'nowrap',
   background: 'rgba(20,4,8,0.72)',
   border: '1px solid rgba(255,90,106,0.55)',
   borderRadius: 999,
@@ -830,7 +846,10 @@ const raceStyle: CSSProperties = {
   top: 46,
   transform: 'translateX(-50%)',
   padding: '6px 16px',
-  whiteSpace: 'nowrap',
+  // Cap the width and allow wrapping so a long race status (CP + time + best)
+  // doesn't run off narrow screens; centred so the wrapped line stays tidy.
+  maxWidth: '72vw',
+  textAlign: 'center',
   background: 'rgba(6,10,22,0.74)',
   border: '1px solid rgba(155,255,77,0.5)',
   borderRadius: 999,
@@ -1032,7 +1051,9 @@ const rosterPanel: CSSProperties = {
   position: 'absolute',
   right: 14,
   bottom: 54,
-  width: 280,
+  // Cap to the viewport on narrow phones so the panel never overflows offscreen;
+  // long player names already ellipsis in the roster row name span.
+  width: 'min(280px, calc(100vw - 28px))',
   maxHeight: '52vh',
   overflowY: 'auto',
   pointerEvents: 'auto',

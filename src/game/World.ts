@@ -1984,7 +1984,10 @@ export class World {
       this.sunGroup.position.set(focus.x + lerp(440, 200, dawn), lerp(-120, 380, dawn), focus.z + 240)
       const warm = clamp01(dawn * 1.6)
       this.sunGlowMat.color.setHex(0xff7a3a).lerp(this.sunWarmGlow, warm)
-      this.sunCoreMat.color.setHex(0xffb070).lerp(this.sunWarmCore, warm)
+      // Core brightens toward white faster than the halo (warm*warm) so the disc
+      // shows a hot pale centre against a still-orange glow during dawn - a richer
+      // sunrise read without changing geometry or timing.
+      this.sunCoreMat.color.setHex(0xffb070).lerp(this.sunWarmCore, warm * warm)
       const a = clamp01((dawn - 0.02) / 0.18) // fade in as it clears the horizon
       this.sunGlowMat.opacity = a * 0.9
       this.sunCoreMat.opacity = a
@@ -2117,5 +2120,13 @@ export class World {
     this.ownedMats.forEach((m) => m.dispose())
     this.ownedTex.forEach((t) => t.dispose())
     this.ownedGeos.forEach((g) => g.dispose())
+    // Drop the material/texture pool maps too: they hold references to the now-
+    // disposed shared materials/textures, and Moon/Mars build fresh World
+    // instances, so leaving them populated leaks the old GPU resources across
+    // zone transitions.
+    this.texPool.clear()
+    this.litMatPool.clear()
+    this.darkPool.clear()
+    this.glowPool.clear()
   }
 }

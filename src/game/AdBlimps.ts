@@ -67,6 +67,14 @@ export class AdBlimps implements GameSystem {
     const half = config.world.half
     const dotN = low ? 12 : 18
 
+    // Dedupe Color construction across blimps that share a tint (build once, reuse).
+    const tintColors = new Map<string, THREE.Color>()
+    const tintColor = (hex: string) => {
+      let c = tintColors.get(hex)
+      if (!c) { c = new THREE.Color(hex); tintColors.set(hex, c) }
+      return c
+    }
+
     for (let i = 0; i < count; i++) {
       const ad = ads[i % ads.length]
       const group = new THREE.Group()
@@ -107,7 +115,7 @@ export class AdBlimps implements GameSystem {
 
       // Row of additive marquee dots along the lower hull (instanced, twinkle).
       const dotMat = this.own(new THREE.MeshBasicMaterial({
-        color: new THREE.Color(ad.tint), transparent: true, opacity: 0.9,
+        color: tintColor(ad.tint), transparent: true, opacity: 0.9,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide,
       }))
       const dots = new THREE.InstancedMesh(dotGeo, dotMat, dotN)

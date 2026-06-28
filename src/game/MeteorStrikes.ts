@@ -29,10 +29,10 @@ const AFTER = 3
 
 const TELEGRAPH_TIME = 1.2 // pulsing ring before the rock falls
 const FALL_HEIGHT = 120 // spawn height of the meteor
-const FALL_SPEED = 220 // units/sec straight down
+const FALL_SPEED = 220 // units/sec straight down (Earth-gravity baseline; scaled by zone)
 const SCORCH_TIME = 2.0 // scorch fade window
 const DEBRIS_LIFE = 1.1 // seconds debris flies + falls
-const GRAVITY = 30 // pulls debris back down
+const EARTH_G = Math.abs(config.zones.earth.gravity) // reference for scaling off-world fall feel
 
 interface Strike {
   phase: number
@@ -61,6 +61,11 @@ export class MeteorStrikes implements GameSystem {
   private tex: THREE.Texture[] = []
   private strikes: Strike[] = []
   private zone: Zone = 'earth'
+  // Cached per-zone gravity (magnitude) and the matching fall-speed scale, both
+  // refreshed on setZone so the per-frame loop stays O(1). Off-world meteors and
+  // debris fall under the local zone's lighter gravity instead of Earth speed.
+  private gravity = EARTH_G
+  private fallScale = 1
   private timer = 3 // countdown to the next strike
   private debrisN: number
   // Scratch reused each impact so we never allocate per strike.
@@ -161,6 +166,12 @@ export class MeteorStrikes implements GameSystem {
 
   setZone(zone: Zone) {
     this.zone = zone
+    // Read the zone's gravity (config stores it negative; we want magnitude) the
+    // same way MeteorShower does, and derive a sqrt fall-speed scale so a 1/6-G
+    // body makes meteors drift down ~40% as fast rather than 1/6 as fast (sqrt
+    // keeps the slow-motion drift readable instead of glacial).
+    this.gravity = Math.abs(config.zones[zone].gravity)
+    this.fallScale = Math.sqrt(this.gravity / EARTH_G)
     const active = zone === 'moon' || zone === 'mars'
     this.group.visible = active
     if (!active) this.resetAll()
@@ -278,7 +289,8 @@ export class MeteorStrikes implements GameSystem {
       }
 
       if (s.phase === FALL) {
-        s.meteor.position.y -= FALL_SPEED * dt
+        // Scale the scripted descent by the zone's gravity so off-world meteors drift slower.
+        s.meteor.position.y -= FALL_SPEED * this.fallScale * dt
         s.meteor.rotation.x += dt * 8
         s.meteor.rotation.z += dt * 6
         if (s.meteor.position.y <= s.gy + 0.5) this.impact(s)
@@ -301,7 +313,8 @@ export class MeteorStrikes implements GameSystem {
         if (age >= DEBRIS_LIFE) { bit.visible = false; continue }
         debrisDone = false
         const d3 = d * 3
-        s.debrisVel[d3 + 1] -= GRAVITY * dt
+        // Pull debris down under the current zone's gravity (cached), so Moon/Mars chunks hang.
+        s.debrisVel[d3 + 1] -= this.gravity * dt
         bit.position.x += s.debrisVel[d3] * dt
         bit.position.y += s.debrisVel[d3 + 1] * dt
         bit.position.z += s.debrisVel[d3 + 2] * dt

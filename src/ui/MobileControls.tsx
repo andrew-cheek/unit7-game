@@ -4,6 +4,17 @@ import type { GameAction, GameControls, HudState } from '../game/types'
 const JOY_R = 56
 const JOY_DEAD = 8 // px of slack around center so a resting thumb reads as zero
 
+// Read an env(safe-area-inset-*) value in px via a one-shot probe element, so the
+// floating stick can keep clear of notches/rounded corners. Returns 0 when unsupported.
+function safeAreaInset(side: 'left' | 'top'): number {
+  const probe = document.createElement('div')
+  probe.style.cssText = `position:fixed;${side}:0;width:0;height:0;padding-${side}:env(safe-area-inset-${side});visibility:hidden`
+  document.body.appendChild(probe)
+  const px = parseFloat(getComputedStyle(probe).getPropertyValue(`padding-${side}`)) || 0
+  document.body.removeChild(probe)
+  return px
+}
+
 interface BtnDef {
   label: string
   action: GameAction
@@ -40,6 +51,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   const [knob, setKnob] = useState({ x: 0, y: 0 })
   const [joyAt, setJoyAt] = useState<{ x: number; y: number } | null>(null)
   const [sprintOn, setSprintOn] = useState(false)
+  // Which hold-type secondary buttons are currently pressed, keyed by label (labels
+  // are unique per BtnDef). Drives the inverted "held" affordance below.
+  const [heldLabels, setHeldLabels] = useState<Set<string>>(new Set())
   const joyId = useRef<number | null>(null)
   const joyOrigin = useRef({ x: 0, y: 0 })
   const lookId = useRef<number | null>(null)
@@ -52,10 +66,21 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   // button's visual state off too, otherwise it can show "on" while the engine
   // has already stopped sprinting (a stuck-sprint mismatch).
   useEffect(() => {
-    const reset = () => setSprintOn(false)
+    const reset = () => { setSprintOn(false); setHeldLabels(new Set()) }
     window.addEventListener('blur', reset)
     return () => window.removeEventListener('blur', reset)
   }, [])
+
+  // Keep the stick origin at least this far from the left/top edges so the base ring
+  // never bleeds off-screen or under a notch (max of its own radius and the inset).
+  const joyMargin = useRef({ x: JOY_R, y: JOY_R })
+  useEffect(() => {
+    joyMargin.current = { x: Math.max(JOY_R, safeAreaInset('left')), y: Math.max(JOY_R, safeAreaInset('top')) }
+  }, [])
+  const clampOrigin = (x: number, y: number) => ({
+    x: Math.max(joyMargin.current.x, x),
+    y: Math.max(joyMargin.current.y, y),
+  })
 
   // --- context ---
   const inVehicle = hud.mode === 'vehicle'
@@ -103,8 +128,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   const onJoyDown = (e: RPointerEvent) => {
     e.currentTarget.setPointerCapture(e.pointerId)
     joyId.current = e.pointerId
-    joyOrigin.current = { x: e.clientX, y: e.clientY }
-    setJoyAt({ x: e.clientX, y: e.clientY })
+    // Clamp the summon point so the base stays clear of the screen edge/notch.
+    joyOrigin.current = clampOrigin(e.clientX, e.clientY)
+    setJoyAt(joyOrigin.current)
     setKnob({ x: 0, y: 0 })
   }
   const onJoyMove = (e: RPointerEvent) => {
@@ -118,9 +144,16 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
       // (the old fixed base made dragging up "run off the pad"). The knob then
       // rests at the edge in the drag direction.
       const over = len - JOY_R
-      joyOrigin.current = { x: joyOrigin.current.x + (dx / len) * over, y: joyOrigin.current.y + (dy / len) * over }
+      // Clamp the dragged base too, so following the finger can't push it off-edge.
+      joyOrigin.current = clampOrigin(joyOrigin.current.x + (dx / len) * over, joyOrigin.current.y + (dy / len) * over)
       setJoyAt({ x: joyOrigin.current.x, y: joyOrigin.current.y })
-      dx = (dx / len) * JOY_R; dy = (dy / len) * JOY_R; len = JOY_R
+      // Recompute from the (possibly clamped) base so the knob + move vector follow
+      // the real finger-to-base direction, not the stale pre-clamp one (matters when
+      // the base pins against the top/left edge mid-drag).
+      const fdx = e.clientX - joyOrigin.current.x, fdy = e.clientY - joyOrigin.current.y
+      const flen = Math.hypot(fdx, fdy) || 1
+      len = Math.min(flen, JOY_R)
+      dx = (fdx / flen) * len; dy = (fdy / flen) * len
     }
     setKnob({ x: dx, y: dy }) // knob rests at the edge in the drag direction
     // Deadzone + magnitude rescale: a resting thumb reads as zero intent and the
@@ -174,11 +207,18 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   const btnDown = (b: BtnDef) => (e: RPointerEvent) => {
     e.stopPropagation()
     if (b.type === 'sprint') setSprintOn((s) => { controls.pressAction('sprint', !s); return !s })
-    else controls.pressAction(b.action, true)
+    else {
+      controls.pressAction(b.action, true)
+      // Mark hold buttons as held so they invert (accent fill) while pressed.
+      if (b.type === 'hold') setHeldLabels((h) => new Set(h).add(b.label))
+    }
   }
   const btnUp = (b: BtnDef) => (e: RPointerEvent) => {
     e.stopPropagation()
-    if (b.type === 'hold') controls.pressAction(b.action, false)
+    if (b.type === 'hold') {
+      controls.pressAction(b.action, false)
+      setHeldLabels((h) => { const n = new Set(h); n.delete(b.label); return n })
+    }
   }
 
   // CHUTE / CUT stacks directly above JUMP (right side) while airborne, so it's a
@@ -213,7 +253,9 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
             </div>
           )}
           {secondary.map((b) => {
-            const active = b.type === 'sprint' && sprintOn
+            // Active = sprint toggled on, or a hold button (GRAPPLE/BOOST/...) currently
+            // held - both invert to the accent fill so the press is visible.
+            const active = (b.type === 'sprint' && sprintOn) || (b.type === 'hold' && heldLabels.has(b.label))
             return (
               <div
                 key={b.label}
@@ -293,6 +335,12 @@ const helperPill: CSSProperties = {
   color: 'rgba(223,238,255,0.92)',
   font: '700 10px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.12em',
+  // Long hints (e.g. "WARP: SWITCH / RETURN") could run off a narrow phone, so cap
+  // the pill width and ellipsize rather than overflow the viewport.
+  maxWidth: '60vw',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 }
 const secWrap: CSSProperties = {
   display: 'flex',
@@ -313,7 +361,8 @@ const secBtn: CSSProperties = {
   width: 48, height: 48, borderRadius: '50%',
   border: '2px solid',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  font: '700 8px/1 ui-monospace, Menlo, monospace',
+  // 9px (was 8px) reads more cleanly on high-DPI phones; button size is unchanged.
+  font: '700 9px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.02em', textAlign: 'center', userSelect: 'none', WebkitUserSelect: 'none',
 }
 const primaryBtn: CSSProperties = {
