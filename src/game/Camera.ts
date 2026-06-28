@@ -17,6 +17,9 @@ export interface FollowState {
   speed01?: number
   /** Whether auto-follow is allowed this frame (grounded + actually moving). */
   canAutoFollow?: boolean
+  /** 0..1 free-fall intensity (downward speed): tightens target tracking + tips
+   *  the view down the fall line so a plunging subject stays framed. */
+  fall01?: number
 }
 
 /**
@@ -125,8 +128,12 @@ export class CameraController {
       input.yaw = dampAngle(input.yaw, f.followYaw, config.camera.autoFollowLambda, dt)
     }
 
+    const fall01 = f.fall01 ?? 0
     const yaw = input.yaw
-    const pitch = input.pitch
+    // While free-falling, tip the look down the fall line so the plunging robot
+    // stays framed with the approaching ground/portals in view (not staring at
+    // the horizon while the subject drops out the bottom of the frame).
+    const pitch = input.pitch + fall01 * config.camera.fallLookDown
     const cosP = Math.cos(pitch)
     // Unit vector pointing from the target back to the camera.
     this.offsetDir.set(-Math.sin(yaw) * cosP, Math.sin(pitch), -Math.cos(yaw) * cosP)
@@ -151,7 +158,10 @@ export class CameraController {
       this.currentTarget.copy(this.desiredTarget)
       this.initialized = true
     } else {
-      dampVec3(this.currentTarget, this.desiredTarget, config.camera.followLambda, dt)
+      // Track much tighter while falling so the target keeps up with the plunge
+      // instead of lagging above the robot (which shrank it into the lower frame).
+      const followL = THREE.MathUtils.lerp(config.camera.followLambda, config.camera.fallFollowLambda, fall01)
+      dampVec3(this.currentTarget, this.desiredTarget, followL, dt)
     }
 
     // Desired distance, extended a bit at speed. minDistance is the *manual*
