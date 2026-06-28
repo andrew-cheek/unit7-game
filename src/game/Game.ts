@@ -52,6 +52,10 @@ import { CraterAmbience } from './CraterAmbience'
 import { LowGravLeap } from './LowGravLeap'
 import { OffworldSamples } from './OffworldSamples'
 import { BiolumiPods } from './BiolumiPods'
+import { RegolithGlitter } from './RegolithGlitter'
+import { MoonTracks } from './MoonTracks'
+import { SandStorm } from './SandStorm'
+import { Burrowers } from './Burrowers'
 import { Aurora } from './Aurora'
 import { SkyLeviathans } from './SkyLeviathans'
 import { CompanionDrone } from './CompanionDrone'
@@ -569,6 +573,13 @@ export class Game {
     }
     this.systems.register(new LowGravLeap(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
     this.systems.register(new OffworldSamples(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
+    // Off-world deepening (Wave 16). Moon: glittering regolith + ice patches, and
+    // the player's footprints pressed into the dust. Mars: a rolling ground-level
+    // dust storm and capturable native burrower fauna. All zone + tier gated.
+    this.systems.register(new RegolithGlitter(this.engine.scene, { zone: () => this.zone, groundY: owGroundY, focus: () => this.focus }))
+    this.systems.register(new MoonTracks(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY }))
+    this.systems.register(new SandStorm(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone }))
+    this.systems.register(new Burrowers(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
     // Night aurora over the city: shimmering curtains that fade in after dusk and
     // out at dawn. Earth-only ambient set dressing.
     this.systems.register(new Aurora(this.engine.scene, {
