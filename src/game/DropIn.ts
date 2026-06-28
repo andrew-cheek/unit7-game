@@ -179,7 +179,10 @@ export class DropIn {
   private static readonly STEER = 64 // canopy steer authority
   private static readonly TURN_RATE = 4.0 // dive heading turn speed (rad/s) at full moveX - snappy aiming
   private static readonly THETA_MIN = 0.32 // shallowest dive angle (~18deg from horizontal) when flared - a flat, far glide
-  private static readonly V_FLARE = 48 // travel speed flared right back (fast glide so you can fly to a pad)
+  private static readonly V_FLARE = 26 // travel speed flared right back - a slow, hanging glide when flat/standing up
+  // Pulling the stick fully down past belly-flat stands the diver upright into a
+  // slow flight glide. Below this pitch the body rises from flat toward standing.
+  private static readonly STAND_KNEE = 0.28
   private static readonly V_DIVE = 92 // travel speed at a full straight-down plunge
   private static readonly H_DAMP = 1.4
   private static readonly H_MAX = 88
@@ -923,8 +926,13 @@ export class DropIn {
         // of the same tilted velocity vector the steering uses, so a full hold is
         // ~2x the flared-glide descent and points dead-down.
         // Neutral sits at a committed head-down dive so letting go still reads as a
-        // DIVE (and the down-camera keeps looking down); pull back to flatten/flare.
-        let diveAmt = clamp(0.55 + this.input.moveY * 0.45, 0, 1)
+        // DIVE (and the down-camera keeps looking down). Pulling the stick DOWN
+        // flattens out and, held all the way, brings the diver up to a near-vertical
+        // standing flight pose gliding slowly - so the pull side reaches pitch 0
+        // (full flare) while the push side keeps the same dive feel as before.
+        let diveAmt = this.input.moveY < 0
+          ? clamp(0.55 + this.input.moveY * 0.55, 0, 1) // pull down: flatten fully, then stand up
+          : clamp(0.55 + this.input.moveY * 0.45, 0, 1) // push up: steepen toward a vertical plunge
         let approach = dt * 3.5
         if (this.plungeT > 0) {
           // Forced head-down nose-over at the start of the dive (see plungeT). Snap
@@ -1050,7 +1058,14 @@ export class DropIn {
     const tpPose = Math.min(1, this.pitch * 1.05)
     // Flared (~86°) reads as belly-flat / levelling out; a full dive (~155°) is a
     // steep head-first plunge. So pulling back pitches up and diving tips head-down.
-    const bodyPitch = diving ? THREE.MathUtils.lerp(1.5, 2.7, tpPose) : 0
+    // Below the stand knee (a full pull-down) the body keeps rising past belly-flat
+    // up to a near-upright standing pose (~7°), so holding down "pulls up to flight".
+    const kneeVal = THREE.MathUtils.lerp(1.5, 2.7, DropIn.STAND_KNEE)
+    const bodyPitch = diving
+      ? (tpPose >= DropIn.STAND_KNEE
+          ? THREE.MathUtils.lerp(1.5, 2.7, tpPose)
+          : THREE.MathUtils.lerp(0.12, kneeVal, tpPose / DropIn.STAND_KNEE))
+      : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     // Bank into the turn (roll with moveX) while diving for a steered feel.
     const roll = diving ? clamp(this.steerX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
@@ -1092,7 +1107,7 @@ export class DropIn {
     this.hud.hint = this.phase === 'canopy'
       ? (alt < 70 ? (-this.vy < 7 ? 'FLARED - SOFT LANDING' : 'PULL BACK TO FLARE') : 'STEER TO A PORTAL OR THE BEACON')
       : this.phase === 'land' ? 'TOUCHDOWN'
-      : 'STEER · SPACE = JETPACK · DEPLOY ANYTIME'
+      : 'STEER · PULL DOWN TO LEVEL INTO A GLIDE · DEPLOY ANYTIME'
     // Sonic-boom charge bar (only while diving toward terminal velocity); the
     // running ring chain + how much of its 2.2s window remains. All derived from
     // values the sim already tracks - no extra per-frame work.
