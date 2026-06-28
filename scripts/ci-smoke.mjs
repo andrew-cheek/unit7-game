@@ -171,6 +171,26 @@ try {
       `triangles within budget (<= ${TRI_BUDGET})`,
       `triangles=${metrics.triangles}`,
     )
+
+    // --- determinism proof -------------------------------------------------
+    // CLAUDE.md: "same physics outcome at any frame rate." The harness runs an
+    // identical scripted input through the isolated fixed step twice from one
+    // seed and fingerprints the result. The HARD gate is reproducibility — a
+    // single run's two passes must match AND two independent invocations must
+    // agree — which is architecture-portable and proves the sim is deterministic
+    // (frame rate only changes how many identical fixed steps run, never their
+    // result). GOLDEN is logged for cross-build drift visibility, not asserted
+    // (IEEE-754 float ops can differ across CPU arches; reproducibility can't).
+    const GOLDEN = 'ebe34b17'
+    const det1 = await page.evaluate(() => window.__unit7nav.determinism(240))
+    const det2 = await page.evaluate(() => window.__unit7nav.determinism(240))
+    console.log(`[ci-smoke] determinism: ${JSON.stringify(det1)} (golden=${GOLDEN})`)
+    check(det1.identical === true, 'sim deterministic within a run (run1 hashA===hashB)', `hash=${det1.hashA}`)
+    check(det2.identical === true, 'sim deterministic within a run (run2)', `hash=${det2.hashA}`)
+    check(det1.hashA === det2.hashA, 'sim reproducible across invocations', `${det1.hashA} vs ${det2.hashA}`)
+    if (det1.hashA !== GOLDEN) {
+      console.log(`[ci-smoke] NOTE: determinism hash ${det1.hashA} != golden ${GOLDEN} — physics changed or arch differs; update GOLDEN if intended.`)
+    }
   }
 
   // --- no runtime errors (the most important gate) -------------------------
