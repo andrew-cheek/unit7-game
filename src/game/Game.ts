@@ -3457,7 +3457,9 @@ export class Game {
           this.pushHud(dt)
           return
         }
-        this.hud.prompt = `ELEVATOR — step in to ride to ${dest.toUpperCase()}`
+        // No HUD prompt here: the elevator's big MOON/MARS marquee + the robots
+        // visibly riding it communicate it, and any prompt would spawn a stray
+        // ENTER button on the platform. Boarding is walk-in.
       } else {
         this.launchPad.elevatorSetBoarding(false)
       }
@@ -4030,7 +4032,11 @@ export class Game {
         : cur.kind === 'tram'
         ? 'RIDING TRAM - G to hop off'
         : `Press G - Exit ${this.vehicles.currentName}`
-    } else if (this.player.mode === 'robot') {
+    } else if (this.player.mode === 'robot' && !this.launchPad) {
+      // On the opening platform we deliberately surface NO contextual prompt: the
+      // city's vehicles sit far below, so vehicles.nearest() would otherwise leak a
+      // "MECH-L LOCKED" toast onto the deck (and MobileControls turns any prompt
+      // into a stray ENTER button). The elevator + dive ledge are self-explanatory.
       const near = this.vehicles.nearest(this.player.position)
       if (near) {
         if (isMech(near.kind) && !this.isUnlocked(near.kind)) {
