@@ -189,6 +189,12 @@ export const config = {
     // instead of staring down at blank ground (the old 0.38 looked downward).
     startPitch: 0.16,
     followLambda: 9,
+    // During a fast free-fall the normal followLambda can't keep up with the
+    // plunging subject, so it lags above the robot (robot drifts low + small in
+    // frame). Track much tighter while falling, and tip the view down the fall
+    // line so you see where you're heading. Both scale with fall intensity (0..1).
+    fallFollowLambda: 18,
+    fallLookDown: 0.22,
     rotateLambda: 16,
     pitchMin: -0.85,
     pitchMax: 1.05, // look further up so tall rockets / portals / towers are visible
@@ -206,8 +212,9 @@ export const config = {
     // Push the look target ahead along movement so you see more of where you go.
     lookAhead: 3.6,
     lookAheadLambda: 6,
-    // Pull the camera back when moving fast (sprint / boost).
-    speedPullback: 1.28,
+    // Pull the camera back when moving fast (sprint / boost). Kept modest so the
+    // robot still reads big while flying/sprinting (was 1.28 - a touch too far).
+    speedPullback: 1.16,
     // Collision pull-in eases back out at returnLambda; pulls in fast (but no
     // longer a single-frame snap, which read as a jarring pop on thin obstacles).
     returnLambda: 7,

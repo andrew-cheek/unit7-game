@@ -3864,13 +3864,15 @@ export class Game {
     // REVEAL PUNCH: ease the orbit inward over the cinematic's run (a slow dolly-in)
     // so the open frame breathes instead of tracing a flat circle. The reveal lasts
     // ~9s of the ≤16s window; p is a smoothstep of progress so it never snaps.
+    // Settles closer than before (was 30/19) so the robot reads clearly on the deck
+    // by hand-off instead of staying a distant speck.
     const t = clamp(this.launchCineT / 9, 0, 1)
     const p = t * t * (3 - 2 * t) // smoothstep(0..1)
-    const r = lerp(40, 30, p) // pull the dolly in from a wide establishing radius
-    const h = lerp(26, 19, p) // and settle the height down toward the follow framing
+    const r = lerp(38, 25, p) // pull the dolly in from a wide establishing radius
+    const h = lerp(24, 15, p) // and settle the height down toward the follow framing
     const cam = this.engine.camera
     cam.position.set(c.x + Math.sin(ang) * r, c.y + h, c.z + Math.cos(ang) * r)
-    cam.lookAt(c.x, c.y + 5.5, c.z)
+    cam.lookAt(c.x, c.y + 4.5, c.z)
     this.focus.copy(this.player.position)
     // FOV settle: a small extra width that eases shut as the dolly closes, fully
     // gone by p=1 so the hand-off framing matches steady-state exactly. Routed
@@ -3920,19 +3922,25 @@ export class Game {
     const sp = Math.hypot(p.velocity.x, p.velocity.z)
     const inv = sp > 0.1 ? 1 / sp : 0
     const onFoot = p.mode === 'robot' || p.mode === 'plane'
+    // Free-fall framing: how hard you're plunging (downward speed), only while
+    // airborne on foot. Ramps in from ~6m/s and saturates near terminal velocity.
+    const falling = onFoot && !p.grounded && p.velocity.y < -6
+    const fall01 = falling ? clamp((-p.velocity.y - 6) / 42, 0, 1) : 0
     return {
-      // Pull the camera well back during the launch-pad opening so the whole
-      // scene (the assembly hangar + the factory tower) reads as an establishing
-      // shot and the robot isn't filling the frame.
-      distanceScale: this.launchPad ? 2.1 : p.mode === 'plane' ? 1.35 : 1,
+      // Stand closer on the launch pad than the old 2.1 establishing pull-back so
+      // the robot reads clearly while you walk it to the ledge.
+      distanceScale: this.launchPad ? 1.45 : p.mode === 'plane' ? 1.35 : 1,
       followYaw: p.yaw,
       moveX: p.velocity.x * inv,
       moveZ: p.velocity.z * inv,
       speed01: clamp(sp / config.player.runSpeed, 0, 1),
+      fall01,
       // Trail the robot whenever it's moving (even a slow turn) and the look stick
       // is idle, so spinning around with the move stick swings the camera behind
-      // you. Grounded, boarding, or gliding all qualify.
-      canAutoFollow: idle && sp > 0.8 && onFoot && (p.grounded || p.boarding || p.mode === 'plane'),
+      // you. Grounded, boarding, or gliding all qualify - plus a steered free-fall,
+      // so the camera keeps trailing the descent instead of letting you slide off
+      // to the side of the frame.
+      canAutoFollow: idle && onFoot && ((sp > 0.8 && (p.grounded || p.boarding || p.mode === 'plane')) || (fall01 > 0 && sp > 0.4)),
     }
   }
 
