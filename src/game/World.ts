@@ -63,28 +63,28 @@ function dayCycle(time: number): number {
   return 0
 }
 const NIGHT = {
-  skyTop: new THREE.Color(0x05070f),
-  skyBot: new THREE.Color(0x180a2c),
-  fog: new THREE.Color(0x070a16),
-  ambient: new THREE.Color(0x223044),
-  ambientI: 0.55,
-  hemiSky: new THREE.Color(0x4a5a80),
-  hemiI: 0.55,
-  sun: new THREE.Color(0xbfd2ff),
-  sunI: 1.0,
+  skyTop: new THREE.Color(0x02030a),
+  skyBot: new THREE.Color(0x0c0518),
+  fog: new THREE.Color(0x03050e),
+  ambient: new THREE.Color(0x10182a),
+  ambientI: 0.3,
+  hemiSky: new THREE.Color(0x2a3550),
+  hemiI: 0.28,
+  sun: new THREE.Color(0x8fa6d8),
+  sunI: 0.55,
 }
 // "DAY" target (the cycle holds here): a bright blue sky, light haze and strong
 // fills so the streets read clearly instead of looking like night-with-a-glow.
 const DAWN = {
-  skyTop: new THREE.Color(0x4f86e0),
-  skyBot: new THREE.Color(0xbcd2f0),
-  fog: new THREE.Color(0x6f8fc0),
-  ambient: new THREE.Color(0xaebfde),
-  ambientI: 2.9,
-  hemiSky: new THREE.Color(0xcfe0ff),
-  hemiI: 2.4,
-  sun: new THREE.Color(0xfff4e0),
-  sunI: 3.4,
+  skyTop: new THREE.Color(0x5a93e8),
+  skyBot: new THREE.Color(0xd5e3f5),
+  fog: new THREE.Color(0x9fb6d6),
+  ambient: new THREE.Color(0xcdd8ea),
+  ambientI: 3.3,
+  hemiSky: new THREE.Color(0xe4eeff),
+  hemiI: 2.9,
+  sun: new THREE.Color(0xfff7ec),
+  sunI: 3.8,
 }
 // Night base colors of the distant fog-immune silhouettes, snapshotted so the
 // day-tint lerp toward fog never compounds (re-reading the live color would).

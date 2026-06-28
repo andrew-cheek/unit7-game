@@ -1,6 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { installConsoleGuard } from './lib/consoleGuard'
+
+installConsoleGuard()
 
 // StrictMode intentionally left ON: it mounts -> unmounts -> remounts the tree in
 // dev, which is the strongest local test that <Unit7Game /> tears down cleanly

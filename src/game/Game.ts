@@ -96,7 +96,7 @@ import { DawnShow } from './DawnShow'
 import { RobotFactory } from './RobotFactory'
 import { RaceActivity, type RaceHud, type RaceCourse } from './RaceActivity'
 import { config } from './config'
-import { detectTier, TIERS } from './tiers'
+import { detectTier, resolveTier, TIERS } from './tiers'
 import { clamp, damp, lerp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
 import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, loadMissionProgress, saveMissionProgress, type Profile } from './storage'
@@ -355,7 +355,10 @@ export class Game {
     // Resolve the quality tier once at startup (GPU/UA probe + manual override),
     // then make it the single object every system reads from.
     const tierName = detectTier(userConfig.quality)
-    const tier = TIERS[tierName]
+    // resolveTier layers the optional "lite / potato" path (?lite or very weak
+    // hardware) on top of the detected preset: same tier name, post-processing +
+    // shadows stripped and density/draw-distance pulled in for the weakest phones.
+    const tier = resolveTier(userConfig.quality)
     config.quality = tierName
     config.tier = tier
     // A much larger world on capable devices (it thins out toward the edges), but
@@ -1404,19 +1407,32 @@ export class Game {
 
   // --- automation / test harness -------------------------------------------
 
-  /** Named teleport targets for the current zone (world-space XZ). */
-  private navLandmarks(): Record<string, { x: number; z: number }> {
-    const m: Record<string, { x: number; z: number }> = {
-      spawn: { x: this.world.spawn.x, z: this.world.spawn.z },
+  /** Named teleport targets for the current zone. `x,z` is where the player is
+   *  dropped; optional `yaw` faces them at the landmark's hero geometry on arrival
+   *  (atan2(dx,dz) — forward is +z at yaw 0). Portal landmarks are placed just
+   *  OUTSIDE their trigger radius so arriving frames the ring instead of instantly
+   *  travelling. */
+  private navLandmarks(): Record<string, { x: number; z: number; yaw?: number }> {
+    const yawTo = (fx: number, fz: number, tx: number, tz: number) => Math.atan2(tx - fx, tz - fz)
+    const sx = this.world.spawn.x, sz = this.world.spawn.z
+    const m: Record<string, { x: number; z: number; yaw?: number }> = {
+      spawn: { x: sx, z: sz, yaw: yawTo(sx, sz, 0, 0) }, // face city center
       origin: { x: 0, z: 0 },
     }
     if (this.zone === 'earth') {
-      m.arcade = { x: 0, z: 24 }
-      m.factory = { x: this.robotFactory.entrance.x, z: this.robotFactory.entrance.z }
-      m.raceGate = { x: 64, z: 8 }
-      if (this.plazaMars) m.marsPortal = { x: this.plazaMars.pos.x, z: this.plazaMars.pos.z }
+      m.arcade = { x: 0, z: 24, yaw: 0 } // hall is north (+z) at z=46 — face into the marquee
+      const fx = this.robotFactory.entrance.x, fz = this.robotFactory.entrance.z
+      m.factory = { x: fx, z: fz, yaw: yawTo(fx, fz, -110, 64) } // face the HUMANOID ROBOTS tower + gantry
+      m.raceGate = { x: 64, z: 8, yaw: yawTo(64, 8, 64, 24) }
+      if (this.plazaMars) {
+        const r = this.plazaMars.radius + 5
+        m.marsPortal = { x: this.plazaMars.pos.x, z: this.plazaMars.pos.z - r, yaw: 0 } // stand south of the ring, face it
+      }
       const moon = this.zones.earthPortals.find((p) => p.target === 'moon')
-      if (moon) m.moonPortal = { x: moon.position.x, z: moon.position.z }
+      if (moon) {
+        const r = moon.radius + 5
+        m.moonPortal = { x: moon.position.x, z: moon.position.z - r, yaw: 0 }
+      }
     }
     return m
   }
@@ -1517,7 +1533,7 @@ export class Game {
       gotoLandmark: (name: string) => {
         const lm = this.navLandmarks()[name]
         if (!lm) return { ok: false, error: `unknown landmark "${name}"; try ${Object.keys(this.navLandmarks()).join(', ')}` }
-        this.navTeleport(lm.x, lm.z)
+        this.navTeleport(lm.x, lm.z, undefined, lm.yaw)
         return nav.state()
       },
 

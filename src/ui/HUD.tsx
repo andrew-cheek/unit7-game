@@ -48,6 +48,7 @@ export function HUD({
   onArcade,
   hideTopCenter,
   hideCorners,
+  botMode = false,
 }: {
   hud: HudState
   touch: boolean
@@ -65,6 +66,10 @@ export function HUD({
   // The touch welcome panel also covers the top-left corner controls; hide them
   // until the player has chosen solo / multiplayer.
   hideCorners?: boolean
+  // Browser-automation ("bot") sessions drive the engine via synthetic input, so
+  // the pointer-capture prompt and the WASD control legend are misleading there;
+  // suppress both. Real desktop players are unaffected (defaults to false).
+  botMode?: boolean
 }) {
   const [rosterOpen, setRosterOpen] = useState(false)
   const [storeOpen, setStoreOpen] = useState(false)
@@ -285,12 +290,12 @@ export function HUD({
       )}
 
       {/* click-to-look hint (desktop, pointer not yet captured) */}
-      {!touch && !hud.lookLocked && !hud.paused && !hud.intro && (
+      {!touch && !botMode && !hud.lookLocked && !hud.paused && !hud.intro && (
         <div style={clickHint}>CLICK TO CAPTURE MOUSE · OR DRAG TO LOOK</div>
       )}
 
       {/* control hints (desktop). On the launch pad, just the essentials. */}
-      {!touch && (
+      {!touch && !botMode && (
         <div style={hints}>
           {hud.onPlatform
             ? 'WASD move · drag to look · walk to the edge and step off'
