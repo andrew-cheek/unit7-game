@@ -67,6 +67,9 @@ import { StuntScore } from './StuntScore'
 import { UpgradePylons } from './UpgradePylons'
 import { NeonCrates } from './NeonCrates'
 import { NeonReflections } from './NeonReflections'
+import { GroundCritters } from './GroundCritters'
+import { StreetPerformers } from './StreetPerformers'
+import { DuskRibbons } from './DuskRibbons'
 import { HiddenCaches } from './HiddenCaches'
 import { WeeklyBeacons } from './WeeklyBeacons'
 import { DroneSiege } from './DroneSiege'
@@ -444,7 +447,7 @@ export class Game {
     this.vehicles = new Vehicles(this.engine.scene, this.physics)
     this.missiles = new Missiles(this.engine.scene)
     const npcCount = Math.round(config.npc.count * tier.densityScale)
-    this.npcs = new NPCManager(this.engine.scene, this.physics, this.capturables, npcCount)
+    this.npcs = new NPCManager(this.engine.scene, this.physics, this.capturables, npcCount, () => this.world.dayFactor)
     this.zones = new Zones(this.engine.scene)
     this.zones.setActive('earth')
     // Pooled transient FX, registered so it advances + disposes with the others.
@@ -646,6 +649,23 @@ export class Game {
       focus: () => this.player.position,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onSmash: (x, y, z, credits) => { this.addCredits(credits); this.popups.pop(x, y, z, `+${credits}c`, '#9bff6a'); this.audio.play('ui') },
+    }))
+    // Glowing ground fauna that scatter as you approach — the city feels inhabited.
+    this.systems.register(new GroundCritters(this.engine.scene, {
+      playerPos: () => this.player.position,
+      zone: () => this.zone,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // Static street buskers at seeded plaza/arcade hotspots, looping a gentle emote.
+    this.systems.register(new StreetPerformers(this.engine.scene, {
+      zone: () => this.zone,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // Cinematic dawn/dusk sky ribbons (warm at sunrise, cool at sunset).
+    this.systems.register(new DuskRibbons(this.engine.scene, {
+      focus: () => this.focus,
+      dayFactor: () => this.world.dayFactor,
+      zone: () => this.zone,
     }))
     // Reflected neon glow washing across the wet streets around the player (ambient).
     this.systems.register(new NeonReflections(this.engine.scene, {
