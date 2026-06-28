@@ -1275,10 +1275,10 @@ const calmChipBtn: CSSProperties = {
 const platformCta: CSSProperties = {
   position: 'absolute',
   left: '50%',
-  bottom: '30%',
+  bottom: '42%',
   transform: 'translateX(-50%)',
   zIndex: 18,
-  maxWidth: '80vw',
+  maxWidth: '66vw',
   textAlign: 'center',
   padding: '8px 18px',
   background: 'rgba(6,10,22,0.7)',

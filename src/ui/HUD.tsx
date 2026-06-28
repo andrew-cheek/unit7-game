@@ -296,7 +296,10 @@ export function HUD({
       {hud.fade > 0.001 && (
         <div style={{ position: 'absolute', inset: 0, background: '#000', opacity: hud.fade, transition: 'opacity 0.08s linear' }} />
       )}
-      {hud.banner && (
+      {/* Center banner — suppressed while a mission card is up so the two don't
+          collide mid-screen (and the banner often just duplicates the card title,
+          e.g. FREE FALL / WAVE 1/3). */}
+      {hud.banner && !(hud.missionPopup && !hud.minigame && !hideTopCenter) && (
         <div style={bannerStyle}>{hud.banner}</div>
       )}
 
@@ -329,40 +332,42 @@ export function HUD({
       {/* pilots roster: open profiles + stats for yourself and everyone online.
           On touch they move to the bottom-center so they clear the thumb-stick
           (bottom-left) and the action cluster (bottom-right) in any orientation. */}
+      {/* PILOTS / STORE / SAVE / CHAT. On TOUCH they live in one centered flex dock
+          so they space evenly and never overlap (the old per-button translateX
+          offsets collided once labels differed in width). On desktop they keep
+          their fixed right-anchored slots. CHAT only when a parent enabled it. */}
       {!hud.minigame && !hud.intro && !hud.onPlatform && (
-        <button
-          style={touch ? { ...pilotsBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-112%)' } : pilotsBtn}
-          onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}
-        >
-          PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
-        </button>
-      )}
-      {!hud.minigame && !hud.intro && !hud.onPlatform && (
-        <button
-          style={touch ? { ...storeBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(12%)' } : storeBtn}
-          onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}
-        >
-          STORE
-        </button>
-      )}
-      {/* SAVE / RESTORE — always available. CHAT — only when a parent has turned
-          typed chat on (hud.chatEnabled). Both sit left of STORE/PILOTS; on touch
-          they tuck into the bottom-center cluster clear of the thumb zones. */}
-      {onSave && !hud.minigame && !hud.intro && !hud.onPlatform && (
-        <button
-          style={touch ? { ...saveBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-212%)' } : saveBtn}
-          onClick={onSave}
-        >
-          SAVE
-        </button>
-      )}
-      {onChat && hud.chatEnabled && !hud.minigame && !hud.intro && !hud.onPlatform && (
-        <button
-          style={touch ? { ...chatBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(112%)' } : chatBtn}
-          onClick={onChat}
-        >
-          CHAT
-        </button>
+        touch ? (
+          <div style={bottomDock}>
+            <button style={dockBtnStyle(pilotsBtn)} onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}>
+              PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
+            </button>
+            {onSave && (
+              <button style={dockBtnStyle(saveBtn)} onClick={onSave}>SAVE</button>
+            )}
+            <button style={dockBtnStyle(storeBtn)} onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}>
+              STORE
+            </button>
+            {onChat && hud.chatEnabled && (
+              <button style={dockBtnStyle(chatBtn)} onClick={onChat}>CHAT</button>
+            )}
+          </div>
+        ) : (
+          <>
+            <button style={pilotsBtn} onClick={() => { setRosterOpen((v) => !v); setStoreOpen(false) }}>
+              PILOTS{hud.online > 1 ? ` · ${hud.online}` : ''}
+            </button>
+            <button style={storeBtn} onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}>
+              STORE
+            </button>
+            {onSave && (
+              <button style={saveBtn} onClick={onSave}>SAVE</button>
+            )}
+            {onChat && hud.chatEnabled && (
+              <button style={chatBtn} onClick={onChat}>CHAT</button>
+            )}
+          </>
+        )
       )}
       {storeOpen && !hud.minigame && (
         <CosmeticsStore p={hud.progress} onBuy={onBuy} onEquip={onEquip} onClose={() => setStoreOpen(false)} />
@@ -957,6 +962,26 @@ const storeBtn: CSSProperties = {
   letterSpacing: '0.16em',
   boxShadow: '0 0 14px rgba(255,138,30,0.22)',
   zIndex: 24,
+}
+// Touch bottom dock: one centered flex row holding PILOTS/SAVE/STORE/CHAT so they
+// space evenly and never overlap regardless of label width or which are present.
+const bottomDock: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: 'max(14px, env(safe-area-inset-bottom))',
+  transform: 'translateX(-50%)',
+  display: 'flex',
+  gap: 8,
+  alignItems: 'center',
+  zIndex: 24,
+  pointerEvents: 'none', // children re-enable; the row itself never eats taps
+  maxWidth: '92vw',
+  flexWrap: 'wrap',
+  justifyContent: 'center',
+}
+// Strip a button's absolute anchoring so it can live as a flex child in the dock.
+function dockBtnStyle(base: CSSProperties): CSSProperties {
+  return { ...base, position: 'static', right: 'auto', left: 'auto', bottom: 'auto', transform: 'none' }
 }
 // CHAT sits left of STORE (right:128); SAVE sits left of CHAT. Fixed offsets so
 // they never overlap whether or not the (conditional) CHAT button is present.
