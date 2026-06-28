@@ -14,6 +14,13 @@ import type { Zone } from './types'
 
 interface Effect {
   group: THREE.Group
+  /**
+   * Representative world epicenter of this event (ship landing/fly-by start,
+   * swarm centre, meteor target, etc.). Consumers read this to react. Omit for
+   * a truly global event with no single epicenter; the system then passes
+   * undefined to onEvent.
+   */
+  origin?: THREE.Vector3
   /** Advance; return true when finished. */
   update(dt: number): boolean
   dispose(): void
@@ -35,8 +42,13 @@ export class WorldEvents {
   private timer: number
   /** Shared additive material for every drone swarm; created lazily, reused, freed in dispose(). */
   private droneSwarmMat?: THREE.MeshBasicMaterial
-  /** Optional hook so the HUD can flash a tiny banner when an event fires. */
-  onEvent?: (label: string) => void
+  /**
+   * Optional hook so the HUD can flash a tiny banner when an event fires.
+   * `pos` is the event's representative world epicenter (or undefined for a
+   * global event with no single epicenter). The orchestrator copies it, so it
+   * is safe to pass an existing mesh/group position rather than a fresh vector.
+   */
+  onEvent?: (label: string, pos?: THREE.Vector3) => void
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -96,7 +108,10 @@ export class WorldEvents {
       default: fx = this.makeMeteors(); label = 'METEOR SHOWER'; break
     }
     this.scene.add(fx.group)
-    this.onEvent?.(label)
+    // Pass the event epicenter so reactive consumers know WHERE it happened.
+    // origin is an existing vector (mesh/group position or this.focus); the
+    // orchestrator copies it, so no per-fire allocation here.
+    this.onEvent?.(label, fx.origin)
   }
 
   // --- effect builders -------------------------------------------------------
@@ -134,6 +149,7 @@ export class WorldEvents {
     const dur = 9
     return {
       group,
+      origin: group.position, // ship's fly-by start point
       update: (dt) => {
         t += dt
         group.position.lerpVectors(from, to, t / dur)
@@ -169,6 +185,7 @@ export class WorldEvents {
     const dur = 8
     return {
       group,
+      origin: group.position, // swarm centre
       update: (dt) => {
         t += dt
         group.position.lerpVectors(from, to, t / dur)
@@ -206,6 +223,7 @@ export class WorldEvents {
     const rest = 2
     return {
       group,
+      origin: group.position, // cargo landing spot (x/z fixed; y descends)
       update: (dt) => {
         t += dt
         if (t < fall) {
@@ -242,6 +260,9 @@ export class WorldEvents {
     const dur = 5
     return {
       group,
+      // Meteors stream down around the player's area; group stays at origin, so
+      // the representative epicenter is the spawn focus. onEvent copies it.
+      origin: this.focus,
       update: (dt) => {
         t += dt
         for (const it of items) {
@@ -268,6 +289,7 @@ export class WorldEvents {
     const dur = 5
     return {
       group,
+      origin: group.position, // dust dome ground position near the horizon
       update: (dt) => {
         t += dt
         const k = t / dur
@@ -298,6 +320,7 @@ export class WorldEvents {
     const dur = 8
     return {
       group,
+      origin: group.position, // satellite's arc start (high in the sky; far from agents)
       update: (dt) => {
         t += dt
         group.position.lerpVectors(from, to, t / dur)

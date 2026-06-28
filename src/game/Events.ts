@@ -50,6 +50,7 @@ interface Traffic {
   pos: THREE.Vector3
   dir: THREE.Vector3
   speed: number
+  react: number // 0..1 reactive-world "rubberneck" amount, eases back to 0
 }
 interface Police {
   model: VehicleModel
@@ -59,6 +60,7 @@ interface Police {
   wp: number
   speed: number
   chasing: boolean // broke patrol to pursue the player (heat >= pursueAt)
+  react: number // 0..1 reactive-world "investigate" drift, eases back to 0
 }
 interface BusWaypoint {
   p: THREE.Vector3
@@ -134,6 +136,10 @@ const POWERUP_COLOR: Record<PowerupKind, number> = { speed: 0x27e7ff, shield: 0x
 const POWERUP_KINDS: PowerupKind[] = ['speed', 'shield', 'fuel', 'score']
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
 const ACTOR_CULL2 = 150 * 150 // squared distance beyond which ambient actors are culled
+// Reactive-world: how close (XZ, squared) a car must be to a world-event epicenter
+// to gently react, and how recent the event must be.
+const EVENT_REACT2 = 180 * 180
+const EVENT_MAX_AGE = 2.5 // seconds; older events are ignored entirely
 
 /**
  * Ambient + scripted city life (Earth only): collectible powerups, a periodic
@@ -147,6 +153,10 @@ export class Events {
   private capturables: Capturable[]
   private onPowerup: (kind: PowerupKind) => void
   private onBust: () => void
+  // Reactive-world hook (optional): the most recent ambient world-event epicenter.
+  private latestEvent?: () => { x: number; z: number; age: number } | null
+  // Per-frame snapshot of latestEvent(): only a recent, in-bounds event sets ev.on.
+  private ev = { on: false, x: 0, z: 0 }
 
   // Police-heat pursuit state. `pursue` mirrors heat >= pursueAt for the frame;
   // `bustContact` accumulates seconds a chasing cruiser has been on the player.
@@ -179,12 +189,13 @@ export class Events {
   }
   private t = 0
 
-  constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], onPowerup: (kind: PowerupKind) => void, onBust: () => void) {
+  constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], onPowerup: (kind: PowerupKind) => void, onBust: () => void, latestEvent?: () => { x: number; z: number; age: number } | null) {
     this.scene = scene
     this.physics = physics
     this.capturables = capturables
     this.onPowerup = onPowerup
     this.onBust = onBust
+    this.latestEvent = latestEvent
     scene.add(this.root)
 
     const q = config.tier.densityScale
@@ -278,7 +289,7 @@ export class Events {
     const dir = new THREE.Vector3(axis ? 1 : 0, 0, axis ? 0 : 1).multiplyScalar(i % 4 < 2 ? 1 : -1)
     const pos = new THREE.Vector3(axis ? -180 : lane, randRange(5, 12), axis ? lane : -180)
     if (dir.x < 0 || dir.z < 0) pos.set(axis ? 180 : lane, pos.y, axis ? lane : 180)
-    this.traffic.push({ model, pos, dir, speed: randRange(14, 26) })
+    this.traffic.push({ model, pos, dir, speed: randRange(14, 26), react: 0 })
   }
 
   /**
@@ -304,7 +315,7 @@ export class Events {
       const pos = waypoints[start].clone()
       pos.y = (this.physics.sampleGround(pos.x, pos.z, 40)?.y ?? 0) + 1.0
       model.group.position.copy(pos)
-      this.police.push({ model, pos, yaw: 0, waypoints, wp: (start + 1) % waypoints.length, speed: 15 + i * 2, chasing: false })
+      this.police.push({ model, pos, yaw: 0, waypoints, wp: (start + 1) % waypoints.length, speed: 15 + i * 2, chasing: false, react: 0 })
     }
   }
 
@@ -367,6 +378,7 @@ export class Events {
     this.t += dt
     this.playerPos.copy(playerPos)
     this.pursue = heatStars >= config.heat.pursueAt
+    this.sampleEvent()
     this.updatePowerups(dt, playerPos)
     this.updateDrones(dt)
     this.updateTraffic(dt)
@@ -531,9 +543,21 @@ export class Events {
 
   private updatePolice(dt: number) {
     const h = config.heat
+    const reactDecay = Math.min(1, dt / 1.5) // ~1.5s ease back onto the beat
     let nearestContact = Infinity // closest chasing cruiser's distance to the player this frame
     for (const p of this.police) {
       p.chasing = this.pursue
+      // Reactive "investigate" drift: only OFF-pursuit cruisers near a recent
+      // world-event lean slightly toward it, then ease back. While chasing, the
+      // reaction is force-decayed so heat always wins.
+      if (!p.chasing && this.ev.on) {
+        const edx = this.ev.x - p.pos.x
+        const edz = this.ev.z - p.pos.z
+        if (edx * edx + edz * edz < EVENT_REACT2) p.react = Math.min(1, p.react + dt * 1.8)
+        else p.react -= p.react * reactDecay
+      } else if (p.react > 0) {
+        p.react -= p.react * reactDecay
+      }
       if (p.chasing) {
         // Pursuit: steer straight at the player at a boosted speed. (Movement runs
         // even when culled so a distant cruiser still closes in off-screen.)
@@ -548,14 +572,26 @@ export class Events {
         p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
         if (d < nearestContact) nearestContact = d
       } else {
-        // Ambient patrol: loop the rectangular beat.
+        // Ambient patrol: loop the rectangular beat. A small reactive drift biases
+        // the steer target toward the event, so the cruiser leans over to
+        // "investigate" then eases back onto its beat - the waypoint advance is
+        // unchanged, so it never abandons or rewrites its route.
         const tgt = p.waypoints[p.wp]
-        const dx = tgt.x - p.pos.x
-        const dz = tgt.z - p.pos.z
+        let dx = tgt.x - p.pos.x
+        let dz = tgt.z - p.pos.z
+        if (p.react > 0.001) {
+          const w = 0.35 * p.react // small lean toward the event, capped
+          dx += (this.ev.x - p.pos.x) * w
+          dz += (this.ev.z - p.pos.z) * w
+        }
         const d = Math.hypot(dx, dz)
-        if (d < 2) {
+        // Waypoint advance uses the true (unbiased) leg distance so the drift can
+        // never make the cruiser "arrive" early or skip a corner.
+        const legDx = tgt.x - p.pos.x
+        const legDz = tgt.z - p.pos.z
+        if (Math.hypot(legDx, legDz) < 2) {
           p.wp = (p.wp + 1) % p.waypoints.length // next leg of the loop
-        } else {
+        } else if (d > 0.0001) {
           p.pos.x += (dx / d) * p.speed * dt
           p.pos.z += (dz / d) * p.speed * dt
           p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 6, dt)
@@ -613,6 +649,22 @@ export class Events {
     }
   }
 
+  /**
+   * Reactive-world: snapshot the latest world-event once per frame into `this.ev`.
+   * Only a recent (age < EVENT_MAX_AGE) event arms a reaction; otherwise ev.on is
+   * false and the traffic/police loops do zero extra work. No allocation (the
+   * callback returns a plain object we read and drop; we keep only three floats).
+   */
+  private sampleEvent() {
+    this.ev.on = false
+    if (!this.latestEvent) return
+    const e = this.latestEvent()
+    if (!e || e.age > EVENT_MAX_AGE) return
+    this.ev.on = true
+    this.ev.x = e.x
+    this.ev.z = e.z
+  }
+
   /** Squared distance test for distance-culling ambient actors (mobile perf). */
   private farFromPlayer(x: number, z: number) {
     const dx = x - this.playerPos.x
@@ -635,14 +687,41 @@ export class Events {
 
   private updateTraffic(dt: number) {
     const lim = config.world.half + 10
+    // Reactive-world ease constants: ~1.5s to ease back to the normal route.
+    const reactDecay = Math.min(1, dt / 1.5)
     for (const c of this.traffic) {
-      c.pos.addScaledVector(c.dir, c.speed * dt)
+      // Reactive "rubberneck": a nearby recent world-event nudges this car's
+      // reaction toward 1; otherwise it eases back to 0 within ~1.5s. This only
+      // modulates the rendered heading + effective speed - the route (c.dir) and
+      // the wrap logic are untouched, so a car can never be pushed off its road,
+      // stalled, or teleported.
+      if (this.ev.on) {
+        const dx = this.ev.x - c.pos.x
+        const dz = this.ev.z - c.pos.z
+        if (dx * dx + dz * dz < EVENT_REACT2) c.react = Math.min(1, c.react + dt * 2.2)
+        else c.react -= c.react * reactDecay
+      } else if (c.react > 0) {
+        c.react -= c.react * reactDecay
+      }
+      // Slow down slightly while rubbernecking (never below ~80% of cruise).
+      const spd = c.speed * (1 - 0.2 * c.react)
+      c.pos.addScaledVector(c.dir, spd * dt)
       if (c.pos.x > lim) c.pos.x = -lim
       if (c.pos.x < -lim) c.pos.x = lim
       if (c.pos.z > lim) c.pos.z = -lim
       if (c.pos.z < -lim) c.pos.z = lim
       c.model.group.position.copy(c.pos)
-      c.model.group.rotation.y = Math.atan2(c.dir.x, c.dir.z)
+      let yaw = Math.atan2(c.dir.x, c.dir.z)
+      if (c.react > 0.001) {
+        // Small visual head-turn toward the event (rotation only, capped small).
+        const want = Math.atan2(this.ev.x - c.pos.x, this.ev.z - c.pos.z)
+        let diff = want - yaw
+        while (diff > Math.PI) diff -= Math.PI * 2
+        while (diff < -Math.PI) diff += Math.PI * 2
+        // Cap the bias so the car still clearly follows its lane (~17deg max).
+        yaw += Math.max(-0.3, Math.min(0.3, diff)) * c.react
+      }
+      c.model.group.rotation.y = yaw
       const far = this.farFromPlayer(c.pos.x, c.pos.z)
       c.model.group.visible = !far
       if (!far) c.model.update(dt, 1)
