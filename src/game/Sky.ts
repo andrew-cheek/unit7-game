@@ -34,9 +34,29 @@ export class Sky {
 
   // Elevated winding "cyber highway" + the cars racing along it.
   private hwSamples: { p: THREE.Vector3; tan: THREE.Vector3 }[] = []
-  private hwCars: { mesh: THREE.Object3D; t: number; speed: number }[] = []
+  // Cars are GPU-instanced: per-car motion state is plain data; each frame we
+  // build the car's world matrix and write the 4 parts via setMatrixAt.
+  private hwCars: { t: number; speed: number; lane: number }[] = []
+  private carBody!: THREE.InstancedMesh
+  private carCabin!: THREE.InstancedMesh
+  private carHead!: THREE.InstancedMesh
+  private carTail!: THREE.InstancedMesh
+  // Local part offsets relative to the car origin (body sits at origin).
+  private readonly carPartOffset = {
+    body: new THREE.Vector3(0, 0, 0),
+    cabin: new THREE.Vector3(0, 0.5, -0.2),
+    head: new THREE.Vector3(0, 0, 1.75),
+    tail: new THREE.Vector3(0, 0, -1.75),
+  }
   private hwRight = new THREE.Vector3() // per-frame scratch, hoisted out of updateHighway
   private readonly hwUp = new THREE.Vector3(0, 1, 0)
+  // Per-frame scratch for instanced-car matrix composition (no allocation in update).
+  private carMat = new THREE.Matrix4()
+  private partMat = new THREE.Matrix4()
+  private carQuat = new THREE.Quaternion()
+  private carPos = new THREE.Vector3()
+  private carScale = new THREE.Vector3(1, 1, 1)
+  private carLook = new THREE.Vector3()
   private extraMats: THREE.Material[] = []
   private extraGeos: THREE.BufferGeometry[] = []
 
@@ -140,27 +160,37 @@ export class Sky {
     const lightGeo = ownG(new THREE.BoxGeometry(1.5, 0.18, 0.18))
     const bodyColors = [0x9bff4d, 0xffffff, 0xffd27f, 0x7fd8ff, 0xff7fb0, 0xb89bff]
     const count = Math.round(30 * densityScale)
-    for (let i = 0; i < count; i++) {
-      // Build a little car: body + glassy cabin + bright head/tail lights, all
-      // additive/fog-free so they glow through the translucent deck.
-      const car = new THREE.Group()
-      const bodyMat = ownM(new THREE.MeshBasicMaterial({ color: bodyColors[i % bodyColors.length], fog: false }))
-      const body = new THREE.Mesh(bodyGeo, bodyMat)
-      car.add(body)
-      const cabin = new THREE.Mesh(cabinGeo, ownM(new THREE.MeshBasicMaterial({ color: 0x0c1830, transparent: true, opacity: 0.85, fog: false })))
-      cabin.position.set(0, 0.5, -0.2)
-      car.add(cabin)
-      const head = new THREE.Mesh(lightGeo, ownM(new THREE.MeshBasicMaterial({ color: 0xffffe0, blending: THREE.AdditiveBlending, fog: false, transparent: true })))
-      head.position.set(0, 0, 1.75)
-      car.add(head)
-      const tail = new THREE.Mesh(lightGeo, ownM(new THREE.MeshBasicMaterial({ color: 0xff3030, blending: THREE.AdditiveBlending, fog: false, transparent: true })))
-      tail.position.set(0, 0, -1.75)
-      car.add(tail)
-      // Spread across both lanes.
-      car.userData.lane = (i % 2 ? 1 : -1) * 2.0
-      this.group.add(car)
-      this.hwCars.push({ mesh: car, t: i / count, speed: 0.05 + Math.random() * 0.05 })
+
+    // GPU-instanced car fleet: one InstancedMesh per part (body/cabin/head/tail),
+    // each with `count` instances. Body color varies per-instance via setColorAt;
+    // cabin/head/tail share a single material color. All additive/fog-free so
+    // they glow through the translucent deck, exactly as the per-mesh cars did.
+    const bodyMat = ownM(new THREE.MeshBasicMaterial({ fog: false }))
+    const cabinMat = ownM(new THREE.MeshBasicMaterial({ color: 0x0c1830, transparent: true, opacity: 0.85, fog: false }))
+    const headMat = ownM(new THREE.MeshBasicMaterial({ color: 0xffffe0, blending: THREE.AdditiveBlending, fog: false, transparent: true }))
+    const tailMat = ownM(new THREE.MeshBasicMaterial({ color: 0xff3030, blending: THREE.AdditiveBlending, fog: false, transparent: true }))
+
+    this.carBody = new THREE.InstancedMesh(bodyGeo, bodyMat, count)
+    this.carCabin = new THREE.InstancedMesh(cabinGeo, cabinMat, count)
+    this.carHead = new THREE.InstancedMesh(lightGeo, headMat, count)
+    this.carTail = new THREE.InstancedMesh(lightGeo, tailMat, count)
+
+    // The highway is a bounded elevated ring generally in view; disabling
+    // frustum culling avoids per-instance bounds popping the whole fleet.
+    for (const im of [this.carBody, this.carCabin, this.carHead, this.carTail]) {
+      im.frustumCulled = false
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      this.group.add(im)
     }
+
+    const tmpColor = new THREE.Color()
+    for (let i = 0; i < count; i++) {
+      // Per-instance body color (cabin/head/tail share their material color).
+      this.carBody.setColorAt(i, tmpColor.setHex(bodyColors[i % bodyColors.length]))
+      // Spread across both lanes; same motion state as before, now plain data.
+      this.hwCars.push({ t: i / count, speed: 0.05 + Math.random() * 0.05, lane: (i % 2 ? 1 : -1) * 2.0 })
+    }
+    if (this.carBody.instanceColor) this.carBody.instanceColor.needsUpdate = true
   }
 
   setVisible(v: boolean) {
@@ -189,15 +219,44 @@ export class Sky {
     const S = this.hwSamples.length
     if (S === 0) return
     const right = this.hwRight
+    const offs = this.carPartOffset
+    let i = 0
     for (const c of this.hwCars) {
       c.t = (c.t + c.speed * dt) % 1
       const s = this.hwSamples[Math.floor(c.t * S) % S]
-      const lane = (c.mesh.userData.lane as number) || 0
+      // Car origin: highway point + lane offset, riding on top of the deck.
       right.crossVectors(s.tan, this.hwUp).normalize()
-      c.mesh.position.copy(s.p).addScaledVector(right, lane)
-      c.mesh.position.y += 0.55 // ride on top of the deck
-      c.mesh.lookAt(c.mesh.position.x + s.tan.x, c.mesh.position.y + s.tan.y, c.mesh.position.z + s.tan.z)
+      this.carPos.copy(s.p).addScaledVector(right, c.lane)
+      this.carPos.y += 0.55
+      // Heading: replicate the old `lookAt(pos + tan)` exactly. Object3D.lookAt
+      // builds Matrix4.lookAt(eye, target, up) (eye=pos, up=+Y) then derives the
+      // quaternion from it, orienting the car's +Z along the tangent.
+      this.carLook.copy(this.carPos).add(s.tan)
+      this.carMat.lookAt(this.carPos, this.carLook, this.hwUp)
+      this.carQuat.setFromRotationMatrix(this.carMat)
+      this.carMat.compose(this.carPos, this.carQuat, this.carScale)
+      // Write each part: partWorld = carMatrix x translate(partLocalOffset).
+      // `partMat` is a scratch translation matrix reused for every part.
+      this.carBody.setMatrixAt(i, this.composePart(offs.body))
+      this.carCabin.setMatrixAt(i, this.composePart(offs.cabin))
+      this.carHead.setMatrixAt(i, this.composePart(offs.head))
+      this.carTail.setMatrixAt(i, this.composePart(offs.tail))
+      i++
     }
+    this.carBody.instanceMatrix.needsUpdate = true
+    this.carCabin.instanceMatrix.needsUpdate = true
+    this.carHead.instanceMatrix.needsUpdate = true
+    this.carTail.instanceMatrix.needsUpdate = true
+  }
+
+  /**
+   * Compose a single car-part world matrix = carMat x translate(offset), using
+   * only hoisted scratch (`partMat`) so no allocation happens per frame.
+   * Returns the shared `partMat`; consume it (setMatrixAt) before the next call.
+   */
+  private composePart(offset: THREE.Vector3): THREE.Matrix4 {
+    this.partMat.identity().setPosition(offset)
+    return this.partMat.premultiply(this.carMat)
   }
 
   private updateBig(dt: number) {
@@ -238,6 +297,12 @@ export class Sky {
     for (const s of this.ships) s.model.dispose()
     this.big.dispose()
     this.bigTrailMat.dispose()
+    // Instanced car parts: geometries/materials are owned via extraGeos/extraMats
+    // below; here we free each InstancedMesh's instance buffers.
+    this.carBody.dispose()
+    this.carCabin.dispose()
+    this.carHead.dispose()
+    this.carTail.dispose()
     this.extraMats.forEach((m) => m.dispose())
     this.extraGeos.forEach((g) => g.dispose())
     this.group.traverse((o) => {

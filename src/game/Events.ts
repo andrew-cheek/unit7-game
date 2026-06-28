@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { config } from './config'
 import { createAlien, createBus, createCitizen, createDrone, createHovercar, createPoliceCar, createSpaceship, type CharacterModel, type VehicleModel } from './procedural'
 import { dampAngle, randRange } from './utils'
@@ -80,6 +81,53 @@ interface Commuter {
   model: CharacterModel
   fade: number // 1 -> 0 as they "enter" the building
   arriving: boolean
+}
+
+/**
+ * Draw-call reduction for ambient fleets: bakes each static child mesh's local
+ * transform into its geometry and merges the children that share a material into
+ * one mesh per material, collapsing a ~10-mesh entity into 1-3 meshes. Children
+ * matching `keep` (the ones an animation drives per-frame, e.g. spinning rotors)
+ * are left untouched as separate children so their animation still works.
+ *
+ * Runs once per entity at creation - no per-frame cost. The original per-part
+ * geometries that get baked away are disposed here so nothing leaks; the merged
+ * geometries replace them on the group and are later freed by the model's own
+ * dispose() (disposeGroup traverses the group). Materials are reused as-is, so
+ * any material-level animation (e.g. the hovercar underglow emissive pulse) is
+ * preserved. Assumes uniform (1,1,1) group scale, which the fleets use.
+ */
+function mergeStaticParts(group: THREE.Group, keep: (m: THREE.Mesh) => boolean): void {
+  const kept: THREE.Mesh[] = []
+  // Bucket the static, mergeable meshes by their (shared) material instance.
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>()
+  const toDispose: THREE.BufferGeometry[] = []
+  for (const child of group.children.slice()) {
+    const m = child as THREE.Mesh
+    if (!m.isMesh || !m.geometry || Array.isArray(m.material)) continue
+    if (keep(m)) {
+      kept.push(m)
+      continue
+    }
+    m.updateMatrix()
+    const baked = m.geometry.clone()
+    baked.applyMatrix4(m.matrix)
+    const mat = m.material as THREE.Material
+    const list = byMat.get(mat)
+    if (list) list.push(baked)
+    else byMat.set(mat, [baked])
+    toDispose.push(m.geometry) // original per-part geometry, now baked into `baked`
+    group.remove(m)
+  }
+  for (const [mat, geos] of byMat) {
+    const merged = geos.length === 1 ? geos[0] : BufferGeometryUtils.mergeGeometries(geos, false)
+    if (geos.length > 1) for (const g of geos) g.dispose() // the per-mat clones, now in `merged`
+    const mesh = new THREE.Mesh(merged, mat)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    group.add(mesh)
+  }
+  for (const g of toDispose) g.dispose()
 }
 
 const POWERUP_COLOR: Record<PowerupKind, number> = { speed: 0x27e7ff, shield: 0x8a5cff, fuel: 0x9bff4d, score: 0xff8a1e }
@@ -200,6 +248,11 @@ export class Events {
 
   private spawnDrone(i: number) {
     const model = createDrone()
+    // Merge the static shell (body, eye, 4 arms) into per-material meshes but
+    // KEEP the 4 rotors separate - the model's update() spins each rotor's
+    // rotation.y per frame, so they must stay as their own child meshes.
+    // Rotors are the only CylinderGeometry parts; everything else is static.
+    mergeStaticParts(model.group, (m) => (m.geometry as THREE.BufferGeometry).type === 'CylinderGeometry')
     this.root.add(model.group)
     const c = this.clearPoint(config.npc.wanderRadius)
     this.drones.push({
@@ -214,6 +267,11 @@ export class Events {
 
   private spawnTraffic(i: number) {
     const model = createHovercar()
+    // Every hovercar part is geometrically static (only the whole car moves);
+    // the sole animation is a material-level emissive pulse on the underglow,
+    // which survives merging because the underglow geometry merges into a mesh
+    // that reuses the same material instance. So merge ALL parts (keep none).
+    mergeStaticParts(model.group, () => false)
     this.root.add(model.group)
     const axis = i % 2 === 0
     const lane = randRange(-150, 150)

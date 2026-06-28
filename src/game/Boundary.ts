@@ -19,14 +19,36 @@ export interface BoundaryBounce {
  *
  * Self-contained: owns its meshes, animates the blobs, and reports a bounce for
  * Game to apply to the player. Earth-only.
+ *
+ * GPU-instanced: instead of 34 Groups × 6 meshes (~204 draws), each distinct part
+ * (body, additive glow, eye, pupil) is a single InstancedMesh, driven per frame by
+ * recomputing instance matrices from plain blob state. ~6 draws total.
  */
 export class Boundary {
   readonly group = new THREE.Group()
   readonly radius: number
 
-  private blobs: { g: THREE.Group; baseY: number; ph: number; react: number }[] = []
+  // Per-blob animation state as plain data (no per-blob Object3D).
+  private blobs: {
+    x: number; z: number; baseY: number; size: number; rotY: number;
+    ph: number; react: number;
+  }[] = []
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
+  private bodyMesh!: THREE.InstancedMesh
+  private glowMesh!: THREE.InstancedMesh
+  private eyeMesh: THREE.InstancedMesh | null = null
+  private pupilMesh: THREE.InstancedMesh | null = null
+  private hasEyes = false
+
+  // Scratch objects reused across the whole per-frame update — no heap allocation.
+  private _m = new THREE.Matrix4()
+  private _ml = new THREE.Matrix4()
+  private _pos = new THREE.Vector3()
+  private _quat = new THREE.Quaternion()
+  private _scl = new THREE.Vector3()
+  private _yAxis = new THREE.Vector3(0, 1, 0)
+
   private t = 0
   private cooldown = 0
   private arcadeX: number
@@ -40,6 +62,7 @@ export class Boundary {
     this.radius = opts.radius
     this.arcadeX = opts.arcade.x
     this.arcadeZ = opts.arcade.z
+    this.hasEyes = opts.eyes
 
     const own = <T extends THREE.Material>(m: T) => { this.mats.push(m); return m }
     const ownG = <T extends THREE.BufferGeometry>(g: T) => { this.geos.push(g); return g }
@@ -58,47 +81,103 @@ export class Boundary {
     const eyeGeo = ownG(new THREE.SphereGeometry(1, 10, 8))
     const pupilGeo = ownG(new THREE.SphereGeometry(1, 8, 6))
 
+    const count = opts.count
+    // One InstancedMesh per distinct (geometry, material) part. Eyes/pupils are 2
+    // per blob, so their instance counts are count*2.
+    this.bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, count)
+    this.glowMesh = new THREE.InstancedMesh(glowGeo, glowMat, count)
+    // The ring surrounds the play area and is bounded; skip frustum culling so the
+    // per-instance bounds can't cause flicker (like the road grid).
+    this.bodyMesh.frustumCulled = false
+    this.glowMesh.frustumCulled = false
+    this.group.add(this.bodyMesh, this.glowMesh)
+    if (this.hasEyes) {
+      this.eyeMesh = new THREE.InstancedMesh(eyeGeo, eyeMat, count * 2)
+      this.pupilMesh = new THREE.InstancedMesh(pupilGeo, pupilMat, count * 2)
+      this.eyeMesh.frustumCulled = false
+      this.pupilMesh.frustumCulled = false
+      this.group.add(this.eyeMesh, this.pupilMesh)
+    }
+
     const R = opts.radius
-    for (let i = 0; i < opts.count; i++) {
+    for (let i = 0; i < count; i++) {
       // Distribute evenly around the SQUARE rim (matching the square play area) so
       // no corner content gets walled off, rather than an inscribed circle.
-      const seg = (i / opts.count) * 4
+      const seg = (i / count) * 4
       const e = Math.floor(seg) % 4
       const u = (seg - Math.floor(seg)) * 2 - 1 // -1..1 along this edge
       const x = e === 1 ? R : e === 3 ? -R : u * R
       const z = e === 0 ? -R : e === 2 ? R : u * R
       const size = 14 + (i % 3) * 4 // bigger so they read as a barrier, with variety
-
-      const g = new THREE.Group()
-      g.rotation.y = Math.atan2(-x, -z) // face the city centre (local +z points inward)
-
-      const body = new THREE.Mesh(bodyGeo, bodyMat)
-      body.scale.setScalar(size)
-      g.add(body)
-      const glow = new THREE.Mesh(glowGeo, glowMat)
-      glow.scale.setScalar(size * 1.5)
-      g.add(glow)
-
-      if (opts.eyes) {
-        for (const sx of [-1, 1]) {
-          const eye = new THREE.Mesh(eyeGeo, eyeMat)
-          eye.position.set(sx * size * 0.42, size * 0.28, size * 0.9)
-          eye.scale.setScalar(size * 0.2)
-          g.add(eye)
-          const pupil = new THREE.Mesh(pupilGeo, pupilMat)
-          pupil.position.set(sx * size * 0.42, size * 0.28, size * 1.04)
-          pupil.scale.setScalar(size * 0.1)
-          g.add(pupil)
-        }
-      }
-
+      const rotY = Math.atan2(-x, -z) // face the city centre (local +z points inward)
       const baseY = getGround(x, z) + size * 0.5
-      g.position.set(x, baseY, z)
-      this.group.add(g)
-      this.blobs.push({ g, baseY, ph: i * 1.7, react: 0 })
+
+      this.blobs.push({ x, z, baseY, size, rotY, ph: i * 1.7, react: 0 })
     }
 
+    // Initial matrix write (sets needsUpdate via the shared writer).
+    this.writeMatrices()
     scene.add(this.group)
+  }
+
+  /**
+   * Recompute every instance matrix from blob state. The group's per-blob transform
+   * is (translate(x, posY, z) · rotateY · scale(squish, stretch, squish)); children
+   * (eyes/pupils) compose parentMatrix · localOffsetMatrix so they follow the blob's
+   * squash exactly. Called every frame; uses only the shared scratch objects.
+   */
+  private writeMatrices() {
+    const blobs = this.blobs
+    const m = this._m, ml = this._ml
+    const pos = this._pos, quat = this._quat, scl = this._scl
+    for (let i = 0; i < blobs.length; i++) {
+      const b = blobs[i]
+      const stretch = 1 + Math.sin(this.t * 2.1 + b.ph) * 0.07 + b.react * 0.45
+      const squish = 1 / Math.sqrt(stretch) // rough volume preserve so it reads as a blob
+      const posY = b.baseY + Math.sin(this.t * 1.5 + b.ph) * 1.4 + b.react * 4
+
+      // Group transform: T · Ry · S(squish, stretch, squish)
+      quat.setFromAxisAngle(this._yAxis, b.rotY)
+      // Body: group scale × body local scale (size).
+      pos.set(b.x, posY, b.z)
+      scl.set(squish * b.size, stretch * b.size, squish * b.size)
+      m.compose(pos, quat, scl)
+      this.bodyMesh.setMatrixAt(i, m)
+
+      // Glow: group scale × glow local scale (size * 1.5).
+      const gs = b.size * 1.5
+      scl.set(squish * gs, stretch * gs, squish * gs)
+      m.compose(pos, quat, scl)
+      this.glowMesh.setMatrixAt(i, m)
+
+      if (this.eyeMesh && this.pupilMesh) {
+        // Parent (group) matrix at unit child scale: T · Ry · S(squish, stretch, squish).
+        scl.set(squish, stretch, squish)
+        m.compose(pos, quat, scl) // m = parent group matrix
+        for (let s = 0; s < 2; s++) {
+          const sx = s === 0 ? -1 : 1
+          // Eye local: position (sx*size*0.42, size*0.28, size*0.9), scale size*0.2.
+          pos.set(sx * b.size * 0.42, b.size * 0.28, b.size * 0.9)
+          quat.identity()
+          scl.set(b.size * 0.2, b.size * 0.2, b.size * 0.2)
+          ml.compose(pos, quat, scl)
+          ml.premultiply(m)
+          this.eyeMesh.setMatrixAt(i * 2 + s, ml)
+          // Pupil local: position (sx*size*0.42, size*0.28, size*1.04), scale size*0.1.
+          pos.set(sx * b.size * 0.42, b.size * 0.28, b.size * 1.04)
+          scl.set(b.size * 0.1, b.size * 0.1, b.size * 0.1)
+          ml.compose(pos, quat, scl)
+          ml.premultiply(m)
+          this.pupilMesh.setMatrixAt(i * 2 + s, ml)
+        }
+        // Restore quat for the next blob's body/glow (recomputed at loop top anyway).
+        quat.setFromAxisAngle(this._yAxis, b.rotY)
+      }
+    }
+    this.bodyMesh.instanceMatrix.needsUpdate = true
+    this.glowMesh.instanceMatrix.needsUpdate = true
+    if (this.eyeMesh) this.eyeMesh.instanceMatrix.needsUpdate = true
+    if (this.pupilMesh) this.pupilMesh.instanceMatrix.needsUpdate = true
   }
 
   /**
@@ -113,12 +192,9 @@ export class Boundary {
 
     for (const b of this.blobs) {
       if (b.react > 0) b.react = Math.max(0, b.react - dt * 2.4)
-      // Idle wobble + a squash-and-stretch kick when freshly bounced (react).
-      const stretch = 1 + Math.sin(this.t * 2.1 + b.ph) * 0.07 + b.react * 0.45
-      const squish = 1 / Math.sqrt(stretch) // rough volume preserve so it reads as a blob
-      b.g.scale.set(squish, stretch, squish)
-      b.g.position.y = b.baseY + Math.sin(this.t * 1.5 + b.ph) * 1.4 + b.react * 4
     }
+    // Idle wobble + squash-and-stretch kick (react) are applied via instance matrices.
+    this.writeMatrices()
 
     // Square containment (matches the playable square): out if either axis is past
     // the rim. Height-independent so you can't jetpack over it.
@@ -136,7 +212,7 @@ export class Boundary {
     let best = this.blobs[0]
     let bd = Infinity
     for (const b of this.blobs) {
-      const dd = (b.g.position.x - px) ** 2 + (b.g.position.z - pz) ** 2
+      const dd = (b.x - px) ** 2 + (b.z - pz) ** 2
       if (dd < bd) { bd = dd; best = b }
     }
     if (best) best.react = 1
@@ -162,6 +238,10 @@ export class Boundary {
 
   dispose() {
     this.group.parent?.remove(this.group)
+    this.bodyMesh.dispose()
+    this.glowMesh.dispose()
+    this.eyeMesh?.dispose()
+    this.pupilMesh?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
   }

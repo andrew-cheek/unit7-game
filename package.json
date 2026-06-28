@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "smoke": "node scripts/smoke.mjs",
+    "ci": "npm run typecheck && npm run build",
+    "smoke": "node scripts/ci-smoke.mjs",
+    "smoke:boot": "node scripts/smoke.mjs",
     "shots": "node scripts/shoot.mjs",
     "party:dev": "partykit dev",
     "party:deploy": "partykit deploy"
