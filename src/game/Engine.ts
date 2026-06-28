@@ -85,6 +85,11 @@ export class Engine {
   drawCalls = 0
   triangles = 0
 
+  // Frame-time capture for the debug perf sampler (window.__unit7nav.perfSample).
+  // Null when idle; an array of raw frame deltas (seconds) while a capture is
+  // running. Off in normal play, so it costs nothing.
+  private perfCapture: number[] | null = null
+
   private clock = new THREE.Clock()
   private elapsed = 0
   private accumulator = 0
@@ -378,6 +383,8 @@ export class Engine {
     const raw = this.clock.getDelta()
     // Smoothed FPS from the *real* frame time (raw, pre-clamp).
     this.fps += ((1 / Math.max(raw, 1e-4)) - this.fps) * 0.1
+    // Record the real frame delta while a perf capture is active (debug only).
+    if (this.perfCapture) this.perfCapture.push(raw)
     let frame = raw
     if (frame > config.render.maxFrameDelta) frame = config.render.maxFrameDelta
     // Hitstop counts down in real time but throttles the sim intake, so the
@@ -495,6 +502,44 @@ export class Engine {
   /** Current adaptive-resolution scale (0.6..1). Read-only; for debug/test stats. */
   get scale() {
     return this.renderScale
+  }
+
+  /** Start capturing real per-frame deltas for the debug perf sampler. */
+  beginPerfCapture() {
+    this.perfCapture = []
+  }
+
+  /**
+   * Stop the capture and reduce it to frame-time percentiles. Returns null if no
+   * capture was running or no frames were recorded. Times are in milliseconds;
+   * `p95`/`p99` are the slow-frame tail (the numbers that read as hitches),
+   * `onePercentLowFps` is the classic "1% low" smoothness figure.
+   */
+  endPerfCapture(): {
+    frames: number; avgMs: number; medianMs: number; p95Ms: number; p99Ms: number; maxMs: number
+    avgFps: number; onePercentLowFps: number
+  } | null {
+    const cap = this.perfCapture
+    this.perfCapture = null
+    if (!cap || cap.length === 0) return null
+    const ms = cap.map((s) => s * 1000).sort((a, b) => a - b)
+    const n = ms.length
+    const at = (q: number) => ms[Math.min(n - 1, Math.floor(q * n))]
+    const avgMs = ms.reduce((a, b) => a + b, 0) / n
+    // 1% low: mean of the slowest 1% of frames, expressed as fps.
+    const tail = ms.slice(Math.floor(n * 0.99))
+    const tailAvg = tail.reduce((a, b) => a + b, 0) / Math.max(1, tail.length)
+    const round = (v: number) => Number(v.toFixed(2))
+    return {
+      frames: n,
+      avgMs: round(avgMs),
+      medianMs: round(at(0.5)),
+      p95Ms: round(at(0.95)),
+      p99Ms: round(at(0.99)),
+      maxMs: round(ms[n - 1]),
+      avgFps: round(1000 / avgMs),
+      onePercentLowFps: round(1000 / tailAvg),
+    }
   }
 
   /** Effective drawing-buffer pixel ratio (device ratio, capped, then scaled). */

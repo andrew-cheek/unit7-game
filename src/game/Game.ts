@@ -1684,8 +1684,8 @@ export class Game {
     const ZONES: Zone[] = ['earth', 'moon', 'mars']
 
     const nav = {
-      /** Library version, so a script can feature-detect the surface. */
-      version: 2,
+      /** Library version, so a script can feature-detect the surface. v3 adds perfSample. */
+      version: 3,
 
       /** True once the world is interactive (no intro / launch pad / drop / minigame). */
       ready: () => !this.intro && !this.launchPad && !this.dropIn && !this.inMinigame,
@@ -1810,6 +1810,31 @@ export class Game {
           zone: this.zone,
           raidActive: this.raidActive,
         }
+      },
+
+      /** Measure real render performance over `ms` milliseconds: captures every
+       *  frame delta, then returns frame-time percentiles + the current tier and
+       *  render stats. Resolves to a JSON-safe object. Use to catch frame-rate
+       *  regressions per tier (drive with ?tier=low|medium|high) the way metrics()
+       *  catches draw-call/triangle regressions. Live-game safe: capture is off
+       *  until called and reset afterwards. */
+      perfSample: (ms = 2000) => {
+        const dur = Math.max(200, Math.min(Number(ms) || 2000, 20000))
+        this.engine.beginPerfCapture()
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            const perf = this.engine.endPerfCapture()
+            resolve({
+              tier: config.tier.name,
+              reducedMotion: config.reducedMotion,
+              zone: this.zone,
+              renderScale: Number(this.engine.scale.toFixed(3)),
+              drawCalls: this.engine.drawCalls,
+              triangles: this.engine.triangles,
+              perf,
+            })
+          }, dur)
+        })
       },
 
       /** A compact, JSON-safe snapshot of where/what the player is. */
