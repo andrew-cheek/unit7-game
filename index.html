@@ -9,12 +9,22 @@
     <meta name="theme-color" content="#05060b" />
     <link rel="icon" href="data:," />
     <title>Unit 7 — Sci-Fi City</title>
-    <!-- Google Analytics (hostname-aware: game vs main site) -->
+    <!-- Google Analytics (hostname-aware: game vs main site).
+         The GAME host is treated as a kids' service: analytics are hardened to
+         basic page metrics only — Google Signals (cross-device / advertising
+         identifiers) and ad personalization are OFF and ad data is redacted, so
+         no advertising/cross-site tracking of children occurs. This is the COPPA
+         posture for a public kids' build. The MAIN site keeps standard config.
+         (To go even further, set DISABLE_GAME_ANALYTICS = true to skip GA on the
+         game host entirely.) -->
     <script>
       (function () {
+          var DISABLE_GAME_ANALYTICS = false; // flip true to drop GA on the game host completely
           var GAME_ID = 'G-68V3G2JBXV';
           var MAIN_ID = 'G-RCCCLCQX95';
-          var id = (window.location.hostname === 'unit7.humanoidrobots.com') ? GAME_ID : MAIN_ID;
+          var isGame = (window.location.hostname === 'unit7.humanoidrobots.com');
+          if (isGame && DISABLE_GAME_ANALYTICS) return; // no analytics at all on the kids' build
+          var id = isGame ? GAME_ID : MAIN_ID;
           var s = document.createElement('script');
           s.async = true;
           s.src = 'https://www.googletagmanager.com/gtag/js?id=' + id;
@@ -22,7 +32,18 @@
           window.dataLayer = window.dataLayer || [];
           window.gtag = function () { window.dataLayer.push(arguments); };
           window.gtag('js', new Date());
-          window.gtag('config', id, { send_page_view: true });
+          if (isGame) {
+              // Kid-safe analytics: no advertising/cross-device identifiers, no ad
+              // personalization, redact ad data. Basic page metrics only.
+              window.gtag('set', 'ads_data_redaction', true);
+              window.gtag('config', id, {
+                  send_page_view: true,
+                  allow_google_signals: false,
+                  allow_ad_personalization_signals: false
+              });
+          } else {
+              window.gtag('config', id, { send_page_view: true });
+          }
       })();
     </script>
     <style>
