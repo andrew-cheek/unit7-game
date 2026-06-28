@@ -90,10 +90,15 @@ export class OrbitalTraffic implements GameSystem {
         fin.rotation.y = a
         group.add(fin)
       }
+      // Per-shuttle window + plume materials (cloned from the templates) so each
+      // shuttle fades on its OWN alpha - a shared material would make every
+      // shuttle flicker to whichever one was processed last each frame.
+      const sWinMat = this.own(winMat.clone())
+      const sPlumeMat = this.own(this.plumeMat.clone())
       // Lit cockpit window band high on the body.
-      const windows = new THREE.Mesh(winGeo, winMat); windows.position.y = 1.9; group.add(windows)
+      const windows = new THREE.Mesh(winGeo, sWinMat); windows.position.y = 1.9; group.add(windows)
       // Bright additive engine plume cone at the tail, pointing down.
-      const plume = new THREE.Mesh(plumeGeo, this.plumeMat); plume.position.y = -1.1; plume.rotation.x = Math.PI; group.add(plume)
+      const plume = new THREE.Mesh(plumeGeo, sPlumeMat); plume.position.y = -1.1; plume.rotation.x = Math.PI; group.add(plume)
 
       group.visible = false
       this.group.add(group)
@@ -145,9 +150,6 @@ export class OrbitalTraffic implements GameSystem {
     if (this.group.visible !== active) this.group.visible = active
     if (!active) return
 
-    // Theme the (shared) plume per active zone - one color set, no per-frame alloc.
-    this.plumeMat.color.copy(this.zone === 'mars' ? this.marsPlume : this.moonPlume)
-
     for (const s of this.shuttles) {
       if (s.delay > 0) {
         s.delay -= dt
@@ -157,6 +159,8 @@ export class OrbitalTraffic implements GameSystem {
 
       const winMat = s.windows.material as THREE.MeshBasicMaterial
       const plumeMat = s.plume.material as THREE.MeshBasicMaterial
+      // Theme this shuttle's plume per active zone (cheap per-shuttle copy, no alloc).
+      plumeMat.color.copy(this.zone === 'mars' ? this.marsPlume : this.moonPlume)
 
       if (s.mode === 'depart') {
         // Accelerate up the column; plume burns bright; fade out high up.
