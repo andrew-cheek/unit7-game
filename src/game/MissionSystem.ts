@@ -14,6 +14,8 @@ import type { MissionProgress } from './storage'
  * dependencies. The system owns the beacon mesh + the chain progress.
  */
 export interface MissionContext {
+  /** Frame delta in seconds, so the beacon spins at a fixed rate independent of FPS. */
+  dt: number
   zone: Zone
   playerPos: THREE.Vector3
   captured: number
@@ -184,7 +186,7 @@ export class MissionSystem {
       const gy = ctx.groundY(this.objTarget.x, this.objTarget.z)
       this.objBeacon.position.set(this.objTarget.x, gy, this.objTarget.z)
       this.objBeacon.visible = true
-      this.objBeacon.rotation.y += 0.4 * (1 / 60)
+      this.objBeacon.rotation.y += 0.4 * ctx.dt
       const d = Math.round(Math.hypot(this.objTarget.x - ctx.playerPos.x, this.objTarget.z - ctx.playerPos.z))
       if (label) label = `${label} · ${d}m`
     } else {

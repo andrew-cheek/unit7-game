@@ -78,7 +78,7 @@ export interface HudState {
   match: MatchView | null // non-null while a live Beam Wars duel is on screen
   progress: ProgressHud // pilot level, streak, daily objective, duel rank, cosmetics
   warp: { charge01: number; ready: boolean; active: string | null; menu: boolean } // teleport ability state
-  race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean } // street-race activity
+  race: { state: 'idle' | 'countdown' | 'racing' | 'done'; cp: number; total: number; time: number; best: number; countdown: number; result: number; near: boolean; bestTime?: number; bestBonus?: number } // street-race activity
   heat: { stars: number; max: number; wanted: boolean } // police wanted level; wanted = cruisers actively chasing
   // non-null during the playable drop-in opening: altimeter, speed, phase + a
   // contextual hint, and whether the chute can be deployed yet.

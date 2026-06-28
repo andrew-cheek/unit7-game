@@ -59,11 +59,13 @@ export class CosmicSky implements GameSystem {
   constructor(scene: THREE.Scene, private deps: Deps) {
     void this.deps
     const low = config.tier.name === 'low'
+    const medium = config.tier.name === 'medium'
 
     // --- nebula band: big soft additive billboards in a high arc ---
     const cloudTex = this.ownT(this.drawCloud())
     const tints = [0xb07cff, 0x4affd0, 0xff4fd8, 0x6fa8ff, 0xff8acb]
-    const nClouds = low ? 3 : 5
+    // Medium (iPad Pro tier) gets ~70% of the high cloud count, above low's floor.
+    const nClouds = low ? 3 : medium ? 4 : 5
     for (let i = 0; i < nClouds; i++) {
       const mat = this.own(new THREE.SpriteMaterial({
         map: cloudTex,
@@ -122,7 +124,8 @@ export class CosmicSky implements GameSystem {
     // --- shooting stars: a pool of thin additive streak planes ---
     const streakTex = this.ownT(this.drawStreak())
     const streakGeo = this.ownG(new THREE.PlaneGeometry(1, 1))
-    const nStreaks = low ? 6 : 12
+    // Medium gets ~67% of the high streak pool (8 of 12), above low's 6.
+    const nStreaks = low ? 6 : medium ? 8 : 12
     for (let i = 0; i < nStreaks; i++) {
       const mat = this.own(new THREE.MeshBasicMaterial({
         map: streakTex,
@@ -200,13 +203,20 @@ export class CosmicSky implements GameSystem {
     g.addColorStop(1, 'rgba(120,140,255,0)')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
-    // Dense star dust concentrated toward the band centre.
+    // Dense star dust concentrated toward the band centre. Quantize each star's
+    // alpha into 16 buckets and only reset fillStyle when the bucket changes, so
+    // 1200 stars cost ~16 fillStyle assignments instead of one per star.
+    let bucket = -1
     for (let i = 0; i < 1200; i++) {
       const x = Math.random() * w
       const dy = (Math.random() - 0.5) ** 3 * 4 // bias toward middle
       const y = h * 0.5 + dy * h
       const a = 0.2 + Math.random() * 0.7
-      ctx.fillStyle = `rgba(255,255,255,${a})`
+      const b = Math.round(a * 16) // 16 alpha buckets, visually indistinguishable
+      if (b !== bucket) {
+        bucket = b
+        ctx.fillStyle = `rgba(255,255,255,${b / 16})`
+      }
       const sz = Math.random() < 0.9 ? 1 : 2
       ctx.fillRect(x, y, sz, sz)
     }
