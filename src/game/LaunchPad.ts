@@ -502,49 +502,122 @@ export class LaunchPad {
     for (const sz of [-6.85, 6.85]) for (const yy of [2.4, 3.4]) { const pipe = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.18, 0.18, len + 4, 8)), pipeMat); pipe.rotation.z = Math.PI / 2; pipe.position.set(cx, yy, Z + sz); this.group.add(pipe) }
   }
 
-  /** A vaulted assembly HANGAR that houses the conveyor line - a wide, peaked-roof
-   *  building (a different silhouette to the tall glass tower) that you look into
-   *  through its open front as the units are built and march out the back toward
-   *  the ledge. Glass sides, neon-trimmed gable + eaves, no colliders. */
+  /** The assembly building over the conveyor line, styled after the concept art:
+   *  a chunky dark-navy block with cyan neon edge-trim, glass upper assembly floor,
+   *  a big glowing octagonal robot-head logo, corner light-pillars and a rooftop
+   *  antenna. The ground floor is an open walk-through passage (front + back
+   *  archways) over the belt; the solid side walls register colliders. */
   private buildAssemblyHangar() {
     const Z = this.beltZ
-    const HW = 22, depth = 24, eave = 9, ridge = 15
+    const HW = 22, depth = 26
     const frontZ = Z - depth / 2, backZ = Z + depth / 2
-    const frameMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4, emissive: 0x0c2236, emissiveIntensity: 0.4 }))
-    const roofMat = this.own(new THREE.MeshStandardMaterial({ color: 0x131c2e, metalness: 0.7, roughness: 0.4, emissive: 0x0a1830, emissiveIntensity: 0.3 }))
-    const glassMat = this.own(new THREE.MeshStandardMaterial({ color: 0x8fd6ff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.12, side: THREE.DoubleSide, emissive: 0x2a6ea0, emissiveIntensity: 0.2 }))
-    const cyan = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    const mag = this.own(new THREE.MeshBasicMaterial({ color: 0xff2bd0, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-    this.towerStripMats.push(cyan, mag)
+    const FH0 = 8.5, FH1 = 7.5 // ground (walk-through) + upper (glass assembly) floor heights
+    const roofY = FH0 + FH1 // ~16
 
-    // Peaked roof: two long angled slabs meeting at the ridge.
-    const run = HW, rise = ridge - eave
-    const slabLen = Math.hypot(run, rise), ang = Math.atan2(rise, run)
-    for (const side of [-1, 1]) {
-      const slab = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(slabLen, 0.6, depth)), roofMat)
-      slab.position.set(side * HW / 2, (eave + ridge) / 2, Z); slab.rotation.z = -side * ang
-      this.group.add(slab)
-    }
-    // Ridge skylight beam + eave trims (neon).
-    const ridgeBeam = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, 0.5, depth)), cyan); ridgeBeam.position.set(0, ridge + 0.2, Z); this.group.add(ridgeBeam)
-    for (const side of [-1, 1]) { const t = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 0.4, depth)), mag); t.position.set(side * HW, eave, Z); this.group.add(t) }
+    const navy = this.own(new THREE.MeshStandardMaterial({ color: 0x141d33, metalness: 0.6, roughness: 0.42, emissive: 0x0a1430, emissiveIntensity: 0.4 }))
+    const navyDark = this.own(new THREE.MeshStandardMaterial({ color: 0x0b1124, metalness: 0.55, roughness: 0.6 }))
+    const deck = this.own(new THREE.MeshStandardMaterial({ color: 0x101a30, metalness: 0.5, roughness: 0.6 }))
+    const glass = this.own(new THREE.MeshStandardMaterial({ color: 0x0a2b4a, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.32, emissive: 0x0a3a5e, emissiveIntensity: 0.5, side: THREE.DoubleSide }))
+    const cyan = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.towerStripMats.push(cyan)
+    const box = (w: number, h: number, d: number, m: THREE.Material) => new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w, h, d)), m)
 
-    // Glass side walls with vertical frame ribs - the line shows through them.
-    for (const side of [-1, 1]) {
-      const wall = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.3, eave, depth)), glassMat); wall.position.set(side * HW, eave / 2, Z); this.group.add(wall)
-      for (let i = 0; i <= 4; i++) { const rib = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.5, eave, 0.5)), frameMat); rib.position.set(side * HW, eave / 2, frontZ + (i / 4) * depth); this.group.add(rib) }
-    }
-    // Corner columns.
-    for (const sx of [-1, 1]) for (const sz of [frontZ, backZ]) { const col = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.9, eave + 1.4, 0.9)), frameMat); col.position.set(sx * HW, (eave + 1.4) / 2, sz); this.group.add(col) }
+    // Upper floor slab + flat roof.
+    const upperFloor = box(HW * 2, 0.5, depth, deck); upperFloor.position.set(0, FH0, Z); this.group.add(upperFloor)
+    const roof = box(HW * 2 + 1, 0.6, depth + 1, navy); roof.position.set(0, roofY + 0.3, Z); roof.castShadow = true; this.group.add(roof)
 
-    // Front entrance: a wide neon lintel + the gable triangle outline you look through.
-    const lintel = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(HW * 2, 0.55, 0.55)), cyan); lintel.position.set(0, eave, frontZ); this.group.add(lintel)
-    for (const side of [-1, 1]) {
-      const g = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(slabLen, 0.32, 0.32)), mag)
-      g.position.set(side * HW / 2, (eave + ridge) / 2, frontZ); g.rotation.z = -side * ang; this.group.add(g)
+    // Solid navy side walls (full height) with a glass band on the upper floor.
+    for (const sx of [-1, 1]) {
+      const wall = box(0.7, roofY, depth, navy); wall.position.set(sx * HW, roofY / 2, Z); wall.castShadow = true; this.group.add(wall)
+      const g = box(0.25, FH1 - 1.4, depth - 3, glass); g.position.set(sx * HW - sx * 0.45, FH0 + FH1 / 2, Z); this.group.add(g)
     }
-    // Floor guide strips flanking the belt inside.
-    for (const sz of [-7.5, 7.5]) { const fl = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(HW * 1.7, 0.05, 0.3)), cyan); fl.position.set(0, 0.13, Z + sz); this.group.add(fl) }
+    // Back + front: upper floor is walled (glass front), ground floor is an open
+    // archway you walk through (flanking posts + a lintel, central gap clear).
+    for (const sz of [frontZ, backZ]) {
+      const upperWall = box(HW * 2, FH1, 0.6, navy); upperWall.position.set(0, FH0 + FH1 / 2, sz); this.group.add(upperWall)
+      for (const sx of [-1, 1]) { const post = box(HW * 0.58, FH0, 0.7, navy); post.position.set(sx * (HW * 0.71), FH0 / 2, sz); this.group.add(post) }
+      const lintel = box(HW * 2, 0.7, 0.9, cyan); lintel.position.set(0, FH0 - 0.2, sz); this.group.add(lintel)
+    }
+    // Glass front of the upper assembly floor (between the side glass bands).
+    const frontGlass = box(HW * 2 - 4, FH1 - 1.4, 0.2, glass); frontGlass.position.set(0, FH0 + FH1 / 2, frontZ - 0.2); this.group.add(frontGlass)
+
+    // Chunky corner light-pillars with vertical cyan strips + glowing caps.
+    for (const sx of [-1, 1]) for (const sz of [frontZ, backZ]) {
+      const pil = box(2.2, roofY + 1.6, 2.2, navy); pil.position.set(sx * (HW + 0.6), (roofY + 1.6) / 2, sz); pil.castShadow = true; this.group.add(pil)
+      const strip = box(0.32, roofY - 1, 0.32, cyan); strip.position.set(sx * (HW + 0.6) + sx * 1.15, roofY / 2, sz); this.group.add(strip)
+      const cap = box(2.6, 0.4, 2.6, cyan); cap.position.set(sx * (HW + 0.6), roofY + 1.7, sz); this.group.add(cap)
+    }
+
+    // Cyan neon edge-trim running along the front + sides at each floor level.
+    for (const y of [0.35, FH0 + 0.35, roofY + 0.4]) {
+      const bar = box(HW * 2 + 0.4, 0.16, 0.16, cyan); bar.position.set(0, y, frontZ); this.group.add(bar)
+      for (const sx of [-1, 1]) { const s = box(0.16, 0.16, depth + 0.3, cyan); s.position.set(sx * HW + sx * 0.1, y, Z); this.group.add(s) }
+    }
+
+    // Big glowing octagonal robot-head logo on the upper front (faces the deck).
+    const logoMat = this.own(new THREE.MeshBasicMaterial({ map: this.hangarLogoTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.towerStripMats.push(logoMat)
+    const logo = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(6.8, 6.8)), logoMat)
+    logo.position.set(0, FH0 + FH1 / 2 + 0.3, frontZ - 0.55); logo.rotation.y = Math.PI; this.group.add(logo)
+
+    // Rooftop antenna beacon (the concept's mast + cyan tip).
+    const mast = box(0.3, 5, 0.3, navyDark); mast.position.set(HW * 0.55, roofY + 2.9, Z - depth * 0.3); this.group.add(mast)
+    const beacon = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.42, 10, 8)), cyan); beacon.position.set(HW * 0.55, roofY + 5.7, Z - depth * 0.3); this.group.add(beacon)
+
+    // Hazard-striped entrance ramp leading up to the front archway.
+    const ramp = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(11, 0.4, 6.5)), this.own(new THREE.MeshStandardMaterial({ map: this.hazardTexture(), metalness: 0.4, roughness: 0.6 })))
+    ramp.position.set(0, 0.32, frontZ - 3.3); ramp.rotation.x = 0.12; this.group.add(ramp)
+
+    // Upper-floor assembly read: a short belt with a row of half-built robot units
+    // behind the glass, so the floor looks like the line is running up there too.
+    const unitMat = this.own(new THREE.MeshStandardMaterial({ color: config.palette.robot, metalness: 0.7, roughness: 0.4 }))
+    const ubelt = box(HW * 1.6, 0.3, 1.6, navyDark); ubelt.position.set(0, FH0 + 0.65, Z); this.group.add(ubelt)
+    const ustrip = box(HW * 1.6, 0.06, 0.5, cyan); ustrip.position.set(0, FH0 + 0.83, Z); this.group.add(ustrip)
+    for (let i = 0; i < 5; i++) {
+      const x = -14 + i * 7
+      const torso = box(0.6, 0.9, 0.5, unitMat); torso.position.set(x, FH0 + 1.3, Z); this.group.add(torso)
+      const head = box(0.42, 0.42, 0.42, unitMat); head.position.set(x, FH0 + 2.0, Z); this.group.add(head)
+    }
+
+    // Floor guide strips flanking the belt on the walk-through ground floor.
+    for (const sz of [-7.5, 7.5]) { const fl = box(HW * 1.7, 0.05, 0.3, cyan); fl.position.set(0, 0.13, Z + sz); this.group.add(fl) }
+  }
+
+  /** A glowing octagonal robot-head logo drawn once to a canvas. */
+  private hangarLogoTexture(): THREE.CanvasTexture {
+    const s = 256
+    const cv = document.createElement('canvas'); cv.width = s; cv.height = s
+    const ctx = cv.getContext('2d')!
+    ctx.clearRect(0, 0, s, s)
+    const c = '#27e7ff'
+    ctx.strokeStyle = c; ctx.fillStyle = c; ctx.shadowColor = c
+    ctx.lineWidth = 10; ctx.shadowBlur = 26
+    const cx = s / 2, cy = s / 2, R = 104, k = R * 0.41
+    const oct: [number, number][] = [[-k, -R], [k, -R], [R, -k], [R, k], [k, R], [-k, R], [-R, k], [-R, -k]]
+    ctx.beginPath(); oct.forEach(([x, y], i) => { const px = cx + x, py = cy + y; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) }); ctx.closePath(); ctx.stroke()
+    ctx.shadowBlur = 18; ctx.lineWidth = 12
+    const hw = 46
+    ctx.beginPath(); ctx.roundRect(cx - hw, cy - hw + 8, hw * 2, hw * 2, 16); ctx.stroke()
+    ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(cx, cy - hw + 8); ctx.lineTo(cx, cy - hw - 18); ctx.stroke()
+    ctx.beginPath(); ctx.arc(cx, cy - hw - 24, 8, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(cx - 20, cy + 12, 13, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(cx + 20, cy + 12, 13, 0, Math.PI * 2); ctx.fill()
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    this.texs.push(tex)
+    return tex
+  }
+
+  /** Yellow/black hazard stripes for the entrance ramp. */
+  private hazardTexture(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#14161c'; ctx.fillRect(0, 0, 128, 128)
+    ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 16
+    for (let i = -128; i < 256; i += 40) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 128, 128); ctx.stroke() }
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(2, 1)
+    this.texs.push(tex)
+    return tex
   }
 
   /** Industrial worker arms at stations down both sides of the belt. */
@@ -1022,19 +1095,17 @@ export class LaunchPad {
 
   colliderBoxes(): THREE.Box3[] {
     const cx = (this.beltX0 + this.beltX1) / 2
-    // Assembly hangar footprint (must match buildAssemblyHangar): spans +/-HW on x,
-    // depth on z centred at beltZ, eave-tall walls.
-    const HW = 22, depth = 24, eave = 9
-    const Z = this.beltZ, backZ = Z + depth / 2
+    // Assembly building footprint (must match buildAssemblyHangar): spans +/-HW on
+    // x, depth on z centred at beltZ. The two solid side walls are colliders; the
+    // front + back are open archways you walk through, so they're left clear.
+    const HW = 22, depth = 26, roofY = 16
+    const Z = this.beltZ
     return [
-      // The assembly line (belt + arms): a low solid bar - walk around either end.
+      // The conveyor line: a low solid bar so you can't clip the belt + arms.
       this.worldBox(cx, 1.6, Z, this.lenX / 2 + 1.5, 1.8, 5.5),
-      // Hangar shell: the two glass side walls + the back wall are solid (the front,
-      // toward spawn, stays open so you walk in - not through). The interior stays
-      // walkable so you can still reach the line; you just can't clip the shell.
-      this.worldBox(-HW, eave / 2, Z, 0.8, eave / 2, depth / 2),
-      this.worldBox(HW, eave / 2, Z, 0.8, eave / 2, depth / 2),
-      this.worldBox(cx, eave / 2, backZ, HW, eave / 2, 0.8),
+      // Solid side walls (full building height) so you can't walk through the sides.
+      this.worldBox(-HW, roofY / 2, Z, 0.9, roofY / 2, depth / 2),
+      this.worldBox(HW, roofY / 2, Z, 0.9, roofY / 2, depth / 2),
     ]
   }
 
