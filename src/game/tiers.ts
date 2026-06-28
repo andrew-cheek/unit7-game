@@ -174,3 +174,65 @@ export function detectTier(override?: AssetQuality): AssetQuality {
 
   return 'high'
 }
+
+/**
+ * Resolves the full QualityTier object to run with, layering an optional
+ * "lite / potato" path on top of the detected preset.
+ *
+ * Lite mode is the cheapest path for the weakest hardware. It is requested when:
+ *  - the `?lite` URL param is present (manual override for testing on any phone), OR
+ *  - the device auto-trips as very weak: `navigator.hardwareConcurrency <= 2`
+ *    (<= 2 logical cores) or `navigator.deviceMemory <= 2` (<= 2 GB RAM).
+ *
+ * It does NOT introduce a new AssetQuality value — it returns the existing
+ * 'low'-named tier (so the rest of the codebase keeps working unchanged) but
+ * with all post-processing and shadows stripped out and density/draw distance
+ * pulled in. That is the right lever for fill-rate- and draw-call-bound low-end
+ * phones: bloom/SSAO/DoF/SMAA and the shadow pass are the most expensive things
+ * on those GPUs, so cutting them (plus capping DPR at 1 and thinning the scene)
+ * buys the biggest frame-rate headroom.
+ *
+ * Non-lite devices get the detected preset (`base`) returned unchanged.
+ */
+export function resolveTier(override?: AssetQuality): QualityTier {
+  const name = detectTier(override)
+  const base = TIERS[name]
+
+  // Guard location/navigator for SSR, same defensive style as detectTier.
+  const hasLiteParam =
+    typeof location !== 'undefined' &&
+    new URLSearchParams(location.search).has('lite')
+
+  const cores =
+    typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency ?? 8) : 8
+  const mem =
+    typeof navigator !== 'undefined'
+      ? ((navigator as any).deviceMemory ?? 8)
+      : 8
+
+  const lite = hasLiteParam || cores <= 2 || mem <= 2
+
+  if (!lite) return base
+
+  return {
+    ...base,
+    name: base.name,
+    bloom: false,
+    ssao: false,
+    dof: false,
+    smaa: false,
+    shadows: false,
+    buildingShadows: false,
+    softShadows: false,
+    accentLights: false,
+    maxSubSteps: 2,
+    pixelRatioCap: Math.min(base.pixelRatioCap, 1),
+    densityScale: base.densityScale * 0.55,
+    drawDistance: Math.round(Math.min(base.drawDistance, 150)),
+    starCount: Math.round(Math.min(base.starCount, 120)),
+    fxScale: base.fxScale * 0.5,
+    anisotropy: 1,
+    shadowMapSize: 256,
+    envMapIntensity: base.envMapIntensity,
+  }
+}

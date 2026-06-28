@@ -186,6 +186,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onArcade={() => controlsRef.current?.openArcade()}
           hideTopCenter={touch && joinPanelVisible}
           hideCorners={touch && joinPanelVisible}
+          botMode={botMode}
         />
       )}
       {touch && hud && !hud.intro && !hud.minigame && !hud.match && !hud.paused && controlsRef.current && (

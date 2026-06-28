@@ -97,6 +97,10 @@ export default class WorldServer implements Party.Server {
   static readonly MAX_MSG_BYTES = 8192 // reject oversized inbound frames before parsing
   static readonly IDLE_TIMEOUT_MS = 30000 // reap players we haven't heard from in 30s
   static readonly REAP_MS = 10000 // stale-player sweep cadence
+  static readonly MAX_STRIKES = 6 // boot a connection after this many clearly-malicious frames
+  // Message types no honest client ever sends. Probing for any of these is the
+  // tell of someone fishing for a cheat backdoor, so each one earns a strike.
+  static readonly HONEYPOT = new Set(['admin', 'godmode', 'setscore', 'set_score', 'give_credits', 'op', 'cheat'])
 
   private players = new Map<string, PlayerSnapshot>()
   private aliens = new Map<number, Alien>()
@@ -108,6 +112,10 @@ export default class WorldServer implements Party.Server {
   // Per-connection liveness + token-bucket rate limiting (anti-flood / anti-ghost).
   private lastSeen = new Map<string, number>()
   private buckets = new Map<string, { state: number; profile: number; misc: number; ts: number }>()
+  // Per-connection strike count for clearly-hostile frames (oversized, garbage
+  // JSON, no/invalid type, or a honeypot probe). Separate from flood control:
+  // these aren't "too many" messages, they're the wrong kind entirely.
+  private strikes = new Map<string, number>()
   // Stable client identity (persisted client-side) so a reconnecting player
   // reclaims their score row instead of duplicating it.
   private connUid = new Map<string, string>() // conn.id -> client uid
@@ -134,6 +142,7 @@ export default class WorldServer implements Party.Server {
     this.profiles.delete(id)
     this.lastSeen.delete(id)
     this.buckets.delete(id)
+    this.strikes.delete(id)
     const uid = this.connUid.get(id)
     if (uid && this.uidConn.get(uid) === id) this.uidConn.delete(uid)
     this.connUid.delete(id)
@@ -171,6 +180,20 @@ export default class WorldServer implements Party.Server {
     return true
   }
 
+  /** Record one strike against a connection for a clearly-malicious frame. Once a
+   *  socket trips MAX_STRIKES it gets shown the door and fully evicted. Returns
+   *  true if the connection was booted (caller should stop touching it). */
+  private strike(id: string, sender?: Party.Connection): boolean {
+    const n = (this.strikes.get(id) ?? 0) + 1
+    this.strikes.set(id, n)
+    if (n < WorldServer.MAX_STRIKES) return false
+    // Six probes in, we stop being polite. Close the socket (no-op if it already
+    // hung up) and tear the player down.
+    try { (sender ?? this.room.getConnection(id))?.close() } catch { /* already closed */ }
+    this.removePlayer(id)
+    return true
+  }
+
   /** Evict players we haven't heard from within IDLE_TIMEOUT_MS - backstops every
    *  case where onClose/onError doesn't fire (backgrounded mobile, dropped TCP). */
   private sweepIdle() {
@@ -189,15 +212,25 @@ export default class WorldServer implements Party.Server {
     // can't be bribed, and "t":"give_me_credits" just gets dropped on the floor a
     // few lines down. The username field is the only place you can be creative and
     // even that gets sanitized. Go beat my high score the honest way.
-    // Reject oversized frames before parsing (cheap DoS guard).
-    if (typeof raw !== 'string' || raw.length > WorldServer.MAX_MSG_BYTES) return
+    // Reject oversized frames before parsing (cheap DoS guard) — and count it as a
+    // strike, since well-behaved clients never send 8KB+ frames.
+    if (typeof raw !== 'string' || raw.length > WorldServer.MAX_MSG_BYTES) { this.strike(sender.id, sender); return }
     let msg: ClientMsg
     try {
       msg = JSON.parse(raw)
     } catch {
+      // Garbage that isn't even JSON is a strike, not an honest hiccup.
+      this.strike(sender.id, sender)
       return
     }
-    if (typeof msg !== 'object' || msg === null || typeof (msg as { t?: unknown }).t !== 'string') return
+    if (typeof msg !== 'object' || msg === null || typeof (msg as { t?: unknown }).t !== 'string') { this.strike(sender.id, sender); return }
+    // Honeypot tripwire: these message types exist nowhere in the real client.
+    // Anyone sending one is fishing for a backdoor, so strike and drop on the floor.
+    if (WorldServer.HONEYPOT.has(msg.t.toLowerCase())) {
+      console.log(`[honeypot] ${sender.id} probed for "${msg.t}"`)
+      this.strike(sender.id, sender)
+      return
+    }
     // Liveness + per-connection flood control.
     this.lastSeen.set(sender.id, Date.now())
     const kind = msg.t === 'state' ? 'state' : msg.t === 'profile' ? 'profile' : 'misc'
@@ -248,11 +281,14 @@ export default class WorldServer implements Party.Server {
 
     if (msg.t === 'profile') {
       if (!this.players.has(sender.id)) return
+      // These are vanity stats for the pilots roster, not the authoritative
+      // scoreboard — but a client can still lie about them, so clamp every number
+      // into a sane finite range (NaN/Infinity fall back to the floor).
       this.profiles.set(sender.id, {
-        aliens: Math.max(0, msg.aliens | 0),
-        level: Math.max(1, Math.min(9999, (msg.level as number) | 0 || 1)),
-        rating: Math.max(0, Math.min(99999, (msg.rating as number) | 0 || 1000)),
-        badges: Math.max(0, Math.min(999, (msg.badges as number) | 0)),
+        aliens: Math.floor(clampFinite(msg.aliens, 0, 100000, 0)),
+        level: Math.floor(clampFinite(msg.level, 0, 999, 1)),
+        rating: Math.floor(clampFinite(msg.rating, 0, 100000, 1000)),
+        badges: Math.floor(clampFinite(msg.badges, 0, 1000, 0)),
         accent: colorOf(msg.accent),
         games: sanitizeGames(msg.games),
       })
