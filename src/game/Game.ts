@@ -78,6 +78,8 @@ import { GroundCritters } from './GroundCritters'
 import { StreetPerformers } from './StreetPerformers'
 import { DuskRibbons } from './DuskRibbons'
 import { HiddenCaches } from './HiddenCaches'
+import { Onlookers } from './Onlookers'
+import { CityCheer } from './CityCheer'
 import { WeeklyBeacons } from './WeeklyBeacons'
 import { DroneSiege } from './DroneSiege'
 import { BountyHunt } from './BountyHunt'
@@ -209,6 +211,7 @@ export class Game {
   // Interactive orbital drop-in (the playable opening). Replaces the passive
   // cinematic on the default Earth start.
   private dropIn: DropIn | null = null
+  private cityCheer!: CityCheer // reactive crowd cheer FX; fired on captures + combo milestones
   private dropLand = new THREE.Vector3() // where the drop-in steers + hands off (arcade plaza)
   private savedFogDensity: number | null = null
   // Sit the sky/star dome around the cinematic's pocket of airspace.
@@ -725,6 +728,19 @@ export class Game {
       zone: () => this.zone,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onCollect: (x, y, z, credits, xp) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `CACHE +${credits}c`, '#7df0ff'); this.audio.play('ui') },
+    }))
+    // Onlookers: civilian spectators at fixed plaza vantage points who turn to
+    // watch the player go by — the city feels like it notices you. Earth + tier gated.
+    this.systems.register(new Onlookers(this.engine.scene, {
+      playerPos: () => this.player.position,
+      zone: () => this.zone,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // City cheer: a reactive confetti/spark burst the crowd throws when you pull off
+    // a capture or a style-combo milestone nearby. Pooled (~1 draw at rest), reduced-
+    // motion-aware. Held on a field so gameplay events can fire cheer().
+    this.cityCheer = this.systems.register(new CityCheer(this.engine.scene, {
+      zone: () => this.zone,
     }))
     // Weekly beacons: a rotating set of bonus light-columns that changes each week.
     this.systems.register(new WeeklyBeacons(this.engine.scene, {
@@ -2413,6 +2429,8 @@ export class Game {
       this.engine.triggerHitstop(0.035)
       vibrate(25)
       this.audio.play('capture')
+      // The crowd cheers the catch — bigger burst the longer the capture chain.
+      this.cityCheer.cheer(best.position.x, best.position.y + 1.2, best.position.z, Math.min(1, 0.5 + (chainMul - 1) * 0.5))
       // Point-blank net refunds a little stamina — rewards taking the risk.
       if (closeCall) this.player.stamina = Math.min(config.player.staminaMax, this.player.stamina + 25)
       // Brief feedback only when it's noteworthy (a chain or a close call).
@@ -3014,6 +3032,8 @@ export class Game {
     this.bannerTimer = 1.8
     this.audio.play('objective')
     vibrate(20)
+    // A banked style run with real flow (x2+) gets a crowd cheer at the player's feet.
+    if (mult >= 2) this.cityCheer.cheer(this.player.position.x, this.player.position.y + 1.4, this.player.position.z, Math.min(1, 0.4 + (mult - 2) * 0.25))
   }
 
   /** One capture's worth of progress: XP + daily objective. */
