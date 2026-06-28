@@ -152,10 +152,11 @@ export class World {
   // Rooftop caps (dome/spire/pyramid/crown/tank) and antenna masts/tips are tiny
   // per-tower meshes that dominated world.group's draw count (~1000+). They share
   // a handful of unit geometries + pooled materials, so they instance cleanly.
-  // Accumulated here per (chunk, unit-geo, material, shadow) then emitted as one
-  // InstancedMesh per bucket by finalizeInstancedDecor(). Chunk keying (matching
-  // MERGE_CHUNK) keeps per-chunk frustum culling alive - a bucket behind you is
-  // skipped because each InstancedMesh keeps frustumCulled = true.
+  // Accumulated here per (unit-geo, material, shadow) - GLOBALLY, no spatial chunk
+  // - then emitted as one InstancedMesh per bucket by finalizeInstancedDecor().
+  // Chunking these only fragmented ~15-25 batches into 340 (92 of them holding a
+  // single instance = a normal draw, no win). An instanced set is 1 draw whatever
+  // its count/position, so city-wide buckets + frustumCulled=false is the win.
   private decorBuckets = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.Material; mats: THREE.Matrix4[]; shadow: boolean }>()
   // Shared antenna-mast material (was minted fresh per tower, which blocked
   // bucketing). One instance now, so every mast batches into one InstancedMesh.
@@ -182,7 +183,14 @@ export class World {
   private trainT = 0
   private tickers: { tex: THREE.CanvasTexture; speed: number; redraw: (lines: string[]) => void }[] = []
   private breaking: string[] = [] // runtime "BREAKING" headlines, newest first
-  private beacons: { mat: THREE.MeshBasicMaterial; phase: number }[] = []
+  // Rooftop aircraft-warning beacons. Were 100 individual blinking Meshes (one
+  // SphereGeometry/MeshBasicMaterial each, kept separate to blink per-phase).
+  // Collapsed into ONE InstancedMesh sharing a single material; the blink is now
+  // driven on that shared material's opacity, so all beacons pulse together (a
+  // synchronized blink - barely noticeable, and 100 draws -> 1). Transforms are
+  // accumulated during build, then the InstancedMesh is created in finalize.
+  private beaconMats: THREE.Matrix4[] = []
+  private beaconMat: THREE.MeshBasicMaterial | null = null
   private routeDashes: THREE.MeshBasicMaterial[] = []
   private static readonly ELEV = { x: 0, z: -108, baseTop: 120, tetherTop: 640 }
   private sky!: SkyModel
@@ -351,8 +359,13 @@ export class World {
   /** Queue a rooftop cap / antenna part as an instance instead of its own mesh.
    *  The per-tower transform (position + rotation + scale) is composed into a
    *  scratch Matrix4 and stored; finalizeInstancedDecor builds one InstancedMesh
-   *  per (chunk, geo, material, shadow) bucket. `shapeId` distinguishes the unit
-   *  geometries (dome/spire/pyramid/crown/tank/box) so they never get mixed. */
+   *  per (geo, material, shadow) bucket. `shapeId` distinguishes the unit
+   *  geometries (dome/spire/pyramid/crown/tank/box) so they never get mixed.
+   *  These are tiny decorative caps/antennas: one instanced set costs exactly 1
+   *  draw regardless of count or position, so we bucket GLOBALLY (no 120m chunk
+   *  in the key). Chunking these only fragmented ~15-25 batches into 340, many
+   *  holding a single instance (no win). The merged building BODIES still chunk
+   *  for culling - that path is untouched. */
   private addDecorInstance(
     shapeId: string,
     geo: THREE.BufferGeometry,
@@ -363,8 +376,7 @@ export class World {
     rotX = 0, rotY = 0,
     shadow = false,
   ) {
-    const C = World.MERGE_CHUNK
-    const key = `${Math.floor(cx / C)}_${Math.floor(cz / C)}|${shapeId}|${mat.uuid}|${shadow ? 1 : 0}`
+    const key = `${shapeId}|${mat.uuid}|${shadow ? 1 : 0}`
     let b = this.decorBuckets.get(key)
     if (!b) { b = { geo, mat, mats: [], shadow }; this.decorBuckets.set(key, b) }
     this.scratchEuler.set(rotX, rotY, 0)
@@ -375,8 +387,8 @@ export class World {
 
   /** Emit one InstancedMesh per decor bucket. The shared unit geometries are
    *  already owned elsewhere and reused directly here (no fresh clones), so no
-   *  new geometry to register. Shadow flags + frustumCulled (default true) are
-   *  carried per bucket so the <150m shadow gate and per-chunk culling survive. */
+   *  new geometry to register. Shadow flags are carried per bucket so the <150m
+   *  shadow gate survives. */
   private finalizeInstancedDecor() {
     const scratch = this.scratchMat
     for (const b of this.decorBuckets.values()) {
@@ -391,17 +403,31 @@ export class World {
       // Original cap/antenna/ziggurat meshes left receiveShadow at its default
       // (false); keep that for pixel parity.
       inst.receiveShadow = false
-      // Leave frustumCulled at its default (true): these are chunk-local, so a
-      // bucket whose 120m chunk is behind the camera is culled - the draw-call win.
+      // Buckets are now global (city-wide), not chunk-local, so a bounding-sphere
+      // frustum test would span the whole city and never cull. An instanced set is
+      // 1 draw regardless of count/position, so skip the test entirely.
+      inst.frustumCulled = false
       this.group.add(inst)
     }
     this.decorBuckets.clear()
-  }
-  /** Add a decorative neon mesh to the scene + register it with the NeonManager
-   *  (so the density dial + distance LOD can thin it). */
-  private addNeon(mesh: THREE.Object3D, keep: number) {
-    this.group.add(mesh)
-    this.neon.add(mesh, keep)
+
+    // Rooftop warning beacons: one InstancedMesh sharing one material (the blink
+    // is driven on that material in update()). domeGeo is already owned.
+    if (this.beaconMats.length) {
+      const mat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3b3b, fog: false, transparent: true }))
+      const inst = new THREE.InstancedMesh(this.domeGeo, mat, this.beaconMats.length)
+      for (let i = 0; i < this.beaconMats.length; i++) {
+        scratch.copy(this.beaconMats[i])
+        inst.setMatrixAt(i, scratch)
+      }
+      inst.instanceMatrix.needsUpdate = true
+      inst.castShadow = false
+      inst.receiveShadow = false
+      inst.frustumCulled = false
+      this.group.add(inst)
+      this.beaconMat = mat
+    }
+    this.beaconMats.length = 0
   }
 
   private buildMaterials() {
@@ -597,10 +623,10 @@ export class World {
     // Trim chance scales with the district neon allowance (NeonManager rule):
     // commercial blocks get more, residential/industrial stay calm.
     if (!dark && !round && hash01(seed * 5.1) > 1 - 0.45 * neon) {
-      const trim = new THREE.Mesh(this.boxGeo, this.glow(neonCorner, 1.5))
-      trim.scale.set(fx + 0.6, 0.7, fz + 0.6)
-      trim.position.set(cx, h + 0.1, cz)
-      this.addNeon(trim, hash01(seed * 5.7))
+      // Instanced (box geo + pooled glow material), city-wide bucket. ~1 draw per
+      // material whatever the count, so NeonManager's distance/density LOD on these
+      // is unnecessary - we no longer register them with it.
+      this.addDecorInstance('box', this.boxGeo, this.glow(neonCorner, 1.5), cx, cz, cx, h + 0.1, cz, fx + 0.6, 0.7, fz + 0.6, 0, 0, false)
     }
     // Desktop-only decorative neon (extra draw calls). On mobile the window
     // texture carries the sci-fi look, so these are skipped to hold frame rate.
@@ -610,11 +636,8 @@ export class World {
     // A glowing vertical spine on taller towers (front + back faces).
     if (richFacade && h > 46 && hash01(seed * 8.9) > 0.55) {
       const spineMat = this.glow(neonCorner, 1.8)
-      for (const sz of [fz / 2 + 0.05, -fz / 2 - 0.05]) {
-        const spine = new THREE.Mesh(this.boxGeo, spineMat)
-        spine.scale.set(0.5, h * 0.92, 0.3)
-        spine.position.set(cx, h * 0.5, cz + sz)
-        this.addNeon(spine, hash01(seed * 6.3))
+      for (const sOff of [fz / 2 + 0.05, -fz / 2 - 0.05]) {
+        this.addDecorInstance('box', this.boxGeo, spineMat, cx, cz, cx, h * 0.5, cz + sOff, 0.5, h * 0.92, 0.3, 0, 0, false)
       }
     }
     // Stacked horizontal neon light-bands wrapping tall towers (Coruscant look).
@@ -622,10 +645,7 @@ export class World {
       const bandMat = this.glow(neonCorner, 1.5)
       const bands = Math.min(3, Math.floor(h / 26))
       for (let k = 1; k <= bands; k++) {
-        const band = new THREE.Mesh(this.boxGeo, bandMat)
-        band.scale.set(fx + 0.5, 0.5, fz + 0.5)
-        band.position.set(cx, (h * k) / (bands + 1), cz)
-        this.addNeon(band, hash01(seed * 9.1 + k))
+        this.addDecorInstance('box', this.boxGeo, bandMat, cx, cz, cx, (h * k) / (bands + 1), cz, fx + 0.5, 0.5, fz + 0.5, 0, 0, false)
       }
     }
     // Roof-shape variety so the skyline isn't all flat boxes.
@@ -675,13 +695,17 @@ export class World {
       const tipMat = this.glow(config.palette.magenta, 3)
       this.addDecorInstance('box', this.boxGeo, tipMat, cx, cz, cx, h + mh, cz, 0.5, 0.5, 0.5, 0, 0, false)
       // Blinking aircraft-warning beacon on the mast tip (desktop only - animated).
+      // Accumulate the transform; all beacons become one InstancedMesh in finalize
+      // and blink together off a single shared material (synchronized pulse).
       if (config.tier.name === 'high') {
-        const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3b3b, fog: false, transparent: true }))
-        const beacon = new THREE.Mesh(this.domeGeo, beaconMat)
-        beacon.scale.set(0.6, 0.6, 0.6)
-        beacon.position.set(cx, h + mh + 0.4, cz)
-        this.group.add(beacon)
-        this.beacons.push({ mat: beaconMat, phase: hash01(seed * 12.1) * 6.28 })
+        this.scratchEuler.set(0, 0, 0)
+        this.scratchQuat.setFromEuler(this.scratchEuler)
+        this.scratchMat.compose(
+          this.scratchPos.set(cx, h + mh + 0.4, cz),
+          this.scratchQuat,
+          this.scratchScale.set(0.6, 0.6, 0.6),
+        )
+        this.beaconMats.push(this.scratchMat.clone())
       }
     }
   }
@@ -2049,8 +2073,10 @@ export class World {
 
     // News tickers scroll their headline strips.
     for (const t of this.tickers) t.tex.offset.x = (t.tex.offset.x + t.speed * dt) % 1
-    // Rooftop beacons blink.
-    for (const b of this.beacons) b.mat.opacity = Math.sin(this.time * 3 + b.phase) > 0.4 ? 1 : 0.12
+    // Rooftop beacons blink. All share one material now, so one assignment drives
+    // every beacon (synchronized pulse). Same rate/brightness as the old per-mesh
+    // loop, just without the per-tower phase offset.
+    if (this.beaconMat) this.beaconMat.opacity = Math.sin(this.time * 3) > 0.4 ? 1 : 0.12
     // Route trail: a pulse of light travels along the dashes toward the plaza.
     for (let i = 0; i < this.routeDashes.length; i++) {
       const phase = (this.time * 1.6 - i * 0.35) % 2
