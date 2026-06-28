@@ -120,10 +120,14 @@ export class SkyElevator {
     const R = opts.radius
     const low = config.tier.name === 'low'
 
-    // Forward-right of spawn, clear of the assembly belt (z≈8, x=-17..17) and the
-    // central dive lane: tower root ≈ (R*0.5, 0, R*0.12) ≈ (25, 0, 6).
-    this.root.position.set(R * 0.5, 0, R * 0.12)
-    // Face the doorway roughly back toward the deck centre (so doors greet spawn).
+    // In the OPEN deck behind the assembly hangar (the hangar box is x[-22,22],
+    // z[-5,21]; the launch rockets sit at x≈±33). The side gaps beside the hangar
+    // were cramped and the tall shaft clipped the glass wall/roof, so we sit it in
+    // the clear zone behind the hangar toward the dive ledge — z>21 has no roof, no
+    // walls and no rockets — offset left of the central dive lane so it fills the
+    // otherwise-empty back-left of the deck and you pass it on the way to the edge.
+    this.root.position.set(-R * 0.36, 0, R * 0.58) // ≈ (-18, 0, 29)
+    // Face the doorway back toward the deck centre (so the doors greet the player).
     this.root.rotation.y = Math.atan2(-this.root.position.x, -this.root.position.z)
 
     // Boarding spot: at the tower base, in PARENT-LOCAL space.
