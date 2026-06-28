@@ -305,10 +305,15 @@ export class DroneSiege implements GameSystem {
     this.pulse += dt
 
     // Beacon look: slow cool pulse when idle, hot glow during a siege.
+    // reducedMotion (read live): soften the siege strobe from 6 rad/s to a calm
+    // 3 rad/s and shrink the pulse amplitude, keeping the beacon bright/findable.
     const sieging = this.state !== 'idle'
-    const heat = sieging ? 1.5 + 0.4 * Math.sin(this.pulse * 6) : 0.6 + 0.25 * Math.sin(this.pulse * 1.6)
+    const siegeRate = config.reducedMotion ? 3 : 6
+    const heatAmp = config.reducedMotion ? 0.2 : 0.4
+    const ringAmp = config.reducedMotion ? 0.12 : 0.25
+    const heat = sieging ? 1.5 + heatAmp * Math.sin(this.pulse * siegeRate) : 0.6 + 0.25 * Math.sin(this.pulse * 1.6)
     this.beaconCoreMat.color.setRGB(Math.min(1, heat), Math.min(0.35, heat * 0.16), 0.12)
-    this.beaconRingMat.opacity = sieging ? 0.55 + 0.25 * Math.sin(this.pulse * 6) : 0.35 + 0.15 * Math.sin(this.pulse * 1.6)
+    this.beaconRingMat.opacity = sieging ? 0.55 + ringAmp * Math.sin(this.pulse * siegeRate) : 0.35 + 0.15 * Math.sin(this.pulse * 1.6)
 
     const focus = this.deps.focus()
 

@@ -984,7 +984,11 @@ export class LaunchPad {
     for (const a of this.arms) {
       a.pivot.rotation.x = Math.sin(this.t * 2 + a.ph) * 0.5 - 0.3
       a.elbow.rotation.x = Math.sin(this.t * 3 + a.ph) * 0.6
-      a.sparkMat.opacity = Math.max(0, Math.sin(this.t * 18 + a.ph)) * 0.85
+      // reducedMotion: soften spark strobe to a slow, low-amplitude glow.
+      const sparkFreq = config.reducedMotion ? 2 : 18
+      const sparkAmp = config.reducedMotion ? 0.18 : 0.85
+      const sparkBase = config.reducedMotion ? 0.25 : 0
+      a.sparkMat.opacity = sparkBase + Math.max(0, Math.sin(this.t * sparkFreq + a.ph)) * sparkAmp
       a.spark.scale.setScalar(1 + a.sparkMat.opacity * 0.9)
     }
     for (let i = 0; i < this.cores.length; i++) { const c = this.cores[i]; c.rotation.x += dt * 1.1; c.rotation.y += dt * 0.8; c.position.y = 3.4 + Math.sin(this.t * 1.4 + i) * 0.5 }
@@ -998,7 +1002,11 @@ export class LaunchPad {
     for (const a of this.towerArms) {
       a.pivot.rotation.x = Math.sin(this.t * 2.2 + a.ph) * 0.4 - 0.2
       a.elbow.rotation.x = Math.sin(this.t * 3.3 + a.ph) * 0.5
-      a.sparkMat.opacity = Math.max(0, Math.sin(this.t * 17 + a.ph)) * 0.9
+      // reducedMotion: soften tower spark strobe to a slow, low-amplitude glow.
+      const tSparkFreq = config.reducedMotion ? 2 : 17
+      const tSparkAmp = config.reducedMotion ? 0.2 : 0.9
+      const tSparkBase = config.reducedMotion ? 0.28 : 0
+      a.sparkMat.opacity = tSparkBase + Math.max(0, Math.sin(this.t * tSparkFreq + a.ph)) * tSparkAmp
       a.spark.scale.setScalar(1 + a.sparkMat.opacity)
     }
     for (let i = 0; i < this.towerStripMats.length; i++) this.towerStripMats[i].opacity = 0.6 + Math.sin(this.t * 2.4 + i) * 0.3
@@ -1009,14 +1017,20 @@ export class LaunchPad {
       const cx = (this.beltX0 + this.beltX1) / 2
       const tx = cx + Math.sin(this.t * 0.55) * (this.lenX / 2 - 2)
       this.gTrolley.position.x = tx
-      const work = Math.max(0, Math.sin(this.t * 16))
-      this.gWeldMat.opacity = work * 0.95
-      this.gWeld.scale.setScalar(1 + work * 1.4)
+      // reducedMotion: slow the welder pulse and lift it off zero so it reads as a steady glow.
+      const workFreq = config.reducedMotion ? 2 : 16
+      const work = Math.max(0, Math.sin(this.t * workFreq))
+      const workVis = config.reducedMotion ? 0.35 + work * 0.25 : work
+      this.gWeldMat.opacity = workVis * 0.95
+      this.gWeld.scale.setScalar(1 + workVis * 1.4)
     }
     // Scanner plane sweeps up and down the arch.
     if (this.scan && this.scanMat) {
       this.scan.position.y = 1.6 + (Math.sin(this.t * 1.3) * 0.5 + 0.5) * 6
-      this.scanMat.opacity = 0.25 + Math.sin(this.t * 6) * 0.12
+      // reducedMotion: mild flicker — soften lightly (slower, smaller swing).
+      const scanFreq = config.reducedMotion ? 2 : 6
+      const scanAmp = config.reducedMotion ? 0.06 : 0.12
+      this.scanMat.opacity = 0.25 + Math.sin(this.t * scanFreq) * scanAmp
     }
     for (const c of this.cargo) { c.o.position.y = c.baseY + Math.sin(this.t * 1.2 + c.ph) * 0.3; c.o.rotation.y += 0.2 * dt }
     for (const d of this.drones) {
@@ -1035,7 +1049,10 @@ export class LaunchPad {
       if (r.t < IGNITE) { flame = 0; r.y = 0 }
       else if (r.t < LIFT) { const f = (r.t - IGNITE) / (LIFT - IGNITE); flame = f; shake = f * 0.14; smoke = f }
       else { r.vy += 17 * dt; r.y += r.vy * dt; flame = 1; smoke = Math.max(0, 1 - (r.t - LIFT) * 0.5) }
-      const flick = 0.7 + Math.abs(Math.sin(this.t * 38 + r.ph)) * 0.3
+      // reducedMotion: tame the very-fast (38 rad/s) flame flicker to a calm shimmer.
+      const flickFreq = config.reducedMotion ? 3 : 38
+      const flickAmp = config.reducedMotion ? 0.12 : 0.3
+      const flick = (config.reducedMotion ? 0.88 : 0.7) + Math.abs(Math.sin(this.t * flickFreq + r.ph)) * flickAmp
       r.flameMat.opacity = flame * flick * 0.95
       r.flame.scale.set(1, (0.85 + flame * 0.7) * flick, 1)
       r.glowMat.opacity = flame * 0.5 * flick

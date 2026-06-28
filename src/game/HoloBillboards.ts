@@ -185,9 +185,16 @@ export class HoloBillboards implements GameSystem {
       b.group.position.y = b.baseY + Math.sin(this.t * 0.5 + b.phase) * 1.6
       b.group.rotation.y += b.spin * dt
       // Cheap hologram flicker: a fast jitter ridden on a slow base, clamped bright.
-      const fl = 0.62 + 0.08 * Math.sin(this.t * 12 + b.flick) + 0.06 * Math.sin(this.t * 2.3 + b.flick * 1.7)
+      // reducedMotion: drop the fast 12 rad/s jitter, keep only a gentle slow drift
+      // (2.3 rad/s at reduced amplitude) so it reads as a steady soft glow ~0.64-0.68.
+      const fl = config.reducedMotion
+        ? 0.66 + 0.02 * Math.sin(this.t * 2.3 + b.flick * 1.7)
+        : 0.62 + 0.08 * Math.sin(this.t * 12 + b.flick) + 0.06 * Math.sin(this.t * 2.3 + b.flick * 1.7)
       b.mat.opacity = fl
-      b.frame.opacity = 0.18 + 0.08 * (0.5 + 0.5 * Math.sin(this.t * 3 + b.flick))
+      // reducedMotion: soften the frame pulse amplitude (slow 3 rad/s term kept mild).
+      b.frame.opacity = config.reducedMotion
+        ? 0.20 + 0.03 * (0.5 + 0.5 * Math.sin(this.t * 3 + b.flick))
+        : 0.18 + 0.08 * (0.5 + 0.5 * Math.sin(this.t * 3 + b.flick))
     }
   }
 

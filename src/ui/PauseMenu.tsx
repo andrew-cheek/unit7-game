@@ -26,6 +26,7 @@ export function PauseMenu({
   hud,
   onToggleMute,
   onCycleNeon,
+  onToggleReducedMotion,
   onOpenChatGate,
   onDisableChat,
 }: {
@@ -34,6 +35,7 @@ export function PauseMenu({
   hud: HudState
   onToggleMute: () => void
   onCycleNeon: () => void
+  onToggleReducedMotion: () => void
   // Parental control: open the gate that turns typed chat ON (PIN-protected).
   onOpenChatGate?: () => void
   // Parental control: turn typed chat OFF (no PIN — never trap a kid enabled).
@@ -84,6 +86,7 @@ export function PauseMenu({
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <button style={muteBtn} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
           <button style={muteBtn} onClick={onCycleNeon}>NEON: {hud.neon.toUpperCase()}</button>
+          <button style={muteBtn} onClick={onToggleReducedMotion}>CALM MODE: {hud.reducedMotion ? 'ON' : 'OFF'}</button>
           <button style={resumeBtn} onClick={onResume}>RESUME</button>
         </div>
       </div>

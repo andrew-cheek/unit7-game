@@ -188,8 +188,11 @@ export class CarePackages implements GameSystem {
       const ratio = this.claimLeft / this.claimTime // 1 -> 0
       const urgency = 1 - ratio
       // Beam + ring shift hot and pulse faster as the timer runs low.
-      const flashSpeed = 3 + urgency * urgency * 14
-      const flash = 0.5 + 0.5 * Math.sin(this.t * flashSpeed)
+      // reducedMotion (read live): cap the strobe to a slow, gentle pulse and
+      // halve the flash amplitude. urgency itself is untouched (gates expiry).
+      const flashSpeed = config.reducedMotion ? 3 : (3 + urgency * urgency * 14)
+      const flashAmp = config.reducedMotion ? 0.25 : 0.5
+      const flash = 0.5 + flashAmp * Math.sin(this.t * flashSpeed)
       this.scratch.copy(this.gold).lerp(this.hot, urgency * urgency)
       this.beamMat.color.copy(this.scratch)
       this.beamMat.opacity = 0.18 + flash * (0.12 + urgency * 0.28)
