@@ -82,6 +82,11 @@ export class DropIn {
   private diveHeading = 0 // the direction you're steering the dive (moveX turns it)
   private steerX = 0 // smoothed steer input - keyboard A/D are binary, so ramp them to an analog value for smooth turns + roll
   private pitch = 0.5
+  // Initial nose-over: counts down at the start of the dive. While positive, the
+  // diver is forced into a steep head-down plunge (and the chase cam swings to look
+  // down at the city) regardless of input, so going over the edge reads as a real
+  // dive rather than a feet-first drop. Then normal steering takes over.
+  private plungeT = 0
 
   private phase: DropHud['phase'] = 'dive'
   private lastAlt = START_Y // height above ground, cached so the camera clamp can skip its raycast up high
@@ -203,6 +208,10 @@ export class DropIn {
     this.diveHeading = this.camHeading
     this.build()
     scene.add(this.group)
+    // Nose into a head-down dive at the start. A touch longer when you step off the
+    // pad (easeIn) so the dive reads clearly as the camera eases in behind you.
+    this.plungeT = easeIn ? 1.5 : 1.0
+    this.pitch = 0.7 // start already tipped forward, not standing
     if (easeIn) {
       // Stepped off the pad: keep the camera where it was (behind the walking
       // robot) and ease it into the dive view; start the fall gently and let it
@@ -913,8 +922,16 @@ export class DropIn {
         // into a forward glide (not a hover). Fall speed is the vertical component
         // of the same tilted velocity vector the steering uses, so a full hold is
         // ~2x the flared-glide descent and points dead-down.
-        const diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
-        this.pitch += (diveAmt - this.pitch) * Math.min(1, dt * 3.5)
+        let diveAmt = clamp(0.38 + this.input.moveY * 0.62, 0, 1)
+        let approach = dt * 3.5
+        if (this.plungeT > 0) {
+          // Forced head-down nose-over at the start of the dive (see plungeT). Snap
+          // into the steep dive faster than normal steering so the launch commits.
+          this.plungeT = Math.max(0, this.plungeT - dt)
+          diveAmt = Math.max(diveAmt, 0.92)
+          approach = dt * 5
+        }
+        this.pitch += (diveAmt - this.pitch) * Math.min(1, approach)
         const tp = Math.min(1, this.pitch * 1.05)
         const speed = THREE.MathUtils.lerp(DropIn.V_FLARE, DropIn.V_DIVE, this.pitch) * this.boostMul()
         const term = -speed * Math.sin(THREE.MathUtils.lerp(DropIn.THETA_MIN, Math.PI / 2, tp))
@@ -1436,11 +1453,14 @@ export class DropIn {
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -6.5); want.y += 3.6
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7); lookWant.y -= 2.6
     } else {
-      // Dive: chase from just above-behind, framed so the robot fills the frame
-      // but you can see the ground rushing up below (camera sits a bit higher and
-      // aims well down the dive line).
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -4.2); want.y += 2.6
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 4.5); lookWant.y -= 6.5
+      // Dive: chase from just above-behind. The STEEPER the dive (pitch), the more
+      // the camera tilts DOWN — a full head-down plunge looks nearly straight down
+      // at the city rushing up, while a flared glide keeps the horizon in view.
+      const steep = Math.min(1, this.pitch * 1.05)
+      const ahead = THREE.MathUtils.lerp(5.5, 2.4, steep) // look less far forward when steep
+      const down = THREE.MathUtils.lerp(4.5, 13, steep)   // and much further down
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -4.2); want.y += 2.6 + steep * 1.6
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, ahead); lookWant.y -= down
     }
     // Ground/roof clearance: the drop camera has no other collision, so on the
     // steep look-down near touchdown its above-behind spot can sink into terrain,
