@@ -49,6 +49,8 @@ import { OrbitalBodies } from './OrbitalBodies'
 import { OrbitalSilhouettes } from './OrbitalSilhouettes'
 import { ThermalVents } from './ThermalVents'
 import { CraterAmbience } from './CraterAmbience'
+import { LowGravLeap } from './LowGravLeap'
+import { OffworldSamples } from './OffworldSamples'
 import { BiolumiPods } from './BiolumiPods'
 import { Aurora } from './Aurora'
 import { SkyLeviathans } from './SkyLeviathans'
@@ -539,6 +541,16 @@ export class Game {
     this.systems.register(new BiolumiPods(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY }))
     // Moon stark crater-rim + boulder-field landmarks.
     this.systems.register(new CraterAmbience(this.engine.scene, { zone: () => this.zone, groundY: owGroundY }))
+    // Off-world activities (Moon/Mars only): a low-grav ring-leap combo course and
+    // collectible alien samples. Rewards route through onReward -> credits/XP/popup.
+    const owReward = (credits: number, xp: number, x: number, y: number, z: number, label: string) => {
+      if (credits) this.addCredits(credits)
+      if (xp) this.awardXp(xp)
+      this.popups.pop(x, y + 1, z, label, '#7df0ff')
+      this.audio.play('ui')
+    }
+    this.systems.register(new LowGravLeap(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
+    this.systems.register(new OffworldSamples(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
     // Night aurora over the city: shimmering curtains that fade in after dusk and
     // out at dawn. Earth-only ambient set dressing.
     this.systems.register(new Aurora(this.engine.scene, {
