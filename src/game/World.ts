@@ -149,6 +149,21 @@ export class World {
   // culling (a whole chunk behind you is skipped) - the win the earlier
   // merge-everything instancing experiment lost.
   private mergeBuckets = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; shadow: boolean }>()
+  // Rooftop caps (dome/spire/pyramid/crown/tank) and antenna masts/tips are tiny
+  // per-tower meshes that dominated world.group's draw count (~1000+). They share
+  // a handful of unit geometries + pooled materials, so they instance cleanly.
+  // Accumulated here per (chunk, unit-geo, material, shadow) then emitted as one
+  // InstancedMesh per bucket by finalizeInstancedDecor(). Chunk keying (matching
+  // MERGE_CHUNK) keeps per-chunk frustum culling alive - a bucket behind you is
+  // skipped because each InstancedMesh keeps frustumCulled = true.
+  private decorBuckets = new Map<string, { geo: THREE.BufferGeometry; mat: THREE.Material; mats: THREE.Matrix4[]; shadow: boolean }>()
+  // Shared antenna-mast material (was minted fresh per tower, which blocked
+  // bucketing). One instance now, so every mast batches into one InstancedMesh.
+  private mastMatStore: THREE.MeshStandardMaterial | null = null
+  private get mastMat(): THREE.MeshStandardMaterial {
+    if (!this.mastMatStore) this.mastMatStore = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.5 }))
+    return this.mastMatStore
+  }
   private static readonly MERGE_CHUNK = 120 // metres per merge chunk
   private billboards: Billboard[] = []
   private facadeMats: THREE.MeshStandardMaterial[] = [] // window-lit tower facades (dimmed by day)
@@ -247,6 +262,7 @@ export class World {
     this.buildNearbyBuildings()
     this.buildDistrictAnchors()
     this.finalizeBuildingMerge()
+    this.finalizeInstancedDecor()
     this.buildElevatedPlatform()
     this.buildDriveHighway()
     this.buildExtras()
@@ -278,8 +294,20 @@ export class World {
     this.ownedGeos.push(g)
     return g
   }
+  // Pool glow materials by (emissive colour + intensity) so identical neon caps,
+  // antenna tips and trim SHARE one material. Sharing is what lets caps/antenna
+  // parts of the same colour bucket into a single InstancedMesh (the renderer
+  // also sees far fewer distinct materials). Behaviour is identical to minting a
+  // fresh material each call - same base/emissive/intensity/roughness.
+  private glowPool = new Map<string, THREE.MeshStandardMaterial>()
   private glow(color: number, intensity = 3) {
-    return this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: intensity, roughness: 0.4 }))
+    const key = color + '|' + intensity
+    let m = this.glowPool.get(key)
+    if (!m) {
+      m = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: color, emissiveIntensity: intensity, roughness: 0.4 }))
+      this.glowPool.set(key, m)
+    }
+    return m
   }
 
   /** Queue a static body/base for chunked merging instead of adding it as its own
@@ -301,6 +329,7 @@ export class World {
   private scratchPos = new THREE.Vector3()
   private scratchQuat = new THREE.Quaternion()
   private scratchScale = new THREE.Vector3()
+  private scratchEuler = new THREE.Euler()
 
   /** Merge every queued bucket into one mesh per (chunk, material). */
   private finalizeBuildingMerge() {
@@ -317,6 +346,56 @@ export class World {
       this.solidMeshes.push(mesh) // camera collision raycasts the merged shell
     }
     this.mergeBuckets.clear()
+  }
+
+  /** Queue a rooftop cap / antenna part as an instance instead of its own mesh.
+   *  The per-tower transform (position + rotation + scale) is composed into a
+   *  scratch Matrix4 and stored; finalizeInstancedDecor builds one InstancedMesh
+   *  per (chunk, geo, material, shadow) bucket. `shapeId` distinguishes the unit
+   *  geometries (dome/spire/pyramid/crown/tank/box) so they never get mixed. */
+  private addDecorInstance(
+    shapeId: string,
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    cx: number, cz: number,
+    px: number, py: number, pz: number,
+    sx: number, sy: number, sz: number,
+    rotX = 0, rotY = 0,
+    shadow = false,
+  ) {
+    const C = World.MERGE_CHUNK
+    const key = `${Math.floor(cx / C)}_${Math.floor(cz / C)}|${shapeId}|${mat.uuid}|${shadow ? 1 : 0}`
+    let b = this.decorBuckets.get(key)
+    if (!b) { b = { geo, mat, mats: [], shadow }; this.decorBuckets.set(key, b) }
+    this.scratchEuler.set(rotX, rotY, 0)
+    this.scratchQuat.setFromEuler(this.scratchEuler)
+    this.scratchMat.compose(this.scratchPos.set(px, py, pz), this.scratchQuat, this.scratchScale.set(sx, sy, sz))
+    b.mats.push(this.scratchMat.clone())
+  }
+
+  /** Emit one InstancedMesh per decor bucket. The shared unit geometries are
+   *  already owned elsewhere and reused directly here (no fresh clones), so no
+   *  new geometry to register. Shadow flags + frustumCulled (default true) are
+   *  carried per bucket so the <150m shadow gate and per-chunk culling survive. */
+  private finalizeInstancedDecor() {
+    const scratch = this.scratchMat
+    for (const b of this.decorBuckets.values()) {
+      if (b.mats.length === 0) continue
+      const inst = new THREE.InstancedMesh(b.geo, b.mat, b.mats.length)
+      for (let i = 0; i < b.mats.length; i++) {
+        scratch.copy(b.mats[i])
+        inst.setMatrixAt(i, scratch)
+      }
+      inst.instanceMatrix.needsUpdate = true
+      inst.castShadow = b.shadow
+      // Original cap/antenna/ziggurat meshes left receiveShadow at its default
+      // (false); keep that for pixel parity.
+      inst.receiveShadow = false
+      // Leave frustumCulled at its default (true): these are chunk-local, so a
+      // bucket whose 120m chunk is behind the camera is culled - the draw-call win.
+      this.group.add(inst)
+    }
+    this.decorBuckets.clear()
   }
   /** Add a decorative neon mesh to the scene + register it with the NeonManager
    *  (so the density dial + distance LOD can thin it). */
@@ -553,68 +632,48 @@ export class World {
     const roof = hash01(seed * 4.4)
     const neonPick = ACCENTS[Math.floor(hash01(seed * 6.1) * ACCENTS.length)]
     if (roof < 0.14) {
-      // Domed cap.
-      const dome = new THREE.Mesh(this.domeGeo, mat)
-      dome.scale.set(fx, Math.min(fx, fz) * 0.6, fz)
-      dome.position.set(cx, h, cz)
-      this.group.add(dome)
+      // Domed cap. (Original mesh never cast shadows -> shadow false for parity.)
+      this.addDecorInstance('dome', this.domeGeo, mat, cx, cz, cx, h, cz, fx, Math.min(fx, fz) * 0.6, fz, 0, 0, false)
     } else if (roof < 0.28) {
       // Spire cap (glowing on lit towers, matte on dark ones).
-      const spire = new THREE.Mesh(this.spireGeo, dark ? mat : this.glow(config.palette.cyan, 2.4))
+      const spireMat = dark ? mat : this.glow(config.palette.cyan, 2.4)
       const sh = 6 + hash01(seed * 4.9) * 10
-      spire.scale.set(fx * 0.5, sh, fz * 0.5)
-      spire.position.set(cx, h + sh / 2, cz)
-      this.group.add(spire)
+      this.addDecorInstance('spire', this.spireGeo, spireMat, cx, cz, cx, h + sh / 2, cz, fx * 0.5, sh, fz * 0.5, 0, 0, false)
     } else if (roof < 0.42) {
       // Ziggurat: two shrinking setbacks stacked into a stepped pyramid.
       let sw = fx, sd = fz, sy = h
       for (let k = 0; k < 2; k++) {
         const sh = 4 + hash01(seed * (4.1 + k)) * 8
         sw *= 0.64; sd *= 0.64
-        const step = new THREE.Mesh(this.boxGeo, mat)
-        step.scale.set(sw, sh, sd)
-        step.position.set(cx, sy + sh / 2, cz)
-        step.castShadow = config.tier.buildingShadows
-        this.group.add(step)
+        this.addDecorInstance('box', this.boxGeo, mat, cx, cz, cx, sy + sh / 2, cz, sw, sh, sd, 0, 0, config.tier.buildingShadows)
         sy += sh
       }
     } else if (roof < 0.54) {
       // Pyramid / tapered crystal cap (4-sided cone).
-      const pyr = new THREE.Mesh(this.pyramidGeo, (!dark && hash01(seed * 7.3) > 0.5) ? this.glow(neonPick, 2.0) : mat)
+      const pyrMat = (!dark && hash01(seed * 7.3) > 0.5) ? this.glow(neonPick, 2.0) : mat
       const ph = Math.min(fx, fz) * (0.7 + hash01(seed * 5.5) * 0.8)
-      pyr.rotation.y = Math.PI / 4
-      pyr.scale.set(fx * 0.72, ph, fz * 0.72)
-      pyr.position.set(cx, h + ph / 2, cz)
-      this.group.add(pyr)
+      this.addDecorInstance('pyramid', this.pyramidGeo, pyrMat, cx, cz, cx, h + ph / 2, cz, fx * 0.72, ph, fz * 0.72, 0, Math.PI / 4, false)
     } else if (roof < 0.64) {
       // Crown ring around the roofline (matte on dark towers).
-      const crown = new THREE.Mesh(this.crownGeo, dark ? mat : this.glow(neonPick, 2.8))
-      crown.rotation.x = Math.PI / 2
-      crown.scale.set(fx * 0.6, fz * 0.6, Math.max(fx, fz) * 0.18)
-      crown.position.set(cx, h + 0.6, cz)
-      this.group.add(crown)
+      const crownMat = dark ? mat : this.glow(neonPick, 2.8)
+      this.addDecorInstance('crown', this.crownGeo, crownMat, cx, cz, cx, h + 0.6, cz, fx * 0.6, fz * 0.6, Math.max(fx, fz) * 0.18, Math.PI / 2, 0, false)
     } else if (roof < 0.74) {
       // Rooftop water-tank / utility cluster on stilts.
       for (let k = 0; k < 2; k++) {
-        const tank = new THREE.Mesh(this.tankGeo, k === 0 ? mat : this.glow(neonPick, 1.6))
+        const tankMat = k === 0 ? mat : this.glow(neonPick, 1.6)
         const r = Math.min(fx, fz) * 0.18
-        tank.scale.set(r, 2 + hash01(seed * (3.3 + k)) * 2, r)
-        tank.position.set(cx + (k ? 1 : -1) * fx * 0.22, h + 1.4, cz + (hash01(seed * (2.2 + k)) - 0.5) * fz * 0.3)
-        this.group.add(tank)
+        const tx = cx + (k ? 1 : -1) * fx * 0.22
+        const tz = cz + (hash01(seed * (2.2 + k)) - 0.5) * fz * 0.3
+        this.addDecorInstance('tank', this.tankGeo, tankMat, cx, cz, tx, h + 1.4, tz, r, 2 + hash01(seed * (3.3 + k)) * 2, r, 0, 0, false)
       }
     }
 
     // Rooftop antenna mast with a glowing tip on some towers (adds verticality).
     if (hash01(seed * 8.3) > 0.6) {
-      const mast = new THREE.Mesh(this.boxGeo, this.own(new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.5 })))
       const mh = 4 + hash01(seed * 9.1) * 8
-      mast.scale.set(0.25, mh, 0.25)
-      mast.position.set(cx, h + mh / 2, cz)
-      this.group.add(mast)
-      const tip = new THREE.Mesh(this.boxGeo, this.glow(config.palette.magenta, 3))
-      tip.scale.set(0.5, 0.5, 0.5)
-      tip.position.set(cx, h + mh, cz)
-      this.group.add(tip)
+      this.addDecorInstance('box', this.boxGeo, this.mastMat, cx, cz, cx, h + mh / 2, cz, 0.25, mh, 0.25, 0, 0, false)
+      const tipMat = this.glow(config.palette.magenta, 3)
+      this.addDecorInstance('box', this.boxGeo, tipMat, cx, cz, cx, h + mh, cz, 0.5, 0.5, 0.5, 0, 0, false)
       // Blinking aircraft-warning beacon on the mast tip (desktop only - animated).
       if (config.tier.name === 'high') {
         const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3b3b, fog: false, transparent: true }))

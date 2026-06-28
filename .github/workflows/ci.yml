@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: typecheck + build + headless smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start preview server
+        run: npm run preview -- --port 4173 &
+
+      - name: Wait for preview server
+        run: |
+          timeout 60 bash -c 'until curl -sf http://localhost:4173 >/dev/null; do sleep 1; done'
+
+      - name: Run headless smoke gate
+        env:
+          SMOKE_URL: http://localhost:4173/?debug&bot
+        run: node scripts/ci-smoke.mjs
