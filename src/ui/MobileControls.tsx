@@ -75,8 +75,12 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     secondary = [RUN]
     if (nearVehicle) secondary.push(ENTER)
     if (hud.canCapture) secondary.push(CAPTURE)
-    if (!airborne) secondary.push(BOARD, GRAPPLE, DANCE)
-    else secondary.push(GRAPPLE)
+    if (!airborne) {
+      secondary.push(BOARD, GRAPPLE)
+      // DANCE needs you standing still anyway, so only surface it when idle - that
+      // keeps the cluster lean during active play instead of a permanent 3rd toy.
+      if (hud.speed < 1.5) secondary.push(DANCE)
+    } else secondary.push(GRAPPLE)
     if (hud.warp.ready || hud.warp.active) secondary.push(WARP)
   }
   // GAMES warp lives right in the cluster on foot (Earth) - the clear, always-there

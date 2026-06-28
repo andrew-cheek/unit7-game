@@ -79,9 +79,11 @@ export function HUD({
   return (
     <div style={wrap}>
       {/* top-left controls (restart replays the cinematic; pause is touch-only since desktop has Esc) */}
-      {!hideCorners && <div style={topLeftRow}>
+      {!hideCorners && <div style={touch ? { ...topLeftRow, maxWidth: '92vw' } : topLeftRow}>
         <button style={pillBtn} onClick={onRestart}>RESTART ↺</button>
-        <button style={{ ...pillBtn, borderColor: 'rgba(138,92,255,0.5)', boxShadow: '0 0 14px rgba(138,92,255,0.2)' }} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+        {/* Sound toggle is redundant on touch (it lives in the pause menu); keeping it
+            in the corner pushed the row to two lines and collided with the meters. */}
+        {!touch && <button style={{ ...pillBtn, borderColor: 'rgba(138,92,255,0.5)', boxShadow: '0 0 14px rgba(138,92,255,0.2)' }} onClick={onToggleMute}>{hud.muted ? 'SOUND OFF' : 'SOUND ON'}</button>}
         {/* Quick-warp to the arcade entrance. Desktop only - mobile has it down in
             the touch button cluster (and the top bar gets covered by panels there). */}
         {onArcade && !touch && !hud.minigame && !hud.intro && !hud.onPlatform && hud.zone === 'earth' && (
@@ -106,8 +108,10 @@ export function HUD({
       </div>}
 
       {/* top-left meters: always-on action/alert chips; full meters behind STATS.
-          Hidden during the launch-pad opening to keep it clean. */}
-      {!hud.onPlatform && <div style={{ ...panel, ...metersPos }}>
+          Hidden during the launch-pad opening to keep it clean. On touch the warp
+          chip is gone, so skip the panel entirely when it'd be empty (otherwise an
+          empty blurred box hangs under the buttons). */}
+      {!hud.onPlatform && (statsOpen || !!hud.powerup || hud.shield || hud.heat.wanted || !touch) && <div style={{ ...panel, ...metersPos }}>
         {hud.powerup && (
           <div style={{ ...chip, color: NEON.cyan, borderColor: NEON.cyan }}>
             {hud.powerup.kind.toUpperCase()} {Math.ceil(hud.powerup.remaining)}s
@@ -115,7 +119,10 @@ export function HUD({
         )}
         {hud.shield && <div style={{ ...chip, color: NEON.purple, borderColor: NEON.purple }}>SHIELD</div>}
         <WantedChip stars={hud.heat.stars} max={hud.heat.max} wanted={hud.heat.wanted} />
-        <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />
+        {/* On touch, warp already has its own button + "WARP READY" helper in the
+            bottom action cluster, so the top chip is redundant (and used to overlap
+            the STATS button). Keep it on desktop where it's the only warp affordance. */}
+        {!touch && <WarpChip w={hud.warp} touch={touch} onTap={onWarp} />}
         {statsOpen && (
           <>
             <Logo />
