@@ -62,6 +62,8 @@ import { NeonCrates } from './NeonCrates'
 import { DroneSiege } from './DroneSiege'
 import { BountyHunt } from './BountyHunt'
 import { CargoRun } from './CargoRun'
+import { RogueTitan } from './RogueTitan'
+import { NightMarket } from './NightMarket'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -597,6 +599,20 @@ export class Game {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onDeliver: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `DELIVERED +${credits}c`, '#9bff6a') },
       banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.4 },
+    }))
+    // Rogue titan: a roaming multi-hit BOSS mech you chip down with net/missiles.
+    this.systems.register(new RogueTitan(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onHit: (pos) => this.popups.pop(pos.x, pos.y, pos.z, 'HIT', '#ff6a4a'),
+      onDefeated: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `TITAN DOWN +${credits}c`, '#ffd24a') },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.6 },
+      shockwave: (x, y, z) => this.missiles.shockwave({ x, y, z }, 0xff7a3a, 5, 0.5),
+    }))
+    // Night-market district: glowing vendor stalls that come alive after dark.
+    this.systems.register(new NightMarket(this.engine.scene, {
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      dayFactor: () => this.world.dayFactor,
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
