@@ -127,6 +127,12 @@ export class CarePackages implements GameSystem {
     this.cooldown = 30 + Math.random() * 20
   }
 
+  /** Stretch the light beam to span the crate -> ground gap (origin at its base). */
+  private setBeam(height: number) {
+    this.beam.position.y = -height
+    this.beam.scale.y = Math.max(0.01, height)
+  }
+
   setZone(zone: Zone) {
     this.zone = zone
     const onEarth = zone === 'earth'
@@ -141,12 +147,6 @@ export class CarePackages implements GameSystem {
     if (!onEarth) return
     this.t += dt
 
-    // Always keep the beam spanning the full crate -> ground gap (origin at base).
-    const setBeam = (height: number) => {
-      this.beam.position.y = -height
-      this.beam.scale.y = Math.max(0.01, height)
-    }
-
     if (this.state === 'IDLE') {
       this.cooldown -= dt
       if (this.cooldown <= 0) this.beginDrop()
@@ -155,7 +155,7 @@ export class CarePackages implements GameSystem {
 
     if (this.state === 'INBOUND') {
       // Brief beat at altitude with the chute open + beam down to the ground, then fall.
-      setBeam(this.startY - this.landY)
+      this.setBeam(this.startY - this.landY)
       this.beamMat.opacity = 0.18 + 0.06 * (0.5 + 0.5 * Math.sin(this.t * 3))
       this.crate.rotation.y += dt * 0.6
       this.state = 'FALLING'
@@ -169,7 +169,7 @@ export class CarePackages implements GameSystem {
       this.rig.position.set(this.cx + sway, this.fallY, this.cz + Math.cos(this.t * 1.6) * 0.6)
       this.chute.rotation.z = Math.sin(this.t * 1.8) * 0.12
       this.crate.rotation.y += dt * 0.6
-      setBeam(this.fallY - this.landY)
+      this.setBeam(this.fallY - this.landY)
       this.beamMat.opacity = 0.18 + 0.06 * (0.5 + 0.5 * Math.sin(this.t * 3))
       if (this.fallY <= this.landY) {
         // Touch down: drop the chute, light the ground ring, start the claim timer.
@@ -200,7 +200,7 @@ export class CarePackages implements GameSystem {
       this.crate.position.y = 0.9 + Math.sin(this.t * 2.0) * 0.12
       this.crate.rotation.y += dt * 0.8
       // Keep the beam spanning the (small) crate -> floor gap.
-      setBeam(this.startY - this.landY)
+      this.setBeam(this.startY - this.landY)
 
       const f = this.deps.focus()
       const dx = this.cx - f.x, dy = (this.landY + this.crate.position.y) - f.y, dz = this.cz - f.z

@@ -66,6 +66,10 @@ export class CapturedEntourage implements GameSystem {
       const body = new THREE.Mesh(bodyGeo, bodyMat); body.scale.set(1, 0.9, 1); g.add(body)
       const core = new THREE.Mesh(coreGeo, coreMat); core.position.set(0, 0.04, 0.16); g.add(core)
       const halo = new THREE.Mesh(haloGeo, haloMat); halo.position.set(0, 0.04, 0.17); g.add(halo)
+      // The posse spring-follows behind the player, so the child bounding spheres
+      // (computed at the local origin) don't reflect the trailing world position -
+      // disable frustum culling so a follower never pops out when it's behind you.
+      body.frustumCulled = false; core.frustumCulled = false; halo.frustumCulled = false
 
       g.visible = false
       this.group.add(g)
