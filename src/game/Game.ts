@@ -1724,6 +1724,11 @@ export class Game {
        *  never their result. `hash` is a stable golden a CI test can pin. Restores
        *  all state afterwards (a no-op for the live game). */
       determinism: (steps = 240) => this.proveDeterminism(Math.max(1, Math.min(Number(steps) || 240, 6000))),
+
+      /** Run text through the live kid-safety chat filter. Lets an automated test
+       *  drive the real filter against an attack/benign corpus headless (the chat
+       *  safety equivalent of the determinism proof). Returns the FilterVerdict. */
+      filter: (text: string) => filterChat(String(text ?? '')),
     }
 
     const w = window as unknown as { __unit7nav?: typeof nav; __unit7?: { test?: typeof nav } }

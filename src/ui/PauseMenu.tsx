@@ -20,7 +20,25 @@ const CONTROLS: Array<[string, string]> = [
 ]
 
 /** In-game pause menu. ESC opens it without ever leaving the page. */
-export function PauseMenu({ onResume, touch, hud, onToggleMute, onCycleNeon }: { onResume: () => void; touch: boolean; hud: HudState; onToggleMute: () => void; onCycleNeon: () => void }) {
+export function PauseMenu({
+  onResume,
+  touch,
+  hud,
+  onToggleMute,
+  onCycleNeon,
+  onOpenChatGate,
+  onDisableChat,
+}: {
+  onResume: () => void
+  touch: boolean
+  hud: HudState
+  onToggleMute: () => void
+  onCycleNeon: () => void
+  // Parental control: open the gate that turns typed chat ON (PIN-protected).
+  onOpenChatGate?: () => void
+  // Parental control: turn typed chat OFF (no PIN — never trap a kid enabled).
+  onDisableChat?: () => void
+}) {
   return (
     <div style={wrap}>
       <div style={panel}>
@@ -43,6 +61,24 @@ export function PauseMenu({ onResume, touch, hud, onToggleMute, onCycleNeon }: {
                 <span style={{ color: 'rgba(223,238,255,0.75)', alignSelf: 'center' }}>{v}</span>
               </div>
             ))}
+          </div>
+        )}
+        {/* Parental control: typed chat with other players. OFF by default; only a
+            grown-up (PIN gate) can turn it on. Turning it off needs no PIN. */}
+        {(onOpenChatGate || onDisableChat) && (
+          <div style={chatControl}>
+            <div style={chatControlText}>
+              <div style={chatControlTitle}>
+                Typed chat with other players
+                <span style={{ ...chatStatePill, ...(hud.chatEnabled ? chatStateOn : chatStateOff) }}>
+                  {hud.chatEnabled ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              <div style={chatControlSub}>Grown-ups only. Off by default to keep things safe.</div>
+            </div>
+            {hud.chatEnabled
+              ? onDisableChat && <button style={chatToggleOff} onClick={onDisableChat}>Turn off</button>
+              : onOpenChatGate && <button style={chatToggleOn} onClick={onOpenChatGate}>Turn on (grown-ups)</button>}
           </div>
         )}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -108,6 +144,82 @@ const kbd: CSSProperties = {
   borderRadius: 6,
   color: '#27e7ff',
   background: 'rgba(39,231,255,0.08)',
+  whiteSpace: 'nowrap',
+}
+const chatControl: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 16,
+  width: '100%',
+  maxWidth: 460,
+  padding: '12px 16px',
+  borderRadius: 12,
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(138,92,255,0.4)',
+}
+const chatControlText: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  textAlign: 'left',
+  minWidth: 0,
+}
+const chatControlTitle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  font: '700 12px/1.2 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.06em',
+  color: 'rgba(223,238,255,0.92)',
+}
+const chatControlSub: CSSProperties = {
+  font: '600 10px/1.4 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.02em',
+  color: 'rgba(223,238,255,0.5)',
+}
+const chatStatePill: CSSProperties = {
+  flexShrink: 0,
+  padding: '2px 8px',
+  borderRadius: 999,
+  border: '1px solid',
+  font: '800 9px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+}
+const chatStateOn: CSSProperties = {
+  color: '#9bff4d',
+  borderColor: 'rgba(155,255,77,0.6)',
+  background: 'rgba(155,255,77,0.1)',
+}
+const chatStateOff: CSSProperties = {
+  color: 'rgba(223,238,255,0.6)',
+  borderColor: 'rgba(255,255,255,0.2)',
+  background: 'rgba(255,255,255,0.04)',
+}
+const chatToggleOn: CSSProperties = {
+  flexShrink: 0,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '10px 16px',
+  font: '800 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+  color: '#04121a',
+  background: 'linear-gradient(180deg,#a98cff,#8a5cff)',
+  border: 'none',
+  borderRadius: 999,
+  whiteSpace: 'nowrap',
+}
+const chatToggleOff: CSSProperties = {
+  flexShrink: 0,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '10px 16px',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+  color: 'rgba(223,238,255,0.85)',
+  background: 'rgba(6,10,22,0.8)',
+  border: '1px solid rgba(255,255,255,0.2)',
+  borderRadius: 999,
   whiteSpace: 'nowrap',
 }
 const resumeBtn: CSSProperties = {

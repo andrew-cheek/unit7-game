@@ -3,11 +3,17 @@ import { Game } from './game/Game'
 import { isTouchDevice } from './game/utils'
 import { trackEvent } from './lib/analytics'
 import type { GameControls, HudState, Unit7Config } from './game/types'
-import { loadCallsign, saveCallsign } from './game/storage'
+import { loadCallsign, saveCallsign, sanitizeCallsign } from './game/storage'
 import { WARP_FORMS } from './game/WarpForms'
 import { HUD } from './ui/HUD'
 import { PauseMenu } from './ui/PauseMenu'
 import { MobileControls } from './ui/MobileControls'
+import { SavePanel } from './ui/SavePanel'
+import { ChatPanel } from './ui/ChatPanel'
+import { ParentalGate } from './ui/ParentalGate'
+import { filterChat } from './game/chatSafety'
+import { hasPin, setPin, enableChatWithPin, disableChat, makeGateChallenge } from './game/parental'
+import { PIN_LENGTH, type ChatMessage } from './game/kidShared'
 
 // The arcade minigames are split into their own chunks and only fetched when a
 // portal is entered, so the initial city load stays light (important on mobile
@@ -40,6 +46,15 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   const controlsRef = useRef<GameControls | null>(null)
   const [hud, setHud] = useState<HudState | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Kid-safe Save + Chat overlays. Chat is gated behind a parental PIN: the panel
+  // only ever renders when hud.chatEnabled is true.
+  const [savePanel, setSavePanel] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [gate, setGate] = useState<null | 'setup' | 'verify'>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  // Hold the arithmetic challenge steady across re-renders (regenerating it each
+  // render would change the question while the parent is answering it).
+  const [gateChallenge, setGateChallenge] = useState<{ question: string; answer: string } | null>(null)
   // Shared-world multiplayer: show the join/username prompt once, unless disabled.
   const [mpJoined, setMpJoined] = useState(false)
   const multiplayer = config?.multiplayer !== false
@@ -70,6 +85,20 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     setCoachDone(true)
   }
 
+  // Open the parental gate that turns typed chat on. With no PIN yet, run the
+  // setup flow (arithmetic speed-bump + create a PIN); once a PIN exists, just
+  // verify it. The arithmetic challenge is generated once here and held in state
+  // so it doesn't change while the parent answers it.
+  const openChatGate = () => {
+    if (hasPin()) {
+      setGateChallenge(null)
+      setGate('verify')
+    } else {
+      setGateChallenge(makeGateChallenge())
+      setGate('setup')
+    }
+  }
+
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -80,6 +109,13 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       gameRef.current = game
       controlsRef.current = game.controls
       game.start()
+      // Enable cloud save through the same host the shared world uses. When the
+      // host is undefined the Game falls back to a local-only store (offline saves
+      // on this device), so solo play keeps working with no network.
+      game.attachSave(config?.multiplayerHost)
+      // Received chat lines land here; keep the last 100 so the log can't grow
+      // without bound. The panel only renders when a parent has enabled chat.
+      game.controls.setChatSink((m) => setMessages((prev) => [...prev.slice(-99), m]))
     } catch (e) {
       // Surface a startup crash on-screen instead of a silent black page.
       console.error('[Unit7] startup failed:', e)
@@ -184,6 +220,8 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onEquip={(slot, id) => controlsRef.current?.equipCosmetic(slot, id)}
           onWarp={() => controlsRef.current?.toggleWarp()}
           onArcade={() => controlsRef.current?.openArcade()}
+          onSave={() => setSavePanel(true)}
+          onChat={() => setChatOpen((v) => !v)}
           hideTopCenter={touch && joinPanelVisible}
           hideCorners={touch && joinPanelVisible}
           botMode={botMode}
@@ -225,7 +263,17 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
         />
       )}
       {hud?.intro && !hud.drop && <IntroOverlay onSkip={() => controlsRef.current?.skipIntro()} />}
-      {hud?.paused && !hud.minigame && <PauseMenu onResume={() => controlsRef.current?.resume()} touch={touch} hud={hud} onToggleMute={() => controlsRef.current?.toggleMute()} onCycleNeon={() => controlsRef.current?.cycleNeon()} />}
+      {hud?.paused && !hud.minigame && (
+        <PauseMenu
+          onResume={() => controlsRef.current?.resume()}
+          touch={touch}
+          hud={hud}
+          onToggleMute={() => controlsRef.current?.toggleMute()}
+          onCycleNeon={() => controlsRef.current?.cycleNeon()}
+          onOpenChatGate={() => openChatGate()}
+          onDisableChat={() => { disableChat(); controlsRef.current?.refreshChatEnabled() }}
+        />
+      )}
       {hud?.minigame === 'beamwars' && controlsRef.current && (
         <Suspense fallback={null}>
           <BeamWars touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
@@ -290,6 +338,56 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           onPick={(id) => controlsRef.current?.warpInto(id)}
           onRevert={() => controlsRef.current?.warpRevert()}
           onClose={() => controlsRef.current?.toggleWarp()}
+        />
+      )}
+
+      {/* Kid-safe Save / Restore. Pure prop-driven; falls back to a friendly
+          "offline" notice when there's no reachable cloud backend (solo play). */}
+      {savePanel && (
+        <SavePanel
+          recoveryCode={controlsRef.current?.saveRecoveryCode() ?? ''}
+          online={controlsRef.current?.saveOnline() ?? false}
+          onCopyCode={() => navigator.clipboard?.writeText(controlsRef.current?.saveRecoveryCode() ?? '')}
+          onRestore={(code) => gameRef.current?.controls.saveRestore(code) ?? Promise.resolve({ ok: false })}
+          onClose={() => setSavePanel(false)}
+          touch={touch}
+        />
+      )}
+
+      {/* Typed chat — NEVER rendered unless a parent has enabled it (hud.chatEnabled). */}
+      {chatOpen && hud?.chatEnabled && (
+        <ChatPanel
+          messages={messages}
+          selfId={controlsRef.current?.myNetId() ?? ''}
+          onFilterPreview={(t) => { const v = filterChat(t); return { allowed: v.allowed, reason: v.reason } }}
+          onSend={(t) => controlsRef.current?.sendChat(t)}
+          onClose={() => setChatOpen(false)}
+          touch={touch}
+        />
+      )}
+
+      {/* Parental gate for turning chat on. Setup proves a grown-up is present
+          (arithmetic + new PIN), then we drop into verify so the single guarded
+          enable path (enableChatWithPin) is the only thing that flips chat ON. */}
+      {gate && (
+        <ParentalGate
+          mode={gate}
+          challenge={gate === 'setup' ? (gateChallenge ?? undefined) : undefined}
+          pinLength={PIN_LENGTH}
+          onSetPin={setPin}
+          onVerify={(pin) => enableChatWithPin(pin)}
+          onSuccess={() => {
+            if (gate === 'setup') {
+              // A PIN now exists; have the parent enter it once so the guarded
+              // enableChatWithPin path is what actually turns chat on.
+              setGateChallenge(null)
+              setGate('verify')
+            } else {
+              controlsRef.current?.refreshChatEnabled()
+              setGate(null)
+            }
+          }}
+          onCancel={() => setGate(null)}
         />
       )}
     </div>
@@ -388,7 +486,10 @@ function JoinWorld({ onJoin, onSolo, touch }: { onJoin: (name: string) => void; 
   const [mode, setMode] = useState<'choice' | 'name'>('choice')
   const [name, setName] = useState(() => loadCallsign())
   const submit = () => {
-    const n = name.trim()
+    // Clean the callsign at input so a kid can't even enter a phone number /
+    // contact info as their visible name (the engine hardens it too, but
+    // cleaning here is friendlier and keeps the displayed value honest).
+    const n = sanitizeCallsign(name)
     if (n) onJoin(n)
   }
   // On touch the left-docked panel sits on top of the floating joystick zone, so
