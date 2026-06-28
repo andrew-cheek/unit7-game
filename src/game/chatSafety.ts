@@ -53,6 +53,9 @@ const CONTACT_KEYWORDS: readonly string[] = [
   'yournumber',
   'callme',
   'textme',
+  'txtme', // "txt me" slang
+  'hmu', // "hit me up"
+  'hitmeup',
   'phoneme',
   'ringme',
   'whatsapp',
@@ -818,6 +821,31 @@ function looksLikeTotalDigits(text: string): boolean {
   return digitFold(text).length >= 7
 }
 
+/** COMBINED number-token rule. A phone can be written by MIXING forms — ascii/
+ *  unicode digits AND spelled number-words in one string ("5 five 5 1 2 3 4"), so
+ *  it slips under BOTH the 7-ascii-digit rule and the 5-spelled-word rule when each
+ *  is counted alone. Here we tally them TOGETHER: every folded numeric character
+ *  (ascii/fullwidth/keycap/circled, leet-in-context) counts 1, and every spelled
+ *  digit-word (spaced or concatenated) counts 1. >= 7 combined number-tokens blocks.
+ *
+ *  Game phrases stay safe because they don't stack number-tokens: "i have 3 lives
+ *  and 5 stars" = 2, "level 7" = 1, "i scored 2048" = 4, "3 2 1 go" = 3 — all < 7.
+ *  Spelled words counted here are the unambiguous DIGIT_WORDS only (no "to"/"for"/
+ *  "ate" homophones), so "i want to win for sure" contributes 0. */
+function combinedNumberTokenCount(rawLower: string, clean: string): number {
+  const digitCount = digitFold(clean).length
+  let wordCount = 0
+  for (const w of rawLower.split(/[^a-z]+/).filter(Boolean)) {
+    if ((DIGIT_WORDS as readonly string[]).includes(w)) {
+      wordCount++
+    } else {
+      // concatenated digit-word token ("fivefive") contributes its chunk count
+      wordCount += countConcatenatedDigitWords(w)
+    }
+  }
+  return digitCount + wordCount
+}
+
 /** LOCATION disclosure: real-world city/state names introduced by a geo lead-in
  *  ("i'm from", "i live in"), bare US-state / well-known-city mentions, and postal
  *  codes (UK postcode, US zip). Gated on REAL geography keywords so in-game
@@ -1076,6 +1104,7 @@ export function filterChat(text: string): FilterVerdict {
     looksLikePhone(normalized) ||
     looksLikePhone(digitPreserving) ||
     looksLikeTotalDigits(clean) ||
+    combinedNumberTokenCount(rawLower, clean) >= 7 ||
     spelledOutNumberRun(rawLower) ||
     looksLikeLocation(lightLower) ||
     looksLikeSchoolOrIdentity(lightLower) ||
