@@ -752,6 +752,9 @@ export class Game {
     // Day/night spectacle: solar trees + dawn arrival / dusk departure shuttle.
     this.dawnShow = new DawnShow(this.engine.scene, this.physics)
     this.robotFactory = new RobotFactory(this.engine.scene, this.physics)
+    // The factory shell is solid: add its wall/tower colliders to the Earth set so
+    // you can't walk through it (the front stays open as the entrance).
+    for (const b of this.robotFactory.colliderBoxes()) this.world.colliders.push(b)
     const raceGround = (x: number, z: number) => this.physics.sampleGround(x, z, 80)?.y ?? 0
     for (const course of RACE_COURSES) {
       const race = new RaceActivity(this.engine.scene, raceGround, course)
