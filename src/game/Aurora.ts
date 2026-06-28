@@ -31,6 +31,7 @@ export class Aurora implements GameSystem {
   private group = new THREE.Group()
   private ribbons: Ribbon[] = []
   private tex: THREE.Texture
+  private gradCanvas: HTMLCanvasElement | null = null // backing store for tex; released in dispose()
   private geo: THREE.PlaneGeometry
   private zone: Zone = 'earth'
   private t = 0
@@ -79,6 +80,7 @@ export class Aurora implements GameSystem {
     g.addColorStop(1, 'rgba(255,255,255,0)') // top: gone
     ctx.fillStyle = g
     ctx.fillRect(0, 0, 4, 128)
+    this.gradCanvas = c // keep a handle so dispose() can free the backing store
     const tex = new THREE.CanvasTexture(c)
     tex.needsUpdate = true
     return tex
@@ -110,6 +112,11 @@ export class Aurora implements GameSystem {
   dispose() {
     this.geo.dispose()
     this.tex.dispose()
+    // Shrink the canvas to 0 so its backing store is released sooner, then drop the ref.
+    if (this.gradCanvas) {
+      this.gradCanvas.width = this.gradCanvas.height = 0
+      this.gradCanvas = null
+    }
     for (const r of this.ribbons) r.mat.dispose()
   }
 }

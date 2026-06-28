@@ -186,6 +186,13 @@ export function HUD({
       {hud.race && hud.race.near && !hud.minigame && (
         <div style={{ ...promptStyle, bottom: '28%', borderColor: 'rgba(155,255,77,0.6)' }}>
           <span style={{ color: NEON.lime }}>DRIVE THROUGH THE GATE TO RACE</span>
+          {/* Tease the best-time speed bonus before the race (display-only; values
+              come straight from RaceActivity's idle HUD). */}
+          {hud.race.bestTime && hud.race.bestTime > 0 ? (
+            <span style={{ color: NEON.dim, marginLeft: 10, fontSize: 11 }}>
+              ⚡ BEST {hud.race.bestTime.toFixed(1)}s{hud.race.bestBonus ? ` +${hud.race.bestBonus}c` : ''}
+            </span>
+          ) : null}
         </div>
       )}
 

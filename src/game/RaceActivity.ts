@@ -18,6 +18,10 @@ export interface RaceHud {
   countdown: number
   result: number // finish time on the 'done' frame
   near: boolean // player is at the start gate (idle) - show the "drive through to race" hint
+  // Populated only while idle + near the gate, so the HUD can tease the best-time
+  // speed bonus before the race starts. Mirrors the values paid out in finish().
+  bestTime?: number // current best lap (s), 0/undefined if never raced
+  bestBonus?: number // credits awarded on top of base for beating it
 }
 
 /** A self-contained course: which zone it lives in, the start gate, the ordered
@@ -193,7 +197,14 @@ export class RaceActivity {
       if (this.countdown <= 0) this.reset()
     }
 
-    return { state: this.state, cp: this.cp, total: this.rings.length, time: this.time, best: this.best, countdown: Math.max(0, this.countdown), result: this.result, near: this.state === 'idle' && this.cooldown <= 0 && distGate < 16 }
+    const near = this.state === 'idle' && this.cooldown <= 0 && distGate < 16
+    return {
+      state: this.state, cp: this.cp, total: this.rings.length, time: this.time, best: this.best,
+      countdown: Math.max(0, this.countdown), result: this.result, near,
+      // Tease the best-time bonus only while idle at the gate (matches finish()'s reward).
+      bestTime: near ? this.best : undefined,
+      bestBonus: near ? this.course.bestBonus : undefined,
+    }
   }
 
   private finish() {

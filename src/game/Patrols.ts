@@ -29,6 +29,7 @@ export class Patrols {
   private physics: Physics
   private list: Patroller[] = []
   private visible = true
+  private frame = 0 // ticks once per update(); used to stagger ground sampling
 
   constructor(scene: THREE.Scene, physics: Physics, densityScale: number) {
     this.scene = scene
@@ -69,7 +70,9 @@ export class Patrols {
 
   update(dt: number) {
     if (!this.visible) return
-    for (const p of this.list) {
+    this.frame++
+    for (let i = 0; i < this.list.length; i++) {
+      const p = this.list[i]
       const tgt = p.waypoints[p.wp]
       const dx = tgt.x - p.pos.x
       const dz = tgt.z - p.pos.z
@@ -83,7 +86,11 @@ export class Patrols {
         p.yaw = dampAngle(p.yaw, Math.atan2(dx, dz), 4, dt)
         moving = 1
       }
-      p.pos.y = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? p.pos.y
+      // Ground barely shifts frame-to-frame, so each patroller raycasts on
+      // alternating frames (staggered by index) and reuses its last y otherwise.
+      if ((this.frame + i) % 2 === 0) {
+        p.pos.y = this.physics.sampleGround(p.pos.x, p.pos.z, p.pos.y + 6)?.y ?? p.pos.y
+      }
       p.model.group.position.copy(p.pos)
       p.model.group.rotation.y = p.yaw
       p.model.update(dt, moving, true)
