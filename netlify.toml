@@ -1,0 +1,8 @@
+# Netlify Functions config. Build command + publish dir stay set in the Netlify
+# UI (this file only declares functions, which merges with the UI settings — it
+# does NOT override the existing build). Functions in netlify/functions/ provide
+# the anonymous cloud-save store and the polling chat relay, both backed by
+# Netlify Blobs, so they deploy on the same git push as the client.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"

@@ -105,7 +105,8 @@ import {
   ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
 } from './progression'
 import { createStore } from './saveStore'
-import { httpSaveTransport } from './saveTransport'
+import { netlifySaveTransport } from './netlifySaveTransport'
+import { netlifyChatClient, type ChatClient } from './chatClient'
 import { isChatEnabled } from './parental'
 import { filterChat } from './chatSafety'
 import type { ChatMessage, KidStore } from './kidShared'
@@ -344,6 +345,9 @@ export class Game {
   private chatEnabled = false
   // Where received (and locally-gated) chat lines are delivered to the UI.
   private chatSink: ((m: ChatMessage) => void) | null = null
+  // Netlify-backed polling chat client (no PartyKit needed). Created lazily; polls
+  // only while a parent has chat enabled.
+  private chatClient: ChatClient | null = null
   private morningSunrise = false // true while the scripted opening sunrise is slowing the clock
   // Warp ability: a charge fills over 30s of play; press R to open the picker and
   // teleport into one of seven sci-fi forms.
@@ -937,15 +941,21 @@ export class Game {
         if (!this.chatEnabled) return
         const v = filterChat(text)
         if (!v.allowed) return
-        this.mp.sendChat(v.text)
+        this.chat().send(loadCallsign() || 'PILOT', v.text)
       },
       setChatSink: (fn: (m: ChatMessage) => void) => { this.chatSink = fn },
-      refreshChatEnabled: () => { this.chatEnabled = isChatEnabled() },
+      refreshChatEnabled: () => {
+        this.chatEnabled = isChatEnabled()
+        // Poll only while a parent has chat on; the receive gate is double-checked
+        // when a line arrives so a mid-poll disable hides it immediately.
+        if (this.chatEnabled) this.chat().start((m) => { if (this.chatEnabled) this.chatSink?.(m) })
+        else this.chatClient?.stop()
+      },
       // Anonymous cloud save surface for the save / recovery panel.
       saveRecoveryCode: () => this.saveStore?.recoveryCode() ?? '',
       saveOnline: () => !!this.saveStore?.online,
       saveRestore: (code: string) => this.saveStore?.restore(code) ?? Promise.resolve({ ok: false, error: 'nostore' }),
-      myNetId: () => this.mp.myId ?? '',
+      myNetId: () => this.chat().selfId,
     }
 
     this.hud = {
@@ -2593,8 +2603,19 @@ export class Game {
    * overwritten by an empty cloud), then kick a sync that reconciles with whatever
    * the cloud already holds via the never-lose merge.
    */
-  attachSave(host?: string) {
-    this.saveStore = createStore(host ? httpSaveTransport(host) : undefined)
+  /** Lazily build the polling chat client (one shared 'main' room). */
+  private chat(): ChatClient {
+    if (!this.chatClient) this.chatClient = netlifyChatClient({ room: 'main' })
+    return this.chatClient
+  }
+
+  attachSave(_host?: string) {
+    // Anonymous cloud save over a same-origin Netlify Function (no PartyKit, no
+    // login). createStore + the CloudStore are offline-safe: localStorage stays
+    // the source of truth, and a failed round-trip just retries — so solo / no
+    // network still works. The host arg is kept for call-site compatibility but
+    // unused now that saves don't ride the realtime host.
+    this.saveStore = createStore(netlifySaveTransport())
     // Fold current on-device progress into the envelope so the first sync uploads
     // it. MissionSystem.serialize() is the live source for mission idx; fall back
     // to the persisted blob if it isn't available.
@@ -3712,6 +3733,7 @@ export class Game {
   dispose() {
     // Session end: report the final summary before tearing anything down.
     this.emitGameOver()
+    this.chatClient?.stop() // kill the chat poll interval
     // Persist session takings (credits + best are already saved live).
     this.profile.lifetimeCaptured += this.hud.captured
     this.profile.credits = this.credits
