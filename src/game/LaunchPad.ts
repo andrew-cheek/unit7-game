@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { config } from './config'
+import { PlatformAirshow } from './PlatformAirshow'
+import { SkyElevator } from './SkyElevator'
 
 /**
  * The opening you stand on, not fall into: a big floating robot FACTORY high above
@@ -29,6 +31,10 @@ export class LaunchPad {
   private t = 0
   private yaw: number
   private center: THREE.Vector3
+  // Launch-pad-only set dressing (lifetime tied to this pad): planes + parachuting
+  // robots in the airspace, and a Moon/Mars space-elevator set piece on the deck.
+  private airshow!: PlatformAirshow
+  private skyElevator!: SkyElevator
 
   private units: {
     g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Object3D; legR: THREE.Object3D
@@ -45,7 +51,7 @@ export class LaunchPad {
   private holos: { o: THREE.Object3D; sp: number }[] = []
   private pylons: THREE.MeshBasicMaterial[] = []
   private cargo: { o: THREE.Object3D; ph: number; baseY: number }[] = []
-  private rockets: { g: THREE.Group; flame: THREE.Mesh; flameMat: THREE.MeshBasicMaterial; glowMat: THREE.MeshBasicMaterial; smokeMat: THREE.SpriteMaterial; bx: number; bz: number; t: number; vy: number; y: number; ph: number }[] = []
+  private rockets: { g: THREE.Group; flame: THREE.Mesh; flameMat: THREE.MeshBasicMaterial; glowMat: THREE.MeshBasicMaterial; smokeMat: THREE.SpriteMaterial; armL: THREE.Group; armR: THREE.Group; bx: number; bz: number; t: number; vy: number; y: number; ph: number }[] = []
   private arrowMat!: THREE.MeshBasicMaterial
   private arrowChevs: THREE.Mesh[] = []
   private edgeGlow!: THREE.MeshBasicMaterial
@@ -107,6 +113,10 @@ export class LaunchPad {
     this.buildRockets()
     this.buildClouds()
     this.buildUnits()
+    // Airspace life + the space-elevator set piece. Both attach to this.group in
+    // local deck space and are driven from update()/freed in dispose().
+    this.airshow = new PlatformAirshow(this.group, { radius: this.radius })
+    this.skyElevator = new SkyElevator(this.group, { radius: this.radius })
 
     // Circular collider with enough segments to read as a true circle, matching the
     // visual floor radius exactly - so you fall off right at the visible edge.
@@ -861,11 +871,41 @@ export class LaunchPad {
       for (const sx of [-0.9, 0.9]) { const leg = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, 16, 0.4)), towerMat); leg.position.set(sx, 8, 0); tower.add(leg) }
       for (let i = 0; i < 4; i++) { const rung = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2.2, 0.25, 0.25)), towerMat); rung.position.set(0, 3 + i * 4, 0); tower.add(rung) }
       const arm = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2.4, 0.3, 0.3)), towerMat); arm.position.set(-1.6, 11, 0); tower.add(arm)
+      // --- Mechazilla catch arms: two "chopstick" beams on Y-pivots, hinged from a
+      //     carriage on the tower, that swing IN to cradle the rocket when it's down
+      //     and OUT to release it for launch. The rocket core sits at local
+      //     x = -3.2 (s.x) relative to the tower; both pivots sit on the rocket-
+      //     facing edge at z = 0 and splay symmetrically (the iconic V).
+      //     At rest (rotation.y = 0) each beam points toward -x (at the rocket).
+      //     CLOSED (side*0.85): tips meet just past the hull at ~1.9 from its centre.
+      //     OPEN  (side*1.7):  beams swing ~97 deg outward, well clear of the stack.
+      const low = config.tier.name === 'low'
+      const catchH = 10            // mid-body height of the rocket core
+      const pivotDX = -1.5         // pivots on the rocket-facing edge of the tower
+      const armLen = 2.6           // beam length: closed tips reach ~1.9 from the core
+      const armMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2b3650, metalness: 0.6, roughness: 0.4, emissive: 0x123048, emissiveIntensity: 0.4 }))
+      const padMat = this.own(new THREE.MeshBasicMaterial({ color: 0x33b8ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      // Sliding carriage the arms hang off (reads as the Mechazilla catch tower).
+      const carriage = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(2.0, 1.4, 2.6)), towerMat); carriage.position.set(-0.4, catchH, 0); tower.add(carriage)
+      const armGeo = this.ownG(new THREE.BoxGeometry(armLen, 0.42, 0.5))
+      const railGeo = low ? null : this.ownG(new THREE.BoxGeometry(armLen * 0.82, 0.16, 0.18))
+      const padGeo = this.ownG(new THREE.BoxGeometry(0.3, 1.0, 0.5))
+      const arms: THREE.Group[] = []
+      for (const side of [-1, 1]) {
+        const pivot = new THREE.Group(); pivot.position.set(pivotDX, catchH, side * 0.5); tower.add(pivot)
+        // Beam grows toward -x (toward the rocket) from the pivot.
+        const beam = new THREE.Mesh(armGeo, armMat); beam.position.x = -armLen / 2; pivot.add(beam)
+        // Soft glowing contact pad at the tip where it cradles the hull.
+        const pad2 = new THREE.Mesh(padGeo, padMat); pad2.position.set(-armLen + 0.15, 0, 0); pivot.add(pad2)
+        if (railGeo) { const rail = new THREE.Mesh(railGeo, armMat); rail.position.set(-armLen / 2, 0.3, side * 0.16); pivot.add(rail) }
+        arms.push(pivot)
+      }
+      const [armL, armR] = arms
       this.group.add(tower)
       // Ground smoke sprites at the base.
       const smokeMat = this.own(new THREE.SpriteMaterial({ map: smokeTex, color: 0xcdd6e2, transparent: true, opacity: 0, depthWrite: false, fog: false }))
       for (let i = 0; i < 5; i++) { const sp = new THREE.Sprite(smokeMat); sp.position.set(s.x + (Math.random() - 0.5) * 5, 0.6, s.z + (Math.random() - 0.5) * 5); sp.scale.set(6, 6, 1); this.group.add(sp) }
-      this.rockets.push({ g, flame, flameMat, glowMat, smokeMat, bx: s.x, bz: s.z, t: s.off, vy: 0, y: 0, ph: s.off })
+      this.rockets.push({ g, flame, flameMat, glowMat, smokeMat, armL, armR, bx: s.x, bz: s.z, t: s.off, vy: 0, y: 0, ph: s.off })
     }
   }
 
@@ -1091,6 +1131,9 @@ export class LaunchPad {
 
   update(dt: number, _x: number, _z: number) {
     this.t += dt
+    // Launch-pad set dressing (planes/parachutists + space elevator).
+    this.airshow.update(dt)
+    this.skyElevator.update(dt)
     // Item 4: on 'low' ONLY, skip the distant-backdrop opacity sweeps on 2 of every
     // 3 frames - they rewrite a uniform every frame yet read identically at a third
     // the rate this far away. Medium/high leave `lowSkip` false, so they stay
@@ -1186,6 +1229,22 @@ export class LaunchPad {
       r.glowMat.opacity = flame * 0.5 * flick
       r.smokeMat.opacity = smoke * 0.55
       r.g.position.set(r.bx + (Math.random() - 0.5) * shake, r.y, r.bz + (Math.random() - 0.5) * shake)
+      // Mechazilla catch arms: armClose 0..1 (0 = open/clear, 1 = cradling).
+      // Slow, weighty motion driven entirely off r.t (no allocation, smoothstep eased):
+      //   - rocket lands at the CYCLE wrap (r.t=0): arms ease CLOSED over ~1.5s
+      //   - they hold closed through the idle middle
+      //   - they ease OPEN over the ~1s just before IGNITE so they're clear of flame
+      //   - through ignite / lift / climb (r.t >= IGNITE - 1): fully OPEN
+      const closeIn = THREE.MathUtils.smoothstep(r.t, 0, 1.5)            // 0 -> 1 as it settles
+      const openOut = 1 - THREE.MathUtils.smoothstep(r.t, IGNITE - 1, IGNITE) // 1 -> 0 before ignite
+      const armClose = r.t < IGNITE ? closeIn * openOut : 0
+      // Map to each pivot's Y-rotation (per-side magnitude; arms mirror in z).
+      // CLOSED ~0.85 rad: tips cradle ~1.9 from the core (gap over the 1.5-1.7 hull).
+      // OPEN  ~1.70 rad: beams swing ~97 deg out, well clear of the launching stack.
+      const CLOSED = 0.85, OPEN = 1.7
+      const ang = OPEN + (CLOSED - OPEN) * armClose
+      r.armL.rotation.y = -ang  // side -1 pivot
+      r.armR.rotation.y = ang   // side +1 pivot
     }
     this.arrowMat.opacity = 0.5 + Math.sin(this.t * 4) * 0.35
     for (let i = 0; i < this.arrowChevs.length; i++) this.arrowChevs[i].position.y = 6 - i * 2.3 - ((this.t * 3 + i) % 1) * 0.6
@@ -1373,6 +1432,8 @@ export class LaunchPad {
     // disposed with the arrays below.
     this.pathTiles?.dispose()
     this.strobes?.dispose()
+    this.airshow?.dispose()
+    this.skyElevator?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
     this.texs.forEach((t) => t.dispose())

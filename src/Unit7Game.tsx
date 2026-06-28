@@ -244,6 +244,21 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [welcomeVisible])
 
+  // Touch platform CTA lifecycle: it must RETIRE itself, not linger. It clears the
+  // moment the player actually starts walking (they got the idea) and, as a
+  // fallback, after ~7s even if they stand still — so it can never sit on screen
+  // the whole time you're on the pad. Resets if you somehow return to the platform.
+  const [ctaRetired, setCtaRetired] = useState(false)
+  const ctaVisible =
+    touch && !!hud && hud.onPlatform && !hud.intro && !hud.minigame && !hud.paused && (mpJoined || !multiplayer) && !ctaRetired
+  useEffect(() => {
+    if (!ctaVisible) return
+    if (hud && hud.speed > 1.2) { setCtaRetired(true); return } // started walking — done
+    const t = setTimeout(() => setCtaRetired(true), 7000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctaVisible, hud?.speed])
+
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
@@ -287,9 +302,7 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       {/* Touch-only platform CTA: spells out the very first action (walk off the
           glowing edge). Desktop already shows this on its bottom hint line, so we
           only render it on touch to avoid duplicating that copy. */}
-      {touch && hud && hud.onPlatform && !hud.intro && !hud.minigame && !hud.paused && (mpJoined || !multiplayer) && (
-        <PlatformCta />
-      )}
+      {ctaVisible && <PlatformCta />}
 
       {/* One-time, auto-dismissing solo welcome card. Pointer-events off so it can
           never block walking off the edge while it fades out on its timer. */}
