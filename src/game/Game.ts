@@ -212,6 +212,9 @@ export class Game {
   private launch = { active: false, phase: 'ascend' as 'ascend' | 'descend', t: 0, target: 'earth' as Zone, rocket: null as Vehicle | null, land: new THREE.Vector3() }
   private travelCooldown = 0
   private bannerTimer = 0
+  // Epicenter + age of the most recent ambient world event, so patrols/traffic can
+  // react to where it happened. Reused in place; aged out (nulled) after a few sec.
+  private lastEvent: { x: number; z: number; age: number } | null = null
   // Objective chain (config.missions) + guided beacon, owned by MissionSystem.
   private missions!: MissionSystem
   private missionPopupTimer = 0
@@ -826,8 +829,14 @@ export class Game {
     // Ambient world events (ship flyovers, drone swarms, meteors, cargo drops)
     // and off-path exploration rewards (discoveries + collectible energy cores).
     this.worldEvents = new WorldEvents(this.engine.scene)
-    this.worldEvents.onEvent = (label) => {
+    this.worldEvents.onEvent = (label, pos) => {
       if (this.bannerTimer <= 0) { this.hud.banner = label; this.bannerTimer = 2.5 } // longer silence between event banners
+      // Record the epicenter (copied — pos may be a reused/mutating vector) so the
+      // patrols + traffic reactive layer can lean toward where it just happened.
+      if (pos) {
+        if (this.lastEvent) { this.lastEvent.x = pos.x; this.lastEvent.z = pos.z; this.lastEvent.age = 0 }
+        else this.lastEvent = { x: pos.x, z: pos.z, age: 0 }
+      }
     }
     this.exploration = new ExplorationPoints(this.engine.scene, (credits, label) => {
       this.addCredits(credits)
@@ -858,9 +867,9 @@ export class Game {
     // off-world initialZone travels later), so build the Earth course now; the
     // off-world courses build on first travel, when their terrain is live.
     this.races.forEach((r) => r.setActive('earth'))
-    this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind), () => this.onBusted())
+    this.events = new Events(this.engine.scene, this.physics, this.capturables, (kind) => this.applyPowerup(kind), () => this.onBusted(), () => this.lastEvent)
     this.citySpectacle = new CitySpectacle(this.engine.scene)
-    this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale)
+    this.patrols = new Patrols(this.engine.scene, this.physics, tier.densityScale, () => this.lastEvent)
     this.sky = new Sky(this.engine.scene, tier.densityScale)
     this.camera = new CameraController(this.engine.camera, this.world.solidMeshes)
     // Vehicle groups are dynamic collision blockers so the camera doesn't clip
@@ -3451,6 +3460,8 @@ export class Game {
     this.systems.update(dt)
     // Ambient events + exploration rewards run in every zone.
     this.worldEvents.update(dt, this.focus)
+    // Age out the last event epicenter so reactions fade and stop after a few seconds.
+    if (this.lastEvent) { this.lastEvent.age += dt; if (this.lastEvent.age > 5) this.lastEvent = null }
     this.exploration.update(dt, this.zone, this.player.position.x, this.player.position.z)
     this.playground.update(dt)
     this.dawnShow.update(dt, this.world.dayFactor)
