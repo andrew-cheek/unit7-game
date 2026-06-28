@@ -73,7 +73,7 @@ interface Match {
 }
 
 type ClientMsg =
-  | { t: 'join'; name: string }
+  | { t: 'join'; name: string; uid?: string }
   | ({ t: 'state' } & Omit<PlayerSnapshot, 'id' | 'name'>)
   | { t: 'capture'; p: Vec3; award: number }
   | { t: 'claim'; id: number }
@@ -94,6 +94,9 @@ export default class WorldServer implements Party.Server {
   static readonly BW_ROWS = 40
   static readonly BW_TICK_MS = 92 // beam step (a touch slower than solo for the network)
   static readonly BW_START_MS = 1600 // "get ready" beat before beams start moving
+  static readonly MAX_MSG_BYTES = 8192 // reject oversized inbound frames before parsing
+  static readonly IDLE_TIMEOUT_MS = 30000 // reap players we haven't heard from in 30s
+  static readonly REAP_MS = 10000 // stale-player sweep cadence
 
   private players = new Map<string, PlayerSnapshot>()
   private aliens = new Map<number, Alien>()
@@ -101,6 +104,14 @@ export default class WorldServer implements Party.Server {
   private profiles = new Map<string, Profile>()
   private nextAlienId = 1
   private tick: ReturnType<typeof setInterval> | null = null
+  private reaper: ReturnType<typeof setInterval> | null = null
+  // Per-connection liveness + token-bucket rate limiting (anti-flood / anti-ghost).
+  private lastSeen = new Map<string, number>()
+  private buckets = new Map<string, { state: number; profile: number; misc: number; ts: number }>()
+  // Stable client identity (persisted client-side) so a reconnecting player
+  // reclaims their score row instead of duplicating it.
+  private connUid = new Map<string, string>() // conn.id -> client uid
+  private uidConn = new Map<string, string>() // client uid -> current conn.id
   // Challenge handshakes (challengerId -> {target, trail}) and live matches by id.
   private challenges = new Map<string, { to: string; trail: number }>()
   private matches = new Map<string, Match>()
@@ -109,38 +120,97 @@ export default class WorldServer implements Party.Server {
   constructor(readonly room: Party.Room) {}
 
   onClose(conn: Party.Connection) {
-    this.players.delete(conn.id)
-    this.profiles.delete(conn.id)
-    // Drop any pending challenge this player owned, and any challenge aimed *at*
-    // them (otherwise a stale offer keeps the challenger flagged as busy).
-    this.challenges.delete(conn.id)
-    for (const [from, offer] of this.challenges) {
-      if (offer.to === conn.id) this.challenges.delete(from)
-    }
-    // If they were mid-duel, the opponent wins by forfeit.
-    const mid = this.inMatch.get(conn.id)
-    if (mid) this.endMatch(mid, conn.id === this.matches.get(mid)?.a ? 'b' : 'a')
-    if (this.scores.delete(conn.id)) {
-      this.broadcastScores()
-    }
-    this.broadcastProfiles()
-    this.room.broadcast(JSON.stringify({ t: 'leave', id: conn.id }))
-    if (this.scores.size === 0) this.stopSim()
+    this.removePlayer(conn.id)
   }
 
   onError(conn: Party.Connection) {
-    this.onClose(conn)
+    this.removePlayer(conn.id)
+  }
+
+  /** Fully evict a player by connection id. Called on close/error AND by the
+   *  stale-player sweep (for clients that vanish without a clean WS close). */
+  private removePlayer(id: string) {
+    this.players.delete(id)
+    this.profiles.delete(id)
+    this.lastSeen.delete(id)
+    this.buckets.delete(id)
+    const uid = this.connUid.get(id)
+    if (uid && this.uidConn.get(uid) === id) this.uidConn.delete(uid)
+    this.connUid.delete(id)
+    // Drop any pending challenge this player owned, and any challenge aimed *at*
+    // them (otherwise a stale offer keeps the challenger flagged as busy).
+    this.challenges.delete(id)
+    for (const [from, offer] of this.challenges) {
+      if (offer.to === id) this.challenges.delete(from)
+    }
+    // If they were mid-duel, the opponent wins by forfeit.
+    const mid = this.inMatch.get(id)
+    if (mid) this.endMatch(mid, id === this.matches.get(mid)?.a ? 'b' : 'a')
+    if (this.scores.delete(id)) {
+      this.broadcastScores()
+    }
+    this.broadcastProfiles()
+    this.room.broadcast(JSON.stringify({ t: 'leave', id }))
+    if (this.scores.size === 0) this.stopSim()
+  }
+
+  /** Token-bucket rate limit per connection + message class, so one socket can't
+   *  flood the room (each state/profile triggers a full broadcast). Returns false
+   *  to silently drop the message. */
+  private allow(id: string, kind: 'state' | 'profile' | 'misc'): boolean {
+    const now = Date.now()
+    let b = this.buckets.get(id)
+    if (!b) { b = { state: 30, profile: 5, misc: 40, ts: now }; this.buckets.set(id, b) }
+    const dt = Math.max(0, (now - b.ts) / 1000)
+    b.ts = now
+    b.state = Math.min(30, b.state + dt * 20) // ~20/s sustained (client sends ~12/s)
+    b.profile = Math.min(5, b.profile + dt * 3) // ~3/s sustained
+    b.misc = Math.min(40, b.misc + dt * 30) // join/claim/challenge/duel input
+    if (b[kind] < 1) return false
+    b[kind] -= 1
+    return true
+  }
+
+  /** Evict players we haven't heard from within IDLE_TIMEOUT_MS - backstops every
+   *  case where onClose/onError doesn't fire (backgrounded mobile, dropped TCP). */
+  private sweepIdle() {
+    const now = Date.now()
+    for (const id of [...this.players.keys()]) {
+      if (now - (this.lastSeen.get(id) ?? 0) > WorldServer.IDLE_TIMEOUT_MS) {
+        try { this.room.getConnection(id)?.close() } catch { /* already gone */ }
+        this.removePlayer(id)
+      }
+    }
   }
 
   onMessage(raw: string, sender: Party.Connection) {
+    // Reject oversized frames before parsing (cheap DoS guard).
+    if (typeof raw !== 'string' || raw.length > WorldServer.MAX_MSG_BYTES) return
     let msg: ClientMsg
     try {
       msg = JSON.parse(raw)
     } catch {
       return
     }
+    if (typeof msg !== 'object' || msg === null || typeof (msg as { t?: unknown }).t !== 'string') return
+    // Liveness + per-connection flood control.
+    this.lastSeen.set(sender.id, Date.now())
+    const kind = msg.t === 'state' ? 'state' : msg.t === 'profile' ? 'profile' : 'misc'
+    if (!this.allow(sender.id, kind)) return
 
     if (msg.t === 'join') {
+      // Reclaim a stale ghost from this client's previous connection (same uid):
+      // carry its score over so a reconnect doesn't reset to 0 or duplicate a row.
+      const uid = typeof msg.uid === 'string' ? msg.uid.replace(/[^\w-]/g, '').slice(0, 40) : ''
+      let carriedScore = 0
+      if (uid) {
+        const prev = this.uidConn.get(uid)
+        if (prev && prev !== sender.id && this.players.has(prev)) {
+          carriedScore = this.scores.get(prev)?.score ?? 0
+          try { this.room.getConnection(prev)?.close() } catch { /* already gone */ }
+          this.removePlayer(prev)
+        }
+      }
       if (this.players.size >= WorldServer.MAX_PLAYERS && !this.players.has(sender.id)) {
         sender.send(JSON.stringify({ t: 'full' }))
         return
@@ -149,7 +219,8 @@ export default class WorldServer implements Party.Server {
       this.players.set(sender.id, {
         id: sender.id, name, p: [0, 0, 0], y: 0, m: 'robot', v: null, z: 'earth', s: 0, g: true,
       })
-      this.scores.set(sender.id, { name, score: 0 })
+      this.scores.set(sender.id, { name, score: carriedScore })
+      if (uid) { this.connUid.set(sender.id, uid); this.uidConn.set(uid, sender.id) }
       this.profiles.set(sender.id, { aliens: 0, level: 1, rating: 1000, badges: 0, accent: 0x27e7ff, games: {} })
       // Newcomer gets the roster, the live scoreboard, the current swarm and
       // the profiles of everyone already here.
@@ -263,7 +334,10 @@ export default class WorldServer implements Party.Server {
 
     if (msg.t === 'capture') {
       if (!this.players.has(sender.id)) return
-      this.room.broadcast(JSON.stringify({ t: 'capture', id: sender.id, p: msg.p, award: msg.award }), [sender.id])
+      // Validate the FX position (clients ignore `award`, so don't forward it).
+      const cp = vec3(msg.p)
+      if (!cp) return
+      this.room.broadcast(JSON.stringify({ t: 'capture', id: sender.id, p: cp }), [sender.id])
       return
     }
 
@@ -287,6 +361,7 @@ export default class WorldServer implements Party.Server {
     if (this.tick) return
     this.fillSwarm()
     this.tick = setInterval(() => this.step(), WorldServer.TICK_MS)
+    this.reaper = setInterval(() => this.sweepIdle(), WorldServer.REAP_MS)
   }
 
   private stopSim() {
@@ -294,6 +369,11 @@ export default class WorldServer implements Party.Server {
       clearInterval(this.tick)
       this.tick = null
     }
+    if (this.reaper) {
+      clearInterval(this.reaper)
+      this.reaper = null
+    }
+    this.nextAlienId = 1
     this.aliens.clear()
   }
 
@@ -444,14 +524,16 @@ export default class WorldServer implements Party.Server {
 
 /** Clamp incoming profile games to a sane, bounded shape (avoid abuse / bloat). */
 function sanitizeGames(raw: unknown): WireGames {
-  const out: WireGames = {}
+  // Null-prototype target so a key like "__proto__" becomes a plain own property
+  // instead of touching the prototype chain (prototype-pollution safety).
+  const out = Object.create(null) as WireGames
   if (!raw || typeof raw !== 'object') return out
   let n = 0
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (n++ >= 24) break
     if (!Array.isArray(v)) continue
     const key = String(k).replace(/[^\w]/g, '').slice(0, 16)
-    if (!key) continue
+    if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
     out[key] = [num(v[0]), num(v[1]), num(v[2]), num(v[3])]
   }
   return out

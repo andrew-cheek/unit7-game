@@ -224,6 +224,10 @@ export class MultiplayerManager implements GameSystem {
         },
         onStatus: (connected) => {
           if (!connected) this.online = this.remotePlayers.count + 1
+          // Re-publish our profile after every (re)connect so a reconnected
+          // avatar gets re-tinted/labelled (the join is sent first, so defer
+          // briefly to let the server register us before the profile lands).
+          else setTimeout(() => this.publishProfile(), 300)
         },
         onFull: () => this.host.banner('WORLD FULL — TRY AGAIN', 3),
         onAliens: (list) => this.sharedAliens.sync(list),
