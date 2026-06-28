@@ -1211,6 +1211,9 @@ export class Game {
     const faceYaw = 0 // face +Z (north) - the arcade hall + city hub sit below/ahead
     this.launchPad = new LaunchPad(this.engine.scene, start, faceYaw)
     this.physics.addGroundMesh(this.launchPad.collider)
+    // Escalator + factory-landing surfaces are walkable: register them as ground
+    // meshes so the player can climb up onto the factory floor.
+    for (const m of this.launchPad.extraGroundMeshes()) this.physics.addGroundMesh(m)
     // Make the assembly line solid so you walk around it, not through it.
     for (const b of this.launchPad.colliderBoxes()) { this.physics.colliders.push(b); this.launchPadColliders.push(b) }
     this.player.exitVehicle(this.launchPad.spawn)
@@ -1259,6 +1262,7 @@ export class Game {
     if (!this.launchPad) return
     this.launchCineT = -1
     this.physics.removeGroundMesh(this.launchPad.collider)
+    for (const m of this.launchPad.extraGroundMeshes()) this.physics.removeGroundMesh(m)
     for (const b of this.launchPadColliders) { const i = this.physics.colliders.indexOf(b); if (i >= 0) this.physics.colliders.splice(i, 1) }
     this.launchPadColliders.length = 0
     // Send the lent rides back to the city - except one you're riding off the edge.

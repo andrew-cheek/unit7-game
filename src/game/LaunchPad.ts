@@ -1400,9 +1400,18 @@ export class LaunchPad {
   /** Left the deck - off the edge of the (circular) floor, which the collider and
    *  this test now share a radius with, so there's no invisible lip to walk on. */
   steppedOff(x: number, y: number, z: number): boolean {
-    const d = Math.hypot(x - this.center.x, z - this.center.z)
+    const lx = x - this.center.x, lz = z - this.center.z
+    const d = Math.hypot(lx, lz)
     if (d <= this.radius - 3) return false
+    // Walking UP an escalator into a factory isn't stepping off the edge.
+    if (this.escalators.onWalkway(lx, lz)) return false
     return y < this.topY - 1.5 || d > this.radius + 6
+  }
+
+  /** Walkable escalator + factory-landing surfaces, registered as physics ground
+   *  meshes so the player can climb up onto the factory floor. */
+  extraGroundMeshes(): THREE.Mesh[] {
+    return this.escalators.groundMeshes
   }
 
   private deckTexture(): THREE.CanvasTexture {
