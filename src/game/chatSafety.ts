@@ -72,10 +72,12 @@ const CONTACT_KEYWORDS: readonly string[] = [
   'icloud',
   'protonmail',
   // --- meet / find / add me (grooming-adjacent solicitation) ---
-  'meetme',
-  'meetup',
-  'meetinrealife',
-  'meetirl',
+  // NOTE: the "meet me" / "meet up" family is NOT listed here anymore — it lives
+  // in MEETUP_KEYWORDS below and is checked through a narrow carve-out
+  // (isSafeInGameMeetup) so that legitimate in-game coordination
+  // ("meet me at the arcade portal") passes while real-world / off-platform
+  // meetup attempts ("meet me at the mall tonight") still BLOCK. See the meetup
+  // section near the detectors.
   // "find me" / "follow me" alone are normal in-game ("come find me!",
   // "follow me to the arcade"), so we block only the "...on <platform>" solicit
   // form plus the platform tokens below. "add me" stays — there is no benign
@@ -732,6 +734,176 @@ function matchesCensorSkeleton(collapsed: string): boolean {
   return false
 }
 
+// --- MEETUP carve-out --------------------------------------------------------
+//
+// SAFETY-CRITICAL: the grooming/contact category must block real-world / off-
+// platform meetup attempts ("meet me at the mall tonight", "meet me irl"). But it
+// was over-blocking legitimate IN-GAME coordination ("meet me at the arcade
+// portal"). This carve-out lets ONLY the narrow, demonstrably-safe in-game shape
+// through; EVERYTHING else in the meetup family still BLOCKS by default.
+//
+// How it works:
+//   - MEETUP_KEYWORDS are the joined-ascii meetup triggers, matched against the
+//     normalized view exactly like the other contact keyword sets.
+//   - When a message trips a meetup keyword, it BLOCKS unless isSafeInGameMeetup()
+//     returns true. That function returns true ONLY when the message is a
+//     "meet/see (you/me) at/by/near the <IN-GAME PLACE>" shape AND carries NO
+//     other red flag (no real-world place/time/IRL signal, and — enforced by the
+//     normal detector order — no digits/email/url/@handle/address, which trip the
+//     other contact rules first and never reach this carve-out).
+//
+// Default remains BLOCK. This is a carve-out on an existing block, not a new
+// broad allow.
+
+/** Meetup triggers that BENEFIT from the in-game carve-out. Matched against the
+ *  normalized (separator-stripped, de-leet) view. */
+const MEETUP_KEYWORDS: readonly string[] = ['meetme', 'meetup']
+
+/** Meetup phrasings that are ALWAYS real-world and must NEVER be carved out.
+ *  These explicitly name "real life" / "irl", so there is no safe in-game reading.
+ *  Matched against the normalized view. (GROOMING_PHRASES also covers "meetirl" /
+ *  "meetinreallife"; these are kept here too as a belt-and-suspenders block.) */
+const MEETUP_REALWORLD_ALWAYS: readonly string[] = [
+  'meetirl',
+  'meetinrealife',
+  'meetinreallife',
+  'meetinperson',
+]
+
+/** IN-GAME location allowlist. These are VIRTUAL places in Unit 7 (arcade, portal,
+ *  moon base, etc.). A meetup that points at one of these — and nothing else
+ *  suspicious — is legitimate gameplay coordination. Curated and intentionally
+ *  narrow; matched as whole word tokens. Multi-word places ("moon base", "dance
+ *  floor") are matched as joined tokens against the separator-stripped form. */
+const INGAME_PLACES: readonly string[] = [
+  'arcade',
+  'portal',
+  'plaza',
+  'spawn',
+  'moon',
+  'mars',
+  'base',
+  'moonbase',
+  'tower',
+  'gate',
+  'ramp',
+  'rooftop',
+  'roof',
+  'dancefloor',
+  'trampoline',
+  'hoverboard',
+  'mech',
+  'rocket',
+  'beacon',
+  'ring',
+  'course',
+  'track',
+  'dome',
+  'start',
+  'top',
+  'map',
+  'lobby',
+  'hub',
+  'here',
+  'there',
+]
+
+/** REAL-WORLD meetup signals. If ANY of these is present, the meetup carve-out is
+ *  DENIED and the message blocks — even if it also names an in-game place. These
+ *  are the genuine-danger signals: off-platform / real-life / real-place / time /
+ *  in-person pickup. Tested against the lightly-cleaned lowercased text with word
+ *  boundaries (so "park" doesn't fire inside "sparkle"). */
+function hasRealWorldMeetupSignal(lightLower: string): boolean {
+  // IRL / real-life / in-person markers.
+  if (/\b(irl|in real life|real life|in person|in the flesh)\b/.test(lightLower)) return true
+  // Home / house / "my place" / coming over / pickup / "where do you live".
+  if (/\b(my|your|ur)\s*(house|home|place|apartment|apt|crib)\b/.test(lightLower)) return true
+  if (/\b(come over|come to my|pick (you|u) up|where do (you|u|ya) live|come round|swing by)\b/.test(lightLower))
+    return true
+  // School-day / time-of-day / day signals (a meetup pinned to real time = IRL).
+  if (/\bafter school\b/.test(lightLower)) return true
+  if (/\b(tonight|tomorrow|today|tonite|this weekend|this week|next week|later today)\b/.test(lightLower)) return true
+  if (/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(lightLower)) return true
+  if (/\b\d{1,2}\s*(am|pm|oclock|o'clock)\b/.test(lightLower)) return true
+  if (/\bat\s+\d{1,2}(:\d{2})?\b/.test(lightLower)) return true // "at 5", "at 5:30"
+  if (/\bat\s+(noon|midnight|lunch|dinner|breakfast|recess)\b/.test(lightLower)) return true
+  // Real-world places a child might name.
+  const realPlaces = [
+    'park',
+    'mall',
+    'school',
+    'home',
+    'store',
+    'shop',
+    'starbucks',
+    'mcdonalds',
+    'mcdonald',
+    'wendys',
+    'walmart',
+    'target',
+    'downtown',
+    'uptown',
+    'corner',
+    'library',
+    'church',
+    'gym',
+    'cafe',
+    'restaurant',
+    'station',
+    'airport',
+    'hotel',
+    'motel',
+    'street',
+    'avenue',
+    'road',
+    'neighborhood',
+    'town',
+    'city',
+    'village',
+    'address',
+  ]
+  const words = lightLower.split(/[^a-z]+/).filter(Boolean)
+  const wordSet = new Set(words)
+  for (const p of realPlaces) if (wordSet.has(p)) return true
+  // "my town" / "my city" already covered by the word-set above ("town"/"city").
+  return false
+}
+
+/** Does the message name an IN-GAME place (whole-word / joined-token match)?
+ *  We test BOTH the word-token view (so "moon", "arcade" match) AND the
+ *  separator-stripped normalized view (so "moon base" -> "moonbase",
+ *  "dance floor" -> "dancefloor" match the joined entries). */
+function namesInGamePlace(lightLower: string, normalized: string): boolean {
+  const words = lightLower.split(/[^a-z]+/).filter(Boolean)
+  const wordSet = new Set(words)
+  for (const p of INGAME_PLACES) {
+    if (wordSet.has(p)) return true
+    // joined multi-word place (e.g. "moonbase", "dancefloor") in the stripped form.
+    if (p.length >= 6 && normalized.includes(p)) return true
+  }
+  return false
+}
+
+/** The narrow SAFE shape: a "meet/see (you/me) ... <in-game place>" message that
+ *  names an in-game location and carries NO real-world meetup signal. Returns true
+ *  ONLY for this safe shape; anything else returns false (-> block stays).
+ *
+ *  Note: digit/email/url/@handle/address red flags are caught by detectors that
+ *  run BEFORE the meetup carve-out in filterChat, so by the time this is consulted
+ *  the message has already cleared those. We still require an in-game place AND no
+ *  real-world signal here as the explicit gate. */
+function isSafeInGameMeetup(lightLower: string, normalized: string): boolean {
+  // Phrasings that are intrinsically real-world ("meet irl") can never be safe.
+  if (containsAny(normalized, collapseAll(normalized), MEETUP_REALWORLD_ALWAYS)) return false
+  // Must be a "meet/see" lead-in (the verb that triggered the carve-out).
+  if (!/\b(meet|see)\b/.test(lightLower)) return false
+  // Any real-world meetup signal denies the carve-out.
+  if (hasRealWorldMeetupSignal(lightLower)) return false
+  // Must point at an in-game place.
+  if (!namesInGamePlace(lightLower, normalized)) return false
+  return true
+}
+
 // --- CONTACT detectors -------------------------------------------------------
 
 /** Phone numbers: any run of 7+ digits, OR shorter digit groups that together add
@@ -1097,6 +1269,10 @@ export function filterChat(text: string): FilterVerdict {
   const collapsed = collapseAll(normalized)
 
   // --- 1. CONTACT (most important; default-deny on ambiguity) ----------------
+  // These detectors are checked FIRST and unconditionally. Critically, they run
+  // BEFORE the meetup carve-out, so a meetup line carrying a phone/email/url/
+  // @handle/address/age/location red flag is blocked here and NEVER reaches the
+  // narrow in-game allowance below.
   if (
     looksLikeEmail(lightLower, compact) ||
     looksLikeAddress(lightLower) ||
@@ -1110,9 +1286,23 @@ export function filterChat(text: string): FilterVerdict {
     looksLikeSchoolOrIdentity(lightLower) ||
     looksLikeAtHandle(lightLower) ||
     mentionsContactPlatform(rawLower) ||
+    looksLikeLink(lightLower, compact) ||
     containsAny(normalized, collapsed, GROOMING_PHRASES) ||
     containsAny(normalized, collapsed, IDENTITY_KEYWORDS) ||
     containsAny(normalized, collapsed, CONTACT_KEYWORDS)
+  ) {
+    return { allowed: false, text: '', reason: 'contact' }
+  }
+
+  // --- 1b. MEETUP (carve-out) ------------------------------------------------
+  // The meetup family ("meet me", "meet up") blocks by DEFAULT. The ONLY exception
+  // is the narrow, demonstrably-safe in-game shape (isSafeInGameMeetup): a
+  // "meet/see ... <in-game place>" line with NO real-world meetup signal and — by
+  // virtue of running after the contact block above — no digit/email/url/@handle/
+  // address red flag. Anything else in the meetup family still BLOCKS.
+  if (
+    containsAny(normalized, collapsed, MEETUP_REALWORLD_ALWAYS) ||
+    (containsAny(normalized, collapsed, MEETUP_KEYWORDS) && !isSafeInGameMeetup(lightLower, normalized))
   ) {
     return { allowed: false, text: '', reason: 'contact' }
   }
