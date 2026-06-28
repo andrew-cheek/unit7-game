@@ -61,6 +61,20 @@ export class LaunchPad {
   private lifts: { o: THREE.Object3D; lo: number; hi: number; ph: number }[] = []
   private towerArms: { pivot: THREE.Group; elbow: THREE.Group; spark: THREE.Mesh; sparkMat: THREE.MeshBasicMaterial; ph: number }[] = []
   private towerStripMats: THREE.MeshBasicMaterial[] = []
+  // "Walk this way" guidance laid over the deck: an inlaid chevron path of light
+  // running spawn -> ledge, two hero light-shafts pinning here/there, and a strobe
+  // chase along the ledge lip. All drawn off this.t, allocation-free in update().
+  private pathTiles?: THREE.InstancedMesh   // item 1: one InstancedMesh, 1 draw
+  private pathCount = 0
+  private shafts: { mat: THREE.MeshBasicMaterial; ph: number }[] = [] // item 2: hero god-rays (off on low)
+  private strobes?: THREE.InstancedMesh     // item 3: one InstancedMesh, 1 draw
+  private strobeCount = 0
+  // Scratch reused every frame so the guidance animations never allocate.
+  private scratchColor = new THREE.Color()
+  private scratchMat = new THREE.Matrix4()
+  // Item 4: on 'low' only, throttle the per-frame backdrop opacity sweeps so the
+  // distant skyline/beacons/sparks don't rewrite a uniform every single frame.
+  private lowThrottle = 0
 
   // Belt runs along X (forge at beltX0, output at beltX1), sitting at z = beltZ
   // just in front of the spawn so the line crosses your view head-on.
@@ -87,6 +101,7 @@ export class LaunchPad {
     this.buildAssemblyHangar()
     this.buildArms()
     this.buildSign()
+    this.buildGuidance()
     this.buildProps()
     this.buildSciFi()
     this.buildRockets()
@@ -681,6 +696,102 @@ export class LaunchPad {
     }
   }
 
+  /** "Walk this way" guidance over the deck so a first-time player instantly reads
+   *  spawn -> ledge: an inlaid chevron PATH of light, two hero light-shafts pinning
+   *  "you are here -> go there", and a strobe chase running along the ledge lip.
+   *  Items 1 & 3 are one InstancedMesh each (1 draw apiece, cheap on low); the hero
+   *  shafts (item 2) are skipped entirely on low (0 draws there). */
+  private buildGuidance() {
+    const R = this.radius, low = config.tier.name === 'low'
+
+    // --- 1. PATH-OF-LIGHT FLOOR GUIDE -------------------------------------------
+    // A lane of inlaid chevron tiles laid flat just above the deck, marching +Z
+    // from in front of the spawn (deck centre, z=0) toward the DROP ZONE ledge.
+    // ONE shared PlaneGeometry chevron + ONE additive cyan material, drawn as a
+    // single InstancedMesh (1 draw). A travelling brightness wave is written into
+    // per-instance instanceColor each frame from a this.t phase offset per tile.
+    const tiles = low ? 10 : 14
+    this.pathCount = tiles
+    const pathBaseZ = 4          // start just ahead of the centred spawn
+    const pathEndZ = R - 5       // stop just inside the ledge / under the sign
+    const pathStepZ = (pathEndZ - pathBaseZ) / (tiles - 1)
+    // One shared plane carrying a canvas-drawn chevron; the additive material is
+    // tinted cyan and the per-instance brightness wave does the "flow" read.
+    const chevTex = this.chevronTex(); this.texs.push(chevTex)
+    const tileGeo = this.ownG(new THREE.PlaneGeometry(5.5, 3))
+    const tileMat = this.own(new THREE.MeshBasicMaterial({ map: chevTex, color: 0x27e7ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const path = new THREE.InstancedMesh(tileGeo, tileMat, tiles)
+    path.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    for (let i = 0; i < tiles; i++) {
+      // Lay flat (face up), pointing +Z, a hair above the deck floor (y=0.02) so it
+      // never z-fights the painted floor.
+      this.scratchMat.makeRotationX(-Math.PI / 2)
+      this.scratchMat.setPosition(0, 0.05, pathBaseZ + i * pathStepZ)
+      path.setMatrixAt(i, this.scratchMat)
+      path.setColorAt(i, this.scratchColor.setRGB(0, 0, 0)) // wave fills these in update()
+    }
+    path.instanceMatrix.needsUpdate = true
+    if (path.instanceColor) path.instanceColor.needsUpdate = true
+    this.group.add(path); this.pathTiles = path
+
+    // --- 2. HERO LIGHT-SHAFTS ----------------------------------------------------
+    // Two soft additive god-ray cones: one pinning the spawn point, one on the DROP
+    // ZONE sign - "you are here -> go there". Open-ended ConeGeometry + additive
+    // material, same pattern as the existing holo beams. Skipped on low (0 draws).
+    if (!low) {
+      const shaftGeo = this.ownG(new THREE.ConeGeometry(3.2, 18, 20, 1, true))
+      // Spawn shaft (warm white, pins where you stand) + sign shaft (cyan, the goal).
+      const spec: [number, number, number][] = [
+        // [x, z, hue] - spawn at deck centre, sign near the ledge (matches buildSign).
+        [0, 0, 0xeaf4ff],
+        [0, R - 7, 0x27e7ff],
+      ]
+      for (const [sx, sz, col] of spec) {
+        const mat = this.own(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
+        const cone = new THREE.Mesh(shaftGeo, mat)
+        cone.position.set(sx, 9, sz) // base near the deck, apex up high
+        this.group.add(cone)
+        this.shafts.push({ mat, ph: sz * 0.2 })
+      }
+    }
+
+    // --- 3. RUNWAY STROBE CHASE --------------------------------------------------
+    // ~16 small additive blips set just inside the deck lip along the ledge-facing
+    // ~120deg arc, with a chasing light sweeping toward the ledge. ONE SphereGeometry
+    // via one InstancedMesh (1 draw); per-instance scale + instanceColor written from
+    // a this.t phase in update(), allocation-free.
+    const blips = 16
+    this.strobeCount = blips
+    const blipGeo = this.ownG(new THREE.SphereGeometry(0.4, 8, 6))
+    const blipMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9dff5a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    const strobe = new THREE.InstancedMesh(blipGeo, blipMat, blips)
+    strobe.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    const arc = (120 * Math.PI) / 180   // 120deg ledge-facing arc, centred on +Z
+    const rr = R - 2                    // just inside the lip
+    for (let i = 0; i < blips; i++) {
+      const a = (i / (blips - 1) - 0.5) * arc // -60deg .. +60deg around +Z
+      this.scratchMat.makeTranslation(Math.sin(a) * rr, 1.9, Math.cos(a) * rr)
+      strobe.setMatrixAt(i, this.scratchMat)
+      strobe.setColorAt(i, this.scratchColor.setRGB(0, 0, 0))
+    }
+    strobe.instanceMatrix.needsUpdate = true
+    if (strobe.instanceColor) strobe.instanceColor.needsUpdate = true
+    this.group.add(strobe); this.strobes = strobe
+  }
+
+  /** A single ">" chevron drawn to a canvas, used by the path-of-light tiles. */
+  private chevronTex(): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 64
+    const ctx = cv.getContext('2d')!
+    ctx.clearRect(0, 0, 128, 64)
+    // Point the chevron toward +V (so on a +Z-laid tile it points to the ledge).
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 10
+    ctx.beginPath(); ctx.moveTo(24, 48); ctx.lineTo(64, 16); ctx.lineTo(104, 48); ctx.stroke()
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }
+
   private buildProps() {
     const R = this.radius
     const coreMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9b6bff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
@@ -980,36 +1091,53 @@ export class LaunchPad {
 
   update(dt: number, _x: number, _z: number) {
     this.t += dt
+    // Item 4: on 'low' ONLY, skip the distant-backdrop opacity sweeps on 2 of every
+    // 3 frames - they rewrite a uniform every frame yet read identically at a third
+    // the rate this far away. Medium/high leave `lowSkip` false, so they stay
+    // byte-for-byte unchanged.
+    const low = config.tier.name === 'low'
+    let lowSkip = false
+    if (low) { this.lowThrottle = (this.lowThrottle + 1) % 3; lowSkip = this.lowThrottle !== 0 }
     for (const st of this.beltSeams) { st.position.x += 6 * dt; if (st.position.x > this.beltX1) st.position.x = this.beltX0 }
     for (const a of this.arms) {
       a.pivot.rotation.x = Math.sin(this.t * 2 + a.ph) * 0.5 - 0.3
       a.elbow.rotation.x = Math.sin(this.t * 3 + a.ph) * 0.6
       // reducedMotion: soften spark strobe to a slow, low-amplitude glow.
+      // low: freeze the fastest (18 rad/s) strobe to a constant glow - it's a
+      // background backdrop on mobile and the fast flicker isn't worth the cost.
       const sparkFreq = config.reducedMotion ? 2 : 18
       const sparkAmp = config.reducedMotion ? 0.18 : 0.85
       const sparkBase = config.reducedMotion ? 0.25 : 0
-      a.sparkMat.opacity = sparkBase + Math.max(0, Math.sin(this.t * sparkFreq + a.ph)) * sparkAmp
-      a.spark.scale.setScalar(1 + a.sparkMat.opacity * 0.9)
+      if (low) { a.sparkMat.opacity = 0.4; a.spark.scale.setScalar(1.36) }
+      else {
+        a.sparkMat.opacity = sparkBase + Math.max(0, Math.sin(this.t * sparkFreq + a.ph)) * sparkAmp
+        a.spark.scale.setScalar(1 + a.sparkMat.opacity * 0.9)
+      }
     }
     for (let i = 0; i < this.cores.length; i++) { const c = this.cores[i]; c.rotation.x += dt * 1.1; c.rotation.y += dt * 0.8; c.position.y = 3.4 + Math.sin(this.t * 1.4 + i) * 0.5 }
     // Sci-fi props.
     for (const h of this.holos) { h.o.rotation.y += h.sp * dt; h.o.rotation.x += h.sp * 0.4 * dt }
     for (const m of this.pylons) m.opacity = 0.45 + Math.sin(this.t * 3.2) * 0.4
-    // Skyline rooftop beacons blink out of phase.
-    for (const b of this.beacons) b.mat.opacity = 0.25 + Math.pow(Math.max(0, Math.sin(this.t * 1.6 + b.ph)), 6) * 0.75
+    // Skyline rooftop beacons blink out of phase. (low: throttled to every 3rd frame.)
+    if (!lowSkip) for (const b of this.beacons) b.mat.opacity = 0.25 + Math.pow(Math.max(0, Math.sin(this.t * 1.6 + b.ph)), 6) * 0.75
     // Factory tower: lift cores travel the tubes, bay arms weld, neon bands pulse.
     for (const l of this.lifts) l.o.position.y = l.lo + (Math.sin(this.t * 0.6 + l.ph) * 0.5 + 0.5) * (l.hi - l.lo)
     for (const a of this.towerArms) {
       a.pivot.rotation.x = Math.sin(this.t * 2.2 + a.ph) * 0.4 - 0.2
       a.elbow.rotation.x = Math.sin(this.t * 3.3 + a.ph) * 0.5
       // reducedMotion: soften tower spark strobe to a slow, low-amplitude glow.
+      // low: freeze the fastest (17 rad/s) strobe to a constant glow (background).
       const tSparkFreq = config.reducedMotion ? 2 : 17
       const tSparkAmp = config.reducedMotion ? 0.2 : 0.9
       const tSparkBase = config.reducedMotion ? 0.28 : 0
-      a.sparkMat.opacity = tSparkBase + Math.max(0, Math.sin(this.t * tSparkFreq + a.ph)) * tSparkAmp
-      a.spark.scale.setScalar(1 + a.sparkMat.opacity)
+      if (low) { a.sparkMat.opacity = 0.45; a.spark.scale.setScalar(1.45) }
+      else {
+        a.sparkMat.opacity = tSparkBase + Math.max(0, Math.sin(this.t * tSparkFreq + a.ph)) * tSparkAmp
+        a.spark.scale.setScalar(1 + a.sparkMat.opacity)
+      }
     }
-    for (let i = 0; i < this.towerStripMats.length; i++) this.towerStripMats[i].opacity = 0.6 + Math.sin(this.t * 2.4 + i) * 0.3
+    // Neon floor/band strips pulse. (low: throttled to every 3rd frame.)
+    if (!lowSkip) for (let i = 0; i < this.towerStripMats.length; i++) this.towerStripMats[i].opacity = 0.6 + Math.sin(this.t * 2.4 + i) * 0.3
     // Forge pistons pump.
     for (const p of this.forgePistons) p.o.position.y = p.base + Math.sin(this.t * 3 + p.ph) * 0.8
     // Gantry trolley tracks back and forth over the line; welder flares as it works.
@@ -1061,6 +1189,37 @@ export class LaunchPad {
     }
     this.arrowMat.opacity = 0.5 + Math.sin(this.t * 4) * 0.35
     for (let i = 0; i < this.arrowChevs.length; i++) this.arrowChevs[i].position.y = 6 - i * 2.3 - ((this.t * 3 + i) % 1) * 0.6
+
+    // --- Guidance animations (items 1-3), all off this.t, allocation-free. -------
+    // 1. Path-of-light: a travelling brightness wave runs spawn -> ledge. Per-tile
+    //    phase offset gives the "flow toward the drop" read; reuse scratchColor.
+    if (this.pathTiles) {
+      for (let i = 0; i < this.pathCount; i++) {
+        const w = 0.35 + Math.pow(Math.max(0, Math.sin(this.t * 2.2 - i * 0.6)), 3) * 0.65
+        this.scratchColor.setRGB(w, w, w)
+        this.pathTiles.setColorAt(i, this.scratchColor)
+      }
+      if (this.pathTiles.instanceColor) this.pathTiles.instanceColor.needsUpdate = true
+    }
+    // 2. Hero light-shafts: a gentle out-of-phase opacity pulse (off on low).
+    for (const s of this.shafts) s.mat.opacity = 0.1 + (Math.sin(this.t * 1.1 + s.ph) * 0.5 + 0.5) * 0.12
+    // 3. Runway strobe chase: a bright pulse sweeps the arc toward the ledge. Write
+    //    per-instance scale (into scratchMat) + instanceColor from the chase phase.
+    if (this.strobes) {
+      for (let i = 0; i < this.strobeCount; i++) {
+        const b = Math.pow(Math.max(0, Math.sin(this.t * 4 - i * 0.5)), 4) // sharp chasing blip
+        const a = (i / (this.strobeCount - 1) - 0.5) * ((120 * Math.PI) / 180)
+        const rr = this.radius - 2
+        const sc = 0.7 + b * 1.8
+        this.scratchMat.makeScale(sc, sc, sc)
+        this.scratchMat.setPosition(Math.sin(a) * rr, 1.9, Math.cos(a) * rr)
+        this.strobes.setMatrixAt(i, this.scratchMat)
+        const g = 0.25 + b * 0.75
+        this.strobes.setColorAt(i, this.scratchColor.setRGB(g * 0.6, g, g * 0.35))
+      }
+      this.strobes.instanceMatrix.needsUpdate = true
+      if (this.strobes.instanceColor) this.strobes.instanceColor.needsUpdate = true
+    }
 
     const ledgeZ = this.radius - 2
     const lenX = this.lenX
@@ -1209,6 +1368,11 @@ export class LaunchPad {
   dispose() {
     this.group.parent?.remove(this.group)
     this.collider.parent?.remove(this.collider)
+    // InstancedMeshes own per-instance buffers beyond their (tracked) geometry +
+    // material, so free those too. Their geo/mat are registered via ownG/own and
+    // disposed with the arrays below.
+    this.pathTiles?.dispose()
+    this.strobes?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
     this.texs.forEach((t) => t.dispose())

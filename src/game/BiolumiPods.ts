@@ -59,6 +59,15 @@ export class BiolumiPods implements GameSystem {
   private zone: Zone = 'earth'
   private t = 0
 
+  // Render-only throttle (never feeds physics): rewrite instances every Nth sim
+  // step on low/medium. high = 0 => original every-frame path, unchanged.
+  // medium ~1*fixedDelta (every 2nd step), low ~2*fixedDelta (every 3rd step).
+  private interval: number
+  private acc = 0
+  // On low/medium, clusters past this XZ distance from the player are invisible
+  // through the Mars dust fog, so we skip rewriting their matrices/colours.
+  private cullDist2: number
+
   private podsMesh!: THREE.InstancedMesh
   private tendrilsMesh!: THREE.InstancedMesh
 
@@ -78,6 +87,11 @@ export class BiolumiPods implements GameSystem {
     const name = config.tier.name
     // Tier-gated count: minimal on low, fewer on medium, full on high.
     const n = name === 'low' ? 12 : name === 'medium' ? 28 : 48
+    const fd = config.render.fixedDelta
+    this.interval = name === 'low' ? fd * 2 : name === 'medium' ? fd * 1 : 0
+    // high: no culling (Infinity => every cluster always rewritten); low/medium
+    // skip clusters beyond ~60m (lost in the fog) during the throttled rewrite.
+    this.cullDist2 = name === 'high' ? Infinity : 60 * 60
     const rnd = mulberry32(540431)
     // Off-world fields are sparser than Earth - scatter over a wide square.
     const reach = 150
@@ -150,9 +164,22 @@ export class BiolumiPods implements GameSystem {
     scene.add(this.group)
   }
 
-  /** Recompute instance matrices + colours from current cluster glow/sway state. */
-  private writeInstances(initial: boolean) {
+  /**
+   * Recompute instance matrices + colours from current cluster glow/sway state.
+   * On low/medium, `px`/`pz` are the player position and clusters beyond
+   * `cullDist2` are skipped (lost in the fog). Returns true if any cluster was
+   * actually rewritten, so callers only flag the GPU uploads when needed.
+   * On high `cullDist2` is Infinity, so every cluster is rewritten (unchanged).
+   */
+  private writeInstances(initial: boolean, px = 0, pz = 0): boolean {
+    let wrote = false
     for (const c of this.clusters) {
+      // Skip far clusters during the throttled rewrite (high: cullDist2 = Infinity).
+      if (!initial) {
+        const dx = c.x - px, dz = c.z - pz
+        if (dx * dx + dz * dz > this.cullDist2) continue
+      }
+      wrote = true
       // Per-cluster animated brightness (a pulse) plus reactive proximity glow.
       const pulse = initial ? 0.5 : 0.5 + 0.5 * Math.sin(this.t * 1.7 + c.phase)
       const brightness = 0.4 + pulse * 0.22 + c.glow * 0.7
@@ -177,6 +204,7 @@ export class BiolumiPods implements GameSystem {
         this.tendrilsMesh.setColorAt(idx, this.cScratch)
       }
     }
+    return wrote
   }
 
   setZone(zone: Zone) {
@@ -189,20 +217,48 @@ export class BiolumiPods implements GameSystem {
     const onMars = this.deps.zone() === 'mars'
     if (this.group.visible !== onMars) this.group.visible = onMars
     if (!onMars) return
-    this.t += dt
+
+    if (this.interval === 0) {
+      // high: original every-frame path, unchanged.
+      this.t += dt
+      const f = this.deps.playerPos()
+      this.advanceGlow(dt, f.x, f.z)
+      this.writeInstances(false)
+      this.podsMesh.instanceMatrix.needsUpdate = true
+      this.tendrilsMesh.instanceMatrix.needsUpdate = true
+      this.podsMesh.instanceColor!.needsUpdate = true
+      this.tendrilsMesh.instanceColor!.needsUpdate = true
+      return
+    }
+
+    // low/medium: keep time + glow advancing every step (continuous motion), but
+    // only rewrite instances on throttled steps, integrating with the accumulated
+    // sub-dt so the pulse/sway/glow rates are unchanged.
+    this.acc += dt
+    if (this.acc < this.interval) return
+    const sub = this.acc
+    this.acc = 0
+    this.t += sub
     const f = this.deps.playerPos()
+    this.advanceGlow(sub, f.x, f.z)
+    // Skip far clusters; only flag the GPU uploads if at least one was rewritten.
+    if (this.writeInstances(false, f.x, f.z)) {
+      this.podsMesh.instanceMatrix.needsUpdate = true
+      this.tendrilsMesh.instanceMatrix.needsUpdate = true
+      this.podsMesh.instanceColor!.needsUpdate = true
+      this.tendrilsMesh.instanceColor!.needsUpdate = true
+    }
+  }
+
+  /** Ease each cluster's proximity glow toward its target over `dt` seconds. */
+  private advanceGlow(dt: number, px: number, pz: number) {
     for (const c of this.clusters) {
       // Reactive: brighten + bloom when the player is close, ease back when not.
-      const dx = c.x - f.x, dz = c.z - f.z
+      const dx = c.x - px, dz = c.z - pz
       const near = dx * dx + dz * dz < 12 * 12 ? 1 : 0
       // Frame-rate-independent exponential approach toward the target glow.
       c.glow += (near - c.glow) * Math.min(1, dt * 4)
     }
-    this.writeInstances(false)
-    this.podsMesh.instanceMatrix.needsUpdate = true
-    this.tendrilsMesh.instanceMatrix.needsUpdate = true
-    this.podsMesh.instanceColor!.needsUpdate = true
-    this.tendrilsMesh.instanceColor!.needsUpdate = true
   }
 
   dispose() {

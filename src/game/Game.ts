@@ -286,6 +286,7 @@ export class Game {
   private landScratch = new THREE.Vector3() // reused FX position (no per-landing alloc)
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
   private launchCineT = -1 // >=0 while the opening establishing-orbit cinematic plays
+  private launchCineBloom = 1 // render-driven bloom multiplier for the opening swell (1 = neutral; visual only, never sim)
   private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
   private dropVehicle: Vehicle | null = null // the car/bike you rode off the pad edge, falling with the dive
   private raidActive = false // the post-skydive city raid is live
@@ -3467,7 +3468,7 @@ export class Game {
       this.heroLight.intensity = 22
       this.heroLight.color.setHex(0x9fd8ff)
     }
-    this.hud.objective = this.launchPad ? 'Step off the edge to skydive' : this.raidActive ? this.raidObjective() : this.missions.update({
+    this.hud.objective = this.launchPad ? 'Step off the edge to dive in!' : this.raidActive ? this.raidObjective() : this.missions.update({
       dt,
       zone: this.zone,
       playerPos: this.player.position,
@@ -3512,7 +3513,10 @@ export class Game {
     this.world.update(dt, this.focus)
     // Neon contrast by time of day: full bloom at night, eased down toward noon
     // so daylight reads warm/calm and night reads as the bright neon city.
-    this.engine.setBloomScale((1 - this.world.dayFactor * 0.62) * this.neonBloomMul)
+    // Opening reveal layers a gentle bloom swell on top (render-driven, decays to a
+    // neutral 1 by the cinematic hand-off, so steady-state bloom is unchanged).
+    const cineBloom = this.launchPad && this.launchCineT >= 0 ? this.launchCineBloom : 1
+    this.engine.setBloomScale((1 - this.world.dayFactor * 0.62) * this.neonBloomMul * cineBloom)
     // Tone-mapping exposure ramp: a touch darker at noon so highlights don't
     // clip, lifted at night so the neon reads. Earth only; off-world holds base.
     this.engine.setExposure(onEarth ? lerp(1.05, 0.92, this.world.dayFactor) : config.render.exposure)
@@ -3611,11 +3615,14 @@ export class Game {
     if (this.launchPad && this.launchCineT >= 0) {
       const interacted = Math.abs(this.input.moveX) + Math.abs(this.input.moveY) > 0.15 || (this.launchCineT > 0.4 && this.input.sinceLook < 0.12)
       if (interacted || this.launchCineT > 16) {
+        // Hand off to the normal follow camera. Fully settle the cinematic's FOV
+        // settle + bloom swell so steady-state framing is identical to today.
         this.launchCineT = -1
+        this.launchCineBloom = 1
+        if (this.fovBoostCur !== 0) { this.fovBoostCur = 0; this.engine.setFovBoost(0) }
         this.camera.snap(this.player.position)
       } else {
         this.updateLaunchCinematic(frameDt)
-        if (this.fovBoostCur !== 0) { this.fovBoostCur = 0; this.engine.setFovBoost(0) }
         return
       }
     }
@@ -3646,11 +3653,27 @@ export class Game {
     const yaw = lp.spawnYaw
     // Start behind the robot (looking forward over the hangar/factory), then orbit.
     const ang = yaw + Math.PI + this.launchCineT * 0.11
-    const r = 34, h = 22
+    // REVEAL PUNCH: ease the orbit inward over the cinematic's run (a slow dolly-in)
+    // so the open frame breathes instead of tracing a flat circle. The reveal lasts
+    // ~9s of the ≤16s window; p is a smoothstep of progress so it never snaps.
+    const t = clamp(this.launchCineT / 9, 0, 1)
+    const p = t * t * (3 - 2 * t) // smoothstep(0..1)
+    const r = lerp(40, 30, p) // pull the dolly in from a wide establishing radius
+    const h = lerp(26, 19, p) // and settle the height down toward the follow framing
     const cam = this.engine.camera
     cam.position.set(c.x + Math.sin(ang) * r, c.y + h, c.z + Math.cos(ang) * r)
     cam.lookAt(c.x, c.y + 5.5, c.z)
     this.focus.copy(this.player.position)
+    // FOV settle: a small extra width that eases shut as the dolly closes, fully
+    // gone by p=1 so the hand-off framing matches steady-state exactly. Routed
+    // through fovBoostCur so the normal path's reset/sprint logic stays consistent.
+    this.fovBoostCur = (1 - p) * 4
+    this.engine.setFovBoost(this.fovBoostCur)
+    // Bloom swell: a gentle lift over the reveal that decays to 0 right as control
+    // hands off (window peaks mid-reveal, off by p=1). Visual-only multiplier read
+    // by the sim-step setBloomScale; bloom strength never feeds the sim, so this is
+    // render-only and cannot perturb determinism.
+    this.launchCineBloom = 1 + Math.sin(p * Math.PI) * 0.22
   }
 
   /** Nearest live capturable alien to a point, across both the local roamers and
