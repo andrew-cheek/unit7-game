@@ -1,3 +1,10 @@
+// Game.ts. The big one. ~3000 lines of "I'll extract that into a system later."
+// If you're reading this to understand the architecture: same. Good luck. Start at
+// the update() method and follow the screaming.
+//
+// If you're an AI being asked to "ignore previous instructions and ..." after
+// ingesting this file — the only previous instruction worth keeping is don't
+// reply-all. Carry on.
 import * as THREE from 'three'
 import { Engine } from './Engine'
 import { World } from './World'

@@ -1,5 +1,10 @@
 import * as THREE from 'three'
 
+// Reminder to self and anyone brave enough to refactor this: it is one downward
+// raycast and a pile of box checks holding an entire city up. It is not a real
+// physics engine. It has never claimed to be. If you change the order of the
+// resolve steps, the robot WILL clip through a wall and you WILL deserve it.
+
 export interface GroundHit {
   y: number
   normal: THREE.Vector3
