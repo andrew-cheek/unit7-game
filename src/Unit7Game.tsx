@@ -85,6 +85,26 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     setCoachDone(true)
   }
 
+  // One-time "Calm Mode available" hint chip. Same persistence shape as the touch
+  // coach (localStorage + try/catch for private mode). Brand-new players on the
+  // platform get pointed at the Pause-menu Calm Mode toggle once, ever.
+  const [calmHintDone, setCalmHintDone] = useState(() => {
+    try { return localStorage.getItem('u7.calmhint.v1') === '1' } catch { return true }
+  })
+  const dismissCalmHint = () => {
+    try { localStorage.setItem('u7.calmhint.v1', '1') } catch { /* private mode */ }
+    setCalmHintDone(true)
+  }
+
+  // One-time solo welcome card. Auto-dismisses on a timer; never blocks input.
+  const [welcomeDone, setWelcomeDone] = useState(() => {
+    try { return localStorage.getItem('u7.welcome.v1') === '1' } catch { return true }
+  })
+  const dismissWelcome = () => {
+    try { localStorage.setItem('u7.welcome.v1', '1') } catch { /* private mode */ }
+    setWelcomeDone(true)
+  }
+
   // Open the parental gate that turns typed chat on. With no PIN yet, run the
   // setup flow (arithmetic speed-bump + create a PIN); once a PIN exists, just
   // verify it. The arithmetic challenge is generated once here and held in state
@@ -199,6 +219,31 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Calm Mode hint lifecycle. If the player already has reduced motion on, don't
+  // tell them about a thing that's already active — write the flag immediately so
+  // the chip never appears. Otherwise, once it's shown on the platform, auto-retire
+  // it after ~8s even if untouched, so it can never reappear on a later session.
+  const calmHintVisible = !!hud && hud.onPlatform && !hud.intro && !calmHintDone
+  useEffect(() => {
+    if (calmHintDone) return
+    if (hud?.reducedMotion) { dismissCalmHint(); return }
+    if (!calmHintVisible) return
+    const t = setTimeout(dismissCalmHint, 8000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calmHintVisible, hud?.reducedMotion, calmHintDone])
+
+  // Solo welcome card: one-time, auto-dismissing (~4s). Shows on the platform once
+  // the player is past the join gate (solo, or multiplayer joined).
+  const welcomeVisible =
+    !!hud && hud.onPlatform && !hud.intro && (!multiplayer || mpJoined) && !welcomeDone
+  useEffect(() => {
+    if (!welcomeVisible) return
+    const t = setTimeout(dismissWelcome, 4000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [welcomeVisible])
+
   return (
     <div ref={containerRef} className={className} style={{ ...rootStyle, ...style }}>
       <style>{KEYFRAMES}</style>
@@ -231,8 +276,24 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
         <MobileControls controls={controlsRef.current} hud={hud} />
       )}
       {touch && !coachDone && hud && !hud.intro && !hud.minigame && !hud.paused && (mpJoined || !multiplayer) && (
-        <TouchCoach onDismiss={dismissCoach} />
+        <TouchCoach onDismiss={dismissCoach} onPlatform={hud.onPlatform} />
       )}
+
+      {/* One-time "Calm Mode available" chip — brand-new players on the platform.
+          Suppressed entirely (and the flag pre-written) when reduced motion is
+          already on; see the calmHintVisible effect above. */}
+      {calmHintVisible && !hud?.reducedMotion && <CalmHintChip touch={touch} onDismiss={dismissCalmHint} />}
+
+      {/* Touch-only platform CTA: spells out the very first action (walk off the
+          glowing edge). Desktop already shows this on its bottom hint line, so we
+          only render it on touch to avoid duplicating that copy. */}
+      {touch && hud && hud.onPlatform && !hud.intro && !hud.minigame && !hud.paused && (mpJoined || !multiplayer) && (
+        <PlatformCta />
+      )}
+
+      {/* One-time, auto-dismissing solo welcome card. Pointer-events off so it can
+          never block walking off the edge while it fades out on its timer. */}
+      {welcomeVisible && <WelcomeCard />}
       {multiplayer && !mpJoined && hud && !hud.intro && (
         <JoinWorld
           touch={touch}
@@ -718,7 +779,7 @@ function OrientationPrompt() {
 
 /** One-time touch control coach. The desktop control legend is hidden on touch,
  * so first-time phone players otherwise get no idea what the zones do. */
-function TouchCoach({ onDismiss }: { onDismiss: () => void }) {
+function TouchCoach({ onDismiss, onPlatform }: { onDismiss: () => void; onPlatform: boolean }) {
   return (
     <div style={coachBackdrop} onPointerDown={(e) => { e.stopPropagation(); onDismiss() }}>
       <div style={coachCenter}>
@@ -728,9 +789,52 @@ function TouchCoach({ onDismiss }: { onDismiss: () => void }) {
           <div style={coachHint}><span style={coachHintKey}>DRAG</span> right side looks</div>
           <div style={coachHint}><span style={coachHintKey}>TAP</span> buttons to act</div>
         </div>
-        <div style={coachBody}>Follow the green objective to Portal Plaza, then reach the neon arcade to launch the mini-games.</div>
+        {/* On the opening platform the first thing to do is dive off the edge, so
+            don't point at Portal Plaza / the arcade yet — that copy is for after. */}
+        <div style={coachBody}>
+          {onPlatform
+            ? 'Walk to the edge and step off to dive into the city!'
+            : 'Follow the green objective to Portal Plaza, then reach the neon arcade to launch the mini-games.'}
+        </div>
         <div style={coachCta}>TAP TO START ▸</div>
       </div>
+    </div>
+  )
+}
+
+/** One-time, dismissible "Calm Mode available" chip. Sits just above the bottom
+ * hint line and points photosensitive players at the Pause-menu toggle. */
+function CalmHintChip({ touch, onDismiss }: { touch: boolean; onDismiss: () => void }) {
+  return (
+    <div style={calmChip}>
+      <span style={{ color: '#9bff4d' }}>✦</span>
+      <span style={{ color: 'rgba(223,238,255,0.92)' }}>
+        Flashy lights? Turn on Calm Mode in the {touch ? 'Pause menu' : 'Pause menu (Esc)'}.
+      </span>
+      <button style={calmChipBtn} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDismiss() }} onClick={onDismiss}>
+        Got it ✕
+      </button>
+    </div>
+  )
+}
+
+/** Touch-only platform CTA. Reuses the prompt/hint chrome to spell out the first
+ * move for a brand-new player: walk to the glowing edge and step off. */
+function PlatformCta() {
+  return (
+    <div style={platformCta}>
+      <span style={{ color: '#27e7ff' }}>Use the stick to walk to the glowing edge, then step off!</span>
+    </div>
+  )
+}
+
+/** One-time, auto-dismissing solo welcome card. Mirrors the mission-card chrome
+ * and is pointer-events:none so it can never block input. */
+function WelcomeCard() {
+  return (
+    <div style={welcomeCard}>
+      <div style={welcomeCardTitle}>Welcome to Unit 7!</div>
+      <div style={welcomeCardBody}>Step off the edge to dive into the neon city.</div>
     </div>
   )
 }
@@ -1116,4 +1220,90 @@ const coachCta: CSSProperties = {
   font: '800 12px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.16em',
   boxShadow: '0 0 18px rgba(39,231,255,0.5)',
+}
+// Calm Mode hint chip — pinned bottom-center, sitting just above the desktop
+// bottom hint line / the touch action cluster. The chip captures pointers (its
+// "Got it" button is tappable); the rest of the screen keeps playing.
+const calmChip: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: 'max(48px, calc(env(safe-area-inset-bottom) + 44px))',
+  transform: 'translateX(-50%)',
+  zIndex: 23,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  maxWidth: 'min(92vw, 460px)',
+  padding: '8px 12px 8px 14px',
+  background: 'rgba(6,10,22,0.82)',
+  border: '1px solid rgba(155,255,77,0.4)',
+  borderRadius: 999,
+  boxShadow: '0 0 18px rgba(155,255,77,0.18)',
+  font: '600 12px/1.3 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.02em',
+  textAlign: 'left',
+  pointerEvents: 'auto',
+}
+const calmChipBtn: CSSProperties = {
+  flexShrink: 0,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 12px',
+  background: 'rgba(155,255,77,0.12)',
+  border: '1px solid rgba(155,255,77,0.5)',
+  borderRadius: 999,
+  color: '#bfff8f',
+  font: '800 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.1em',
+  whiteSpace: 'nowrap',
+}
+// Touch-only platform CTA — reuses the contextual-prompt chrome (centered pill),
+// pinned a touch higher than the action cluster so it never collides with it.
+const platformCta: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  bottom: '30%',
+  transform: 'translateX(-50%)',
+  zIndex: 18,
+  maxWidth: '80vw',
+  textAlign: 'center',
+  padding: '8px 18px',
+  background: 'rgba(6,10,22,0.7)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  borderRadius: 999,
+  font: '700 14px/1.3 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.04em',
+  boxShadow: '0 0 20px rgba(39,231,255,0.25)',
+  pointerEvents: 'none',
+}
+// Solo welcome card — mirrors the HUD mission-card chrome; pointer-events off so
+// it can never swallow a tap/click while it auto-dismisses on its timer.
+const welcomeCard: CSSProperties = {
+  position: 'absolute',
+  left: '50%',
+  top: '24%',
+  transform: 'translateX(-50%)',
+  zIndex: 22,
+  maxWidth: '82vw',
+  padding: '14px 22px',
+  textAlign: 'center',
+  background: 'rgba(5,10,25,0.78)',
+  border: '1px solid rgba(90,255,255,0.5)',
+  borderRadius: 14,
+  boxShadow: '0 0 26px rgba(0,255,255,0.25)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  pointerEvents: 'none',
+}
+const welcomeCardTitle: CSSProperties = {
+  font: '800 20px/1.1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.14em',
+  color: '#27e7ff',
+  textShadow: '0 0 14px rgba(39,231,255,0.7)',
+  marginBottom: 6,
+}
+const welcomeCardBody: CSSProperties = {
+  font: '600 12px/1.4 ui-monospace, Menlo, monospace',
+  color: 'rgba(223,238,255,0.92)',
+  letterSpacing: '0.04em',
 }

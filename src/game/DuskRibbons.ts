@@ -53,6 +53,12 @@ export class DuskRibbons implements GameSystem {
   private scratch = new THREE.Color()
   private scratchPos = new THREE.Vector3()
 
+  // Render-only throttle (never feeds physics): rewrite ribbon transforms/colours
+  // every Nth sim step on low/medium. high = 0 => original every-frame path.
+  // medium ~1*fixedDelta (every 2nd step), low ~2*fixedDelta (every 3rd step).
+  private interval: number
+  private acc = 0
+
   constructor(scene: THREE.Scene, private deps: Deps) {
     this.tex = this.makeGradient()
     // Wide, soft horizontal band, gently waved so overlapping ribbons read as
@@ -60,6 +66,8 @@ export class DuskRibbons implements GameSystem {
     // the visible horizon even though there are only a few.
     // LOW: shrink ~18% to trim the additive footprint; high/medium full size.
     const low = config.tier.name === 'low'
+    const fd = config.render.fixedDelta
+    this.interval = config.tier.name === 'low' ? fd * 2 : config.tier.name === 'medium' ? fd * 1 : 0
     this.geo = new THREE.PlaneGeometry(low ? 320 : 390, low ? 60 : 74, 20, 1)
     const pos = this.geo.attributes.position as THREE.BufferAttribute
     for (let i = 0; i < pos.count; i++) {
@@ -83,7 +91,9 @@ export class DuskRibbons implements GameSystem {
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         fog: false,
-        side: THREE.DoubleSide,
+        // LOW: viewed from below, so the back face is never seen - FrontSide halves
+        // the additive fill cost on mobile. medium/high keep DoubleSide.
+        side: low ? THREE.FrontSide : THREE.DoubleSide,
       })
       const mesh = new THREE.Mesh(this.geo, mat)
       mesh.rotation.z = (i - (n - 1) / 2) * 0.04 // slight fan so bands aren't parallel
@@ -152,10 +162,32 @@ export class DuskRibbons implements GameSystem {
     const { glow, dawn } = this.envelope(this.deps.dayFactor())
     if (glow <= 0) { if (this.group.visible) this.group.visible = false; return }
     this.group.visible = true
-    this.t += dt
+
+    if (this.interval === 0) {
+      // high: original every-frame path, unchanged.
+      this.t += dt
+      // Anchor the whole group over the player's focus so the glow follows the view.
+      const f = this.deps.focus()
+      this.group.position.set(f.x, 0, f.z)
+      this.writeFrame(glow, dawn)
+      return
+    }
+
+    // low/medium: keep time advancing every step (continuous sway/shimmer), but
+    // only rewrite ribbon transforms/colours on throttled steps, integrating with
+    // the accumulated sub-dt so the drift/shimmer rates are unchanged.
+    this.acc += dt
+    if (this.acc < this.interval) return
+    this.t += this.acc
+    this.acc = 0
     // Anchor the whole group over the player's focus so the glow follows the view.
     const f = this.deps.focus()
     this.group.position.set(f.x, 0, f.z)
+    this.writeFrame(glow, dawn)
+  }
+
+  /** Recompute each ribbon's position, opacity and colour from the current state. */
+  private writeFrame(glow: number, dawn: number) {
     for (const r of this.ribbons) {
       r.mesh.position.set(
         r.offX + Math.sin(this.t * r.drift + r.phase) * 18,

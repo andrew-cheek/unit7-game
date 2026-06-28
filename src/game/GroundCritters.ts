@@ -52,6 +52,12 @@ export class GroundCritters implements GameSystem {
   private n: number
   private zone: Zone = 'earth'
 
+  // Render-only throttle (never feeds physics): rewrite instances every Nth sim
+  // step on low/medium to cut per-frame CPU. high = 0 => original every-frame path.
+  // medium ~1*fixedDelta (every 2nd step), low ~2*fixedDelta (every 3rd step).
+  private interval: number
+  private acc = 0
+
   // Scratch objects reused every frame so update() never allocates.
   private center = new THREE.Vector3()
   private mat = new THREE.Matrix4()
@@ -63,6 +69,8 @@ export class GroundCritters implements GameSystem {
   constructor(scene: THREE.Scene, private deps: Deps) {
     const tier = config.tier.name
     this.n = tier === 'low' ? 8 : tier === 'medium' ? 16 : 26
+    const fd = config.render.fixedDelta
+    this.interval = tier === 'low' ? fd * 2 : tier === 'medium' ? fd * 1 : 0
 
     // --- procedural geometry: a stubby dart of a body + a soft glow halo ---
     // Body: a small flattened sphere reads as a hunched little sparrow/beetle.
@@ -126,6 +134,21 @@ export class GroundCritters implements GameSystem {
     this.bodyMesh.visible = true
     this.glowMesh.visible = true
 
+    // high: original every-frame path, unchanged. low/medium: integrate motion
+    // with the accumulated sub-dt and rewrite instances only on throttled steps,
+    // so speeds stay identical while we touch the matrices less often.
+    if (this.interval === 0) {
+      this.step(dt)
+      return
+    }
+    this.acc += dt
+    if (this.acc < this.interval) return
+    this.step(this.acc)
+    this.acc = 0
+  }
+
+  /** One simulation + instance rewrite over `dt` seconds of motion. */
+  private step(dt: number) {
     const f = this.deps.playerPos()
     this.center.copy(f)
     const span = WRAP * 2
