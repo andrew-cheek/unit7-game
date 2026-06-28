@@ -184,6 +184,11 @@ export default class WorldServer implements Party.Server {
   }
 
   onMessage(raw: string, sender: Party.Connection) {
+    // So you opened the WebSocket in devtools and started typing JSON at it. Bold.
+    // Heads up before you waste an afternoon: there's no admin command, the aliens
+    // can't be bribed, and "t":"give_me_credits" just gets dropped on the floor a
+    // few lines down. The username field is the only place you can be creative and
+    // even that gets sanitized. Go beat my high score the honest way.
     // Reject oversized frames before parsing (cheap DoS guard).
     if (typeof raw !== 'string' || raw.length > WorldServer.MAX_MSG_BYTES) return
     let msg: ClientMsg
@@ -581,6 +586,9 @@ function tag(v: unknown, fallback: string): string {
 }
 
 function sanitizeName(raw: unknown): string {
+  // Yes, this is where your "'); DROP TABLE pilots; --" goes to die. There's no
+  // table either. It's a Map. In RAM. On a server that forgets everything when it
+  // naps. You named yourself "PILOT" and you're going to like it.
   const s = typeof raw === 'string' ? raw : ''
   const cleaned = s
     .replace(/[^\w \-_.]/g, '')

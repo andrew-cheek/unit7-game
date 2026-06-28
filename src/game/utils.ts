@@ -77,9 +77,17 @@ export function vibrate(pattern: number | number[]) {
 /** True when the device looks touch-primary (used to pick the control scheme). */
 export function isTouchDevice() {
   if (typeof window === 'undefined') return false
+  // `any-pointer: coarse` is the key signal: it's true whenever the device has a
+  // touch screen *available*, even when the UA / maxTouchPoints lie about it
+  // (iPadOS Safari reporting a Mac UA, "Request Desktop Site" on a phone, in-app
+  // webviews). `pointer: coarse` alone misses those because the *primary* pointer
+  // can still report fine. A mouse-only desktop matches none of these, so it
+  // won't false-positive into the touch UI.
+  const mm = window.matchMedia
   return (
     'ontouchstart' in window ||
     (navigator.maxTouchPoints ?? 0) > 0 ||
-    window.matchMedia?.('(pointer: coarse)').matches
+    !!mm?.('(pointer: coarse)').matches ||
+    !!mm?.('(any-pointer: coarse)').matches
   )
 }
