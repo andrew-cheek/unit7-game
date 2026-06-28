@@ -28,14 +28,16 @@ interface Deps {
 type SiegeState = 'idle' | 'announce' | 'wave' | 'lull' | 'victory'
 
 interface SiegeDrone {
-  group: THREE.Group
   cap: Capturable
-  eyeMat: THREE.MeshBasicMaterial // per-drone so it can pulse independently
   pos: THREE.Vector3 // shared with cap.position
   vel: THREE.Vector3
   bob: number
   spin: number
   active: boolean // part of the current wave's live set
+  // Live transform, written each frame; consumed when composing instance matrices.
+  rotY: number
+  rotZ: number
+  eyeColor: THREE.Color // per-drone eye pulse, pushed to the eye InstancedMesh
 }
 
 const BEACON = new THREE.Vector3(0, 0, 22) // siege beacon location on Earth
@@ -53,6 +55,30 @@ export class DroneSiege implements GameSystem {
   private geos: THREE.BufferGeometry[] = []
   private drones: SiegeDrone[] = []
   private zone: Zone = 'earth'
+
+  // --- lazily-built drone wave pool ---
+  // Built on the first siege activation, removed + disposed when the siege ends,
+  // so the idle scene holds only the beacon. When live, the whole wave renders as
+  // three InstancedMeshes (bodies, eyes, fins) instead of one Group per drone.
+  private poolSize: number
+  private bodyGeo: THREE.OctahedronGeometry
+  private finGeo: THREE.ConeGeometry
+  private eyeGeo: THREE.SphereGeometry
+  private bodyMat: THREE.MeshStandardMaterial
+  private finMat: THREE.MeshStandardMaterial
+  private eyeMat: THREE.MeshBasicMaterial
+  private bodyInst: THREE.InstancedMesh | null = null
+  private eyeInst: THREE.InstancedMesh | null = null
+  private finInst: THREE.InstancedMesh | null = null
+  // Static local offsets composed under each drone's live transform every frame.
+  private eyeLocal = new THREE.Matrix4()
+  private finLocals: THREE.Matrix4[] = []
+  // scratch for instance-matrix composition - no per-frame allocation
+  private mDrone = new THREE.Matrix4()
+  private mInst = new THREE.Matrix4()
+  private qDrone = new THREE.Quaternion()
+  private eDrone = new THREE.Euler()
+  private sOne = new THREE.Vector3(1, 1, 1)
 
   // Beacon visuals.
   private beacon = new THREE.Group()
@@ -79,7 +105,7 @@ export class DroneSiege implements GameSystem {
     const low = config.tier.name === 'low'
     // Fewer, smaller waves on mobile; bigger escalation on desktop.
     this.waves = low ? [3, 5, 7] : [3, 5, 7, 9]
-    const poolSize = this.waves[this.waves.length - 1]
+    this.poolSize = this.waves[this.waves.length - 1]
 
     // --- beacon: a pillar + core + ground ring, placed on the city floor ---
     const pillarGeo = this.ownG(new THREE.CylinderGeometry(0.5, 0.7, 4, 10))
@@ -96,39 +122,43 @@ export class DroneSiege implements GameSystem {
     this.beacon.position.set(BEACON.x, gy, BEACON.z)
     this.group.add(this.beacon)
 
-    // --- shared drone geometry/materials (built once, reused across the pool) ---
-    const bodyGeo = this.ownG(new THREE.OctahedronGeometry(0.55, 0))
-    const finGeo = this.ownG(new THREE.ConeGeometry(0.16, 0.7, 4))
-    const eyeGeo = this.ownG(new THREE.SphereGeometry(0.2, 10, 8))
-    const bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x14171d, metalness: 0.85, roughness: 0.3, emissive: 0x180404, emissiveIntensity: 0.5 }))
-    const finMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a2f3a, metalness: 0.75, roughness: 0.4 }))
+    // --- shared drone geometry/materials (built once, reused across activations) ---
+    // The geometry + materials persist for the system's lifetime (cheap, reused on
+    // every siege). Only the InstancedMeshes that hold them are built and torn down
+    // per siege, so the idle scene is just the beacon.
+    this.bodyGeo = this.ownG(new THREE.OctahedronGeometry(0.55, 0))
+    this.finGeo = this.ownG(new THREE.ConeGeometry(0.16, 0.7, 4))
+    this.eyeGeo = this.ownG(new THREE.SphereGeometry(0.2, 10, 8))
+    this.bodyMat = this.own(new THREE.MeshStandardMaterial({ color: 0x14171d, metalness: 0.85, roughness: 0.3, emissive: 0x180404, emissiveIntensity: 0.5 }))
+    this.finMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a2f3a, metalness: 0.75, roughness: 0.4 }))
+    // White base so each drone's per-instance eye color drives the pulse directly,
+    // reproducing the old per-drone eye material exactly.
+    this.eyeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }))
 
-    for (let i = 0; i < poolSize; i++) {
-      const grp = new THREE.Group()
-      const body = new THREE.Mesh(bodyGeo, bodyMat); grp.add(body)
-      // Per-drone eye material so each can pulse independently.
-      const eyeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xff3322, fog: false }))
-      const eye = new THREE.Mesh(eyeGeo, eyeMat); eye.position.set(0, 0.05, 0.5); grp.add(eye)
-      for (let f = 0; f < 4; f++) {
-        const fin = new THREE.Mesh(finGeo, finMat)
-        const a = (f / 4) * Math.PI * 2
-        fin.position.set(Math.cos(a) * 0.6, 0, Math.sin(a) * 0.6)
-        fin.rotation.z = Math.PI / 2
-        fin.rotation.y = -a
-        grp.add(fin)
-      }
-      grp.visible = false
-      this.group.add(grp)
+    // Static local transforms for the eye + the four fins (identical to the old per-drone Group layout).
+    this.eyeLocal.compose(new THREE.Vector3(0, 0.05, 0.5), new THREE.Quaternion(), this.sOne)
+    for (let f = 0; f < 4; f++) {
+      const a = (f / 4) * Math.PI * 2
+      const m = new THREE.Matrix4()
+      m.compose(
+        new THREE.Vector3(Math.cos(a) * 0.6, 0, Math.sin(a) * 0.6),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -a, Math.PI / 2, 'XYZ')),
+        this.sOne,
+      )
+      this.finLocals.push(m)
+    }
 
+    for (let i = 0; i < this.poolSize; i++) {
       const pos = new THREE.Vector3()
       const drone: SiegeDrone = {
-        group: grp,
-        eyeMat,
         pos,
         vel: new THREE.Vector3(),
         bob: Math.random() * Math.PI * 2,
         spin: Math.random() * Math.PI * 2,
         active: false,
+        rotY: 0,
+        rotZ: 0,
+        eyeColor: new THREE.Color(0xff3322),
         cap: { position: pos, alive: false, capture: () => this.onCaptured(drone) },
       }
       this.drones.push(drone)
@@ -139,12 +169,74 @@ export class DroneSiege implements GameSystem {
     scene.add(this.group)
   }
 
+  /**
+   * Lazily build the wave pool: three InstancedMeshes (bodies, eyes, fins) added to
+   * the group. Idempotent - a no-op if already built. Called when a siege activates.
+   */
+  private buildPool() {
+    if (this.bodyInst) return
+    const n = this.poolSize
+    this.bodyInst = new THREE.InstancedMesh(this.bodyGeo, this.bodyMat, n)
+    this.eyeInst = new THREE.InstancedMesh(this.eyeGeo, this.eyeMat, n)
+    this.finInst = new THREE.InstancedMesh(this.finGeo, this.finMat, n * 4)
+    for (const im of [this.bodyInst, this.eyeInst, this.finInst]) {
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      im.frustumCulled = false // wave can wrap behind the camera while chasing
+      this.group.add(im)
+    }
+    // Per-instance eye color so each drone pulses independently.
+    this.eyeInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3)
+    this.syncInstances() // place everything before the first render
+  }
+
+  /** Remove + dispose the lazily-built InstancedMeshes (shared geo/mat are kept). */
+  private destroyPool() {
+    for (const im of [this.bodyInst, this.eyeInst, this.finInst]) {
+      if (!im) continue
+      this.group.remove(im)
+      im.dispose() // frees the InstancedMesh's instance buffers, not the shared geo/mat
+    }
+    this.bodyInst = null
+    this.eyeInst = null
+    this.finInst = null
+  }
+
+  /** Push every active drone's transform + eye color into the instance buffers. */
+  private syncInstances() {
+    const body = this.bodyInst, eye = this.eyeInst, fin = this.finInst
+    if (!body || !eye || !fin) return
+    for (let i = 0; i < this.drones.length; i++) {
+      const d = this.drones[i]
+      if (d.active) {
+        this.eDrone.set(0, d.rotY, d.rotZ, 'XYZ')
+        this.qDrone.setFromEuler(this.eDrone)
+        this.mDrone.compose(d.pos, this.qDrone, this.sOne)
+      } else {
+        // Park inactive instances at the origin scaled to zero so they vanish.
+        this.mDrone.makeScale(0, 0, 0)
+      }
+      body.setMatrixAt(i, this.mDrone)
+
+      this.mInst.multiplyMatrices(this.mDrone, this.eyeLocal)
+      eye.setMatrixAt(i, this.mInst)
+      eye.setColorAt(i, d.eyeColor)
+
+      for (let f = 0; f < 4; f++) {
+        this.mInst.multiplyMatrices(this.mDrone, this.finLocals[f])
+        fin.setMatrixAt(i * 4 + f, this.mInst)
+      }
+    }
+    body.instanceMatrix.needsUpdate = true
+    eye.instanceMatrix.needsUpdate = true
+    fin.instanceMatrix.needsUpdate = true
+    if (eye.instanceColor) eye.instanceColor.needsUpdate = true
+  }
+
   /** Netted/blasted: destroy the drone, decrement the wave count, pay a bounty. */
   private onCaptured(d: SiegeDrone): number {
     if (!d.active) return 0
     d.active = false
     d.cap.alive = false
-    d.group.visible = false
     d.vel.set(0, 0, 0)
     this.deps.notify(d.pos.x, d.pos.y + 0.6, d.pos.z, `+${KILL_BOUNTY}c`, '#ff7a3a')
     this.alive--
@@ -153,6 +245,7 @@ export class DroneSiege implements GameSystem {
 
   /** Spawn `count` drones on a ring around the player and arm the wave. */
   private startWave() {
+    this.buildPool() // ensure the instanced pool exists before drones go live
     const focus = this.deps.focus()
     const count = this.waves[this.wave]
     this.alive = 0
@@ -164,31 +257,32 @@ export class DroneSiege implements GameSystem {
       const z = focus.z + Math.sin(a) * SPAWN_RING
       d.pos.set(x, this.deps.groundY(x, z) + HOVER + 2, z)
       d.vel.set(0, 0, 0)
+      d.rotY = 0
+      d.rotZ = d.spin
       d.active = true
       d.cap.alive = true
-      d.group.visible = true
-      d.group.position.copy(d.pos)
       spawned++
       this.alive++
     }
+    this.syncInstances()
     this.state = 'wave'
     this.deps.banner(`WAVE ${this.wave + 1} / ${this.waves.length}`)
   }
 
-  /** Hide every drone and clear the live wave (zone exit / reset). */
+  /** Deactivate every drone and clear the live wave (zone exit / reset). */
   private clearDrones() {
     for (const d of this.drones) {
       d.active = false
       d.cap.alive = false
-      d.group.visible = false
       d.vel.set(0, 0, 0)
     }
     this.alive = 0
   }
 
-  /** Stop any in-progress siege and return to a re-armable idle. */
+  /** Stop any in-progress siege and return to a re-armable idle (pool torn down). */
   private abort() {
     this.clearDrones()
+    this.destroyPool()
     this.state = 'idle'
     this.wave = 0
     this.timer = 0
@@ -269,6 +363,7 @@ export class DroneSiege implements GameSystem {
           this.state = 'idle'
           this.wave = 0
           this.cooldown = COOLDOWN
+          this.destroyPool() // siege over: drop back to just the beacon
         }
         break
       }
@@ -305,17 +400,22 @@ export class DroneSiege implements GameSystem {
       const target = Math.max(ground, focus.y + 1.2)
       d.pos.y += (target + Math.sin(d.bob * 2.4) * 0.2 - d.pos.y) * Math.min(1, dt * 4)
 
-      d.group.position.copy(d.pos)
-      d.group.rotation.y = Math.atan2(this.toPlayer.x, this.toPlayer.z)
-      d.group.rotation.z = d.spin
+      // Facing + spin, recorded for instance-matrix composition (toPlayer is the
+      // pre-move heading, matching the old per-drone group orientation).
+      d.rotY = Math.atan2(this.toPlayer.x, this.toPlayer.z)
+      d.rotZ = d.spin
 
       // Eye pulse: hot, hunting red.
       const glow = 1.5 + 0.4 * Math.sin(d.spin * 3)
-      d.eyeMat.color.setRGB(Math.min(1, glow), Math.min(0.35, glow * 0.16), 0.12)
+      d.eyeColor.setRGB(Math.min(1, glow), Math.min(0.35, glow * 0.16), 0.12)
     }
+
+    // Single pass to upload all live transforms + eye colors to the instance buffers.
+    this.syncInstances()
   }
 
   dispose() {
+    this.destroyPool()
     for (const g of this.geos) g.dispose()
     for (const m of this.mats) m.dispose()
   }

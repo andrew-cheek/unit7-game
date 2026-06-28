@@ -6,6 +6,7 @@
 // fake leaderboard so the HUD reads "busy".
 
 import * as THREE from 'three'
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { createRobot, type RobotModel } from './procedural'
 import { config } from './config'
 import { clamp, dampAngle, randRange } from './utils'
@@ -24,6 +25,7 @@ interface Bot {
   name: string
   model: RobotModel
   group: THREE.Group
+  mergedGeos: THREE.BufferGeometry[] // baked static-body geometries we created; dispose on teardown
   tagMat: THREE.SpriteMaterial
   tagTex: THREE.CanvasTexture
   pos: THREE.Vector3
@@ -80,6 +82,7 @@ export class Bots implements GameSystem {
       const style = styles[i % styles.length]
       const trim = TRIMS[i % TRIMS.length]
       const model = createRobot({ trim, accent: trim })
+      const mergedGeos = this.mergeStaticBody(model.group)
       const group = new THREE.Group()
       group.add(model.group)
       const level = 12 + Math.floor(Math.random() * 30) // they read as skilled veterans
@@ -90,7 +93,7 @@ export class Bots implements GameSystem {
       group.position.copy(pos)
       this.scene.add(group)
       this.bots.push({
-        name, model, group, tagMat: mat, tagTex: tex,
+        name, model, group, mergedGeos, tagMat: mat, tagTex: tex,
         pos, vel: new THREE.Vector3(), yaw: Math.random() * 6.28, target: this.randomPoint(),
         runSpeed: (style === 'runner' ? 14 : 10) + Math.random() * 4, flying: false, flyT: 0, cruiseH: 24, lastGround: pos.y,
         rayPhase: i % 2, score: 40 + Math.floor(Math.random() * 220), nextScore: 4 + Math.random() * 10, t: 0,
@@ -238,6 +241,72 @@ export class Bots implements GameSystem {
     }
   }
 
+  // Draw-call reduction. A procedural robot is ~20+ separate meshes, but most of
+  // them (torso, head, pelvis, chest, pack, neck, antenna, ears, vents…) are rigid
+  // relative to the animated "core" node and never move on their own. We bake those
+  // static meshes into ONE merged mesh per material (in core-local space) and add
+  // them back under `core`, so they still inherit core's per-frame bob/sway/lean.
+  //
+  // The animated limbs (legL/legR/armL/armR are hip/shoulder Groups, wingL/wingR are
+  // pivot Groups) and the flames (children of the outer group, not core) are LEFT
+  // UNTOUCHED — the walk/idle/fly animation rotates and scales those by reference.
+  // We discriminate by node type: a *Mesh* child of core is static body, a *Group*
+  // child of core is an animated limb. This drops a robot from ~10+ visible mesh
+  // draws to roughly 1 (merged static body) + 4 limbs + 2 flames.
+  private mergeStaticBody(modelGroup: THREE.Group): THREE.BufferGeometry[] {
+    const created: THREE.BufferGeometry[] = []
+    // The animated "core" node is the only direct child Group of modelGroup that
+    // contains the body; flames are the other direct children (Meshes). Find core.
+    let core: THREE.Group | null = null
+    for (const child of modelGroup.children) {
+      if ((child as THREE.Group).isGroup) { core = child as THREE.Group; break }
+    }
+    if (!core) return created
+
+    // Collect static body meshes (direct Mesh children of core) grouped by material.
+    // Animated limbs are Groups and are skipped, so they keep animating by reference.
+    const buckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; mat: THREE.Material; cast: boolean; receive: boolean }>()
+    const statics: THREE.Mesh[] = []
+    for (const child of core.children) {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh || !mesh.geometry || Array.isArray(mesh.material)) continue
+      statics.push(mesh)
+    }
+    if (statics.length < 2) return created // nothing worth merging
+
+    for (const mesh of statics) {
+      const mat = mesh.material as THREE.Material
+      // Bake the mesh's local transform (position/rotation/scale relative to core)
+      // into a cloned geometry so the merged result sits exactly where it was.
+      mesh.updateMatrix()
+      const geo = mesh.geometry.clone()
+      geo.applyMatrix4(mesh.matrix)
+      let bucket = buckets.get(mat)
+      if (!bucket) { bucket = { geos: [], mat, cast: mesh.castShadow, receive: mesh.receiveShadow }; buckets.set(mat, bucket) }
+      bucket.geos.push(geo)
+    }
+
+    // Remove originals from the graph and free their geometries (mergeGeometries
+    // copies vertex data, so the source geos and our per-mesh clones are no longer
+    // needed). createRobot.dispose() can't reach these once detached, so we do it.
+    for (const mesh of statics) {
+      core.remove(mesh)
+      mesh.geometry.dispose()
+    }
+
+    for (const bucket of buckets.values()) {
+      const merged = BufferGeometryUtils.mergeGeometries(bucket.geos, false)
+      bucket.geos.forEach((g) => g.dispose()) // the per-mesh baked clones
+      if (!merged) continue
+      const mesh = new THREE.Mesh(merged, bucket.mat)
+      mesh.castShadow = bucket.cast
+      mesh.receiveShadow = bucket.receive
+      core.add(mesh)
+      created.push(merged)
+    }
+    return created
+  }
+
   private makeTag(label: string, accent: number): { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture } {
     const cv = document.createElement('canvas')
     cv.width = 256
@@ -267,7 +336,11 @@ export class Bots implements GameSystem {
   dispose() {
     for (const b of this.bots) {
       this.scene.remove(b.group)
+      // model.dispose() traverses the live graph and frees geometries it finds,
+      // which now includes our merged static-body meshes. We also dispose them
+      // explicitly so teardown stays correct regardless of traversal order.
       b.model.dispose()
+      for (const g of b.mergedGeos) g.dispose()
       b.tagMat.dispose()
       b.tagTex.dispose()
     }

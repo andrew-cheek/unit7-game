@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { config } from './config'
 import type { GameSystem } from './System'
 import type { Zone } from './types'
@@ -18,6 +19,11 @@ interface Lantern {
 
 const NIGHT_AT = 0.55 // dayFactor below this begins to light the market
 const FULL_AT = 0.35 // fully lit at/below this dayFactor
+
+// Shared constant axes/quaternion used while baking part transforms (no alloc).
+const YAXIS = new THREE.Vector3(0, 1, 0)
+const XAXIS = new THREE.Vector3(1, 0, 0)
+const IDENTQ = new THREE.Quaternion()
 
 /** Deterministic PRNG so the market layout is identical each load. */
 function mulberry32(seed: number) {
@@ -90,6 +96,33 @@ export class NightMarket implements GameSystem {
 
     // Scratch reused across the layout loop (no per-iteration Vector3 allocation).
     const sp = new THREE.Vector3()
+    // Scratch matrices/quaternion for baking child local transforms into the
+    // stall transform (no per-part allocation; reused every push()).
+    const stallMat = new THREE.Matrix4()
+    const childMat = new THREE.Matrix4()
+    const bakeMat = new THREE.Matrix4()
+    const bq = new THREE.Quaternion()
+    const bs = new THREE.Vector3(1, 1, 1)
+
+    // Merge buckets: one list of baked geometry clones per material. Every static
+    // (non-per-frame-transformed) part is baked into market-group space here and
+    // merged into a single mesh per material at the end of the constructor, so the
+    // whole market draws in a handful of calls instead of ~150.
+    const buckets = new Map<THREE.Material, THREE.BufferGeometry[]>()
+    const bake = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
+      // childMat holds the part's local transform (set by callers via the helpers
+      // below); compose with the current stall transform, then bake into a clone.
+      bakeMat.multiplyMatrices(stallMat, childMat)
+      const g = geo.clone()
+      g.applyMatrix4(bakeMat)
+      let list = buckets.get(mat)
+      if (!list) { list = []; buckets.set(mat, list) }
+      list.push(g)
+    }
+    // String segments share one material across the whole market: collect baked
+    // line-segment endpoint pairs and emit a single LineSegments at the end.
+    const stringPositions: number[] = []
+    const segP = new THREE.Vector3()
 
     for (let i = 0; i < count; i++) {
       // Loose rows/cluster layout: a couple of rows, jittered, around the centre.
@@ -103,10 +136,13 @@ export class NightMarket implements GameSystem {
       const x = cx + (col - (cols - 1) / 2) * colW + jx
       const z = cz + (row - 0.5) * rowD + jz
 
-      const stall = new THREE.Group()
       const gy = this.deps.groundY(x, z)
-      stall.position.set(x, gy, z)
-      stall.rotation.y = (rnd() * 2 - 1) * 0.35
+      const ry = (rnd() * 2 - 1) * 0.35
+      // Stall transform (was a Group): position + Y rotation. Baked into each
+      // static part's geometry so all stalls collapse into shared merged meshes.
+      bq.setFromAxisAngle(YAXIS, ry)
+      sp.set(x, gy, z)
+      stallMat.compose(sp, bq, bs)
 
       const tintIdx = i % awnings.length
       const counterH = 1.0
@@ -114,9 +150,8 @@ export class NightMarket implements GameSystem {
       const canopyY = postH + 0.1
 
       // Counter slab.
-      const counter = new THREE.Mesh(counterGeo, counterMat)
-      counter.position.y = counterH * 0.5
-      stall.add(counter)
+      childMat.makeTranslation(0, counterH * 0.5, 0)
+      bake(counterGeo, counterMat)
 
       // Support posts (2-4) at the corners of the canopy footprint.
       const nPosts = 2 + ((rnd() * 3) | 0)
@@ -124,60 +159,78 @@ export class NightMarket implements GameSystem {
       const cornerX = [px, -px, px, -px]
       const cornerZ = [pz, pz, -pz, -pz]
       for (let p = 0; p < nPosts; p++) {
-        const post = new THREE.Mesh(postGeo, postMat)
-        post.position.set(cornerX[p], postH * 0.5, cornerZ[p])
-        stall.add(post)
+        childMat.makeTranslation(cornerX[p], postH * 0.5, cornerZ[p])
+        bake(postGeo, postMat)
       }
 
       // Canopy (slightly peaked: tilt it a touch for a peaked-awning read).
-      const canopy = new THREE.Mesh(canopyGeo, canopyMats[tintIdx])
-      canopy.position.y = canopyY
-      canopy.rotation.x = (rnd() * 2 - 1) * 0.08
-      stall.add(canopy)
+      bq.setFromAxisAngle(XAXIS, (rnd() * 2 - 1) * 0.08)
+      sp.set(0, canopyY, 0)
+      childMat.compose(sp, bq, bs)
+      bake(canopyGeo, canopyMats[tintIdx])
 
       // Glowing wares on the counter (a few small additive spheres).
       const nWares = 3 + ((rnd() * 3) | 0)
       for (let w = 0; w < nWares; w++) {
-        const ware = new THREE.Mesh(wareGeo, this.waresMat)
-        ware.position.set((rnd() * 2 - 1) * 1.1, counterH + 0.16, (rnd() * 2 - 1) * 0.35)
-        ware.scale.setScalar(0.7 + rnd() * 0.8)
-        stall.add(ware)
+        sp.set((rnd() * 2 - 1) * 1.1, counterH + 0.16, (rnd() * 2 - 1) * 0.35)
+        bs.setScalar(0.7 + rnd() * 0.8)
+        childMat.compose(sp, IDENTQ, bs)
+        bs.setScalar(1)
+        bake(wareGeo, this.waresMat)
       }
 
       // Holographic price/sign plane, hung at the canopy front edge.
-      const sign = new THREE.Mesh(signGeo, this.signMats[i % this.signMats.length])
-      sign.position.set(0, canopyY - 0.5, pz + 0.05)
-      stall.add(sign)
+      childMat.makeTranslation(0, canopyY - 0.5, pz + 0.05)
+      bake(signGeo, this.signMats[i % this.signMats.length])
 
       // String of hanging lanterns spanning the canopy front (post to post).
       const nLanterns = low ? 3 : 4
       const lanternY = canopyY - 0.35
       const x0 = -px, x1 = px
-      // String line behind the lanterns (drawn as a simple sagging poly-line).
-      const pts: THREE.Vector3[] = []
-      for (let s = 0; s <= nLanterns; s++) {
-        const f = s / nLanterns
-        const lx = x0 + (x1 - x0) * f
-        const sag = Math.sin(f * Math.PI) * 0.18
-        pts.push(new THREE.Vector3(lx, lanternY + 0.1 - sag, pz + 0.02))
+      // String line behind the lanterns (a sagging poly-line). Baked into the
+      // shared market-wide LineSegments as consecutive endpoint pairs.
+      for (let s = 0; s < nLanterns; s++) {
+        const f0 = s / nLanterns, f1 = (s + 1) / nLanterns
+        const lx0 = x0 + (x1 - x0) * f0, lx1 = x0 + (x1 - x0) * f1
+        const sag0 = Math.sin(f0 * Math.PI) * 0.18, sag1 = Math.sin(f1 * Math.PI) * 0.18
+        segP.set(lx0, lanternY + 0.1 - sag0, pz + 0.02).applyMatrix4(stallMat)
+        stringPositions.push(segP.x, segP.y, segP.z)
+        segP.set(lx1, lanternY + 0.1 - sag1, pz + 0.02).applyMatrix4(stallMat)
+        stringPositions.push(segP.x, segP.y, segP.z)
       }
-      const stringGeo = this.ownG(new THREE.BufferGeometry().setFromPoints(pts))
-      stall.add(new THREE.Line(stringGeo, this.stringMat))
 
       for (let s = 0; s < nLanterns; s++) {
         const f = (s + 0.5) / nLanterns
         const lx = x0 + (x1 - x0) * f
         const sag = Math.sin(f * Math.PI) * 0.18
         const ly = lanternY - sag
-        sp.set(lx, ly, pz + 0.02)
+        // Lanterns bob in Y per frame, so they cannot be merged; keep them as
+        // individual meshes. Bake the stall transform (which is pure Y rotation +
+        // translation, so it preserves world Y) into the base position.
+        sp.set(lx, ly, pz + 0.02).applyMatrix4(stallMat)
         const lantern = new THREE.Mesh(lanternGeo, this.lanternMat)
         lantern.position.copy(sp)
+        lantern.rotation.y = ry
         lantern.scale.setScalar(0.8 + rnd() * 0.6)
-        stall.add(lantern)
-        this.lanterns.push({ mesh: lantern, baseY: ly, phase: rnd() * 6.28, bob: 0.03 + rnd() * 0.04 })
+        this.group.add(lantern)
+        this.lanterns.push({ mesh: lantern, baseY: sp.y, phase: rnd() * 6.28, bob: 0.03 + rnd() * 0.04 })
       }
+    }
 
-      this.group.add(stall)
+    // --- Merge each material bucket into a single mesh added to the group. ---
+    for (const [mat, geos] of buckets) {
+      const merged = BufferGeometryUtils.mergeGeometries(geos, false)
+      for (const g of geos) g.dispose() // temp clones, no longer needed
+      if (!merged) continue
+      this.ownG(merged)
+      this.group.add(new THREE.Mesh(merged, mat))
+    }
+
+    // Single LineSegments for every stall's lantern string (one draw, one mat).
+    if (stringPositions.length) {
+      const sg = this.ownG(new THREE.BufferGeometry())
+      sg.setAttribute('position', new THREE.Float32BufferAttribute(stringPositions, 3))
+      this.group.add(new THREE.LineSegments(sg, this.stringMat))
     }
 
     this.group.visible = false

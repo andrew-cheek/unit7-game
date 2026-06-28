@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { config } from './config'
 import type { GameSystem } from './System'
 import type { Zone } from './types'
@@ -14,6 +15,12 @@ interface Deps {
  * sky, with beacon lights and a slow climber car); on the Moon a vast ORBITAL
  * RING arcing overhead with running lights. Far, huge, no colliders; the active
  * sub-group is offset by the player focus each frame so it reads as distant.
+ *
+ * Draw-call budget: each sub-group's static structure is merged into one mesh,
+ * and the many repeated beacon/ring lights are drawn as a single InstancedMesh.
+ * Per-light animation that was opacity-based now drives per-instance color
+ * (additive blending makes a brightness ramp read identically), so it costs no
+ * extra draw calls and allocates nothing per frame.
  */
 export class Megastructure implements GameSystem {
   private group = new THREE.Group()
@@ -26,8 +33,15 @@ export class Megastructure implements GameSystem {
 
   // Animated bits (no per-frame allocation).
   private climber: THREE.Mesh
-  private marsBeacons: THREE.Mesh[] = []
-  private ringLights: THREE.Mesh[] = []
+  private marsBeacons: THREE.InstancedMesh
+  private marsBeaconN: number
+  private readonly marsBeaconBase: THREE.Color
+  private ringLights: THREE.InstancedMesh
+  private ringLightN: number
+  private readonly ringLightBase: THREE.Color
+
+  // Scratch color reused for per-instance brightness writes (no per-frame alloc).
+  private readonly scratchColor = new THREE.Color()
 
   // Anchor offsets so we can keep great distance while tracking the focus XZ.
   private readonly marsBase = new THREE.Vector3(-340, 0, -260)
@@ -42,32 +56,43 @@ export class Megastructure implements GameSystem {
     // ---- Mars: space elevator -------------------------------------------------
     const tetherH = 1400
     const warm = 0xffcaa0
-    const tetherMat = this.own(new THREE.MeshBasicMaterial({ color: 0x8a6a52, fog: false }))
+
+    // Static structure (tether + anchor) merged into one mesh. The two parts
+    // had distinct base colors, so bake those into vertex colors and use one
+    // vertex-coloured material — identical visuals, a single draw call.
     const tetherGeo = this.ownG(new THREE.CylinderGeometry(1.2, 5.5, tetherH, 8, 1, true))
-    const tether = new THREE.Mesh(tetherGeo, tetherMat)
-    tether.position.y = tetherH / 2
-    this.marsGroup.add(tether)
+    tetherGeo.translate(0, tetherH / 2, 0)
+    paintGeometry(tetherGeo, 0x8a6a52)
 
-    // High anchor station + counterweight glow far above.
-    const anchorMat = this.own(new THREE.MeshBasicMaterial({ color: 0x6a5040, fog: false }))
-    const anchorGeo = this.ownG(new THREE.SphereGeometry(22, 12, 10))
-    const anchor = new THREE.Mesh(anchorGeo, anchorMat)
-    anchor.position.y = tetherH
-    anchor.scale.set(1, 0.5, 1)
-    this.marsGroup.add(anchor)
+    const anchorGeo = new THREE.SphereGeometry(22, 12, 10)
+    anchorGeo.scale(1, 0.5, 1)
+    anchorGeo.translate(0, tetherH, 0)
+    paintGeometry(anchorGeo, 0x6a5040)
 
+    const marsStaticGeo = this.ownG(mergeGeometries([tetherGeo, anchorGeo], false))
+    anchorGeo.dispose() // consumed by the merge; tetherGeo is owned for disposal
+    const marsStaticMat = this.own(new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }))
+    this.marsGroup.add(new THREE.Mesh(marsStaticGeo, marsStaticMat))
+
+    // Beacons: one InstancedMesh, per-instance color drives the running wave.
     const beaconGeo = this.ownG(new THREE.SphereGeometry(3.2, 8, 6))
-    const beaconN = low ? 6 : 10
-    for (let i = 0; i < beaconN; i++) {
-      // Per-beacon material so the running-wave opacity can vary along the tether.
-      const beaconMat = this.own(new THREE.MeshBasicMaterial({ color: warm, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-      const b = new THREE.Mesh(beaconGeo, beaconMat)
-      b.position.y = (i / (beaconN - 1)) * tetherH
-      this.marsBeacons.push(b)
-      this.marsGroup.add(b)
+    this.marsBeaconN = low ? 6 : 10
+    this.marsBeaconBase = new THREE.Color(warm)
+    const beaconMat = this.own(new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.marsBeacons = new THREE.InstancedMesh(beaconGeo, beaconMat, this.marsBeaconN)
+    this.marsBeacons.instanceMatrix.setUsage(THREE.StaticDrawUsage)
+    {
+      const m = new THREE.Matrix4()
+      for (let i = 0; i < this.marsBeaconN; i++) {
+        m.makeTranslation(0, (i / (this.marsBeaconN - 1)) * tetherH, 0)
+        this.marsBeacons.setMatrixAt(i, m)
+        this.marsBeacons.setColorAt(i, this.marsBeaconBase)
+      }
     }
+    this.marsBeacons.instanceMatrix.needsUpdate = true
+    this.marsGroup.add(this.marsBeacons)
 
-    // Climber car that slides up and down the tether.
+    // Climber car that slides up and down the tether (animated each frame).
     const climberMat = this.own(new THREE.MeshBasicMaterial({ color: 0xffe6b0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     const climberGeo = this.ownG(new THREE.BoxGeometry(14, 18, 14))
     this.climber = new THREE.Mesh(climberGeo, climberMat)
@@ -84,18 +109,27 @@ export class Megastructure implements GameSystem {
     ring.position.y = -ringR * 0.55
     this.moonGroup.add(ring)
 
+    // Running lights: one InstancedMesh parented to the ring so it inherits the
+    // ring's tilt exactly as the individual light meshes used to. Per-instance
+    // color drives the chase.
     const lightGeo = this.ownG(new THREE.SphereGeometry(11, 8, 6))
-    const lightN = low ? 24 : 48
-    for (let i = 0; i < lightN; i++) {
-      const a = (i / lightN) * Math.PI * 2
-      // Per-light material so the chase opacity can vary around the ring.
-      const lightMat = this.own(new THREE.MeshBasicMaterial({ color: 0xeafcff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
-      const l = new THREE.Mesh(lightGeo, lightMat)
-      // Place around the torus ring before the group rotation is applied.
-      l.position.set(Math.cos(a) * ringR, Math.sin(a) * ringR, 0)
-      this.ringLights.push(l)
-      ring.add(l)
+    this.ringLightN = low ? 24 : 48
+    this.ringLightBase = new THREE.Color(0xeafcff)
+    const lightMat = this.own(new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    this.ringLights = new THREE.InstancedMesh(lightGeo, lightMat, this.ringLightN)
+    this.ringLights.instanceMatrix.setUsage(THREE.StaticDrawUsage)
+    {
+      const m = new THREE.Matrix4()
+      for (let i = 0; i < this.ringLightN; i++) {
+        const a = (i / this.ringLightN) * Math.PI * 2
+        // Place around the torus ring (in the ring's local space, pre-tilt).
+        m.makeTranslation(Math.cos(a) * ringR, Math.sin(a) * ringR, 0)
+        this.ringLights.setMatrixAt(i, m)
+        this.ringLights.setColorAt(i, this.ringLightBase)
+      }
     }
+    this.ringLights.instanceMatrix.needsUpdate = true
+    ring.add(this.ringLights)
 
     this.group.add(this.marsGroup, this.moonGroup)
     this.group.visible = false
@@ -119,26 +153,47 @@ export class Megastructure implements GameSystem {
     if (this.zone === 'mars') {
       // Keep its great distance while tracking the player so it stays on the horizon.
       this.marsGroup.position.set(f.x + this.marsBase.x, this.marsBase.y, f.z + this.marsBase.z)
-      // Beacons pulse in a running wave up the tether.
-      for (let i = 0; i < this.marsBeacons.length; i++) {
-        const m = this.marsBeacons[i].material as THREE.MeshBasicMaterial
-        m.opacity = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(this.t * 2 - i * 0.6))
+      // Beacons pulse in a running wave up the tether. Additive blending makes a
+      // brightness ramp read the same as the old per-mesh opacity ramp.
+      for (let i = 0; i < this.marsBeaconN; i++) {
+        const o = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(this.t * 2 - i * 0.6))
+        this.scratchColor.copy(this.marsBeaconBase).multiplyScalar(0.9 * o)
+        this.marsBeacons.setColorAt(i, this.scratchColor)
       }
+      if (this.marsBeacons.instanceColor) this.marsBeacons.instanceColor.needsUpdate = true
       // Climber slides slowly up and back down the full tether height.
       const tetherH = 1400
       this.climber.position.y = (0.5 + 0.5 * Math.sin(this.t * 0.07)) * tetherH
     } else {
       this.moonGroup.position.set(f.x + this.moonBase.x, this.moonBase.y, f.z + this.moonBase.z)
       // Running lights chase around the ring.
-      for (let i = 0; i < this.ringLights.length; i++) {
-        const m = this.ringLights[i].material as THREE.MeshBasicMaterial
-        m.opacity = 0.25 + 0.65 * (0.5 + 0.5 * Math.sin(this.t * 3 - i * 0.5))
+      for (let i = 0; i < this.ringLightN; i++) {
+        const o = 0.25 + 0.65 * (0.5 + 0.5 * Math.sin(this.t * 3 - i * 0.5))
+        this.scratchColor.copy(this.ringLightBase).multiplyScalar(0.9 * o)
+        this.ringLights.setColorAt(i, this.scratchColor)
       }
+      if (this.ringLights.instanceColor) this.ringLights.instanceColor.needsUpdate = true
     }
   }
 
   dispose() {
+    this.marsBeacons.dispose()
+    this.ringLights.dispose()
     for (const g of this.geos) g.dispose()
     for (const m of this.mats) m.dispose()
   }
+}
+
+/** Bake a flat color into a geometry's vertex colors so it can be merged with
+ *  differently-coloured static parts under a single vertex-coloured material. */
+function paintGeometry(geo: THREE.BufferGeometry, color: number) {
+  const c = new THREE.Color(color)
+  const count = geo.attributes.position.count
+  const colors = new Float32Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = c.r
+    colors[i * 3 + 1] = c.g
+    colors[i * 3 + 2] = c.b
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 }

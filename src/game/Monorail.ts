@@ -22,6 +22,7 @@ export class Monorail implements GameSystem {
   private group = new THREE.Group()
   private mats: THREE.Material[] = []
   private geos: THREE.BufferGeometry[] = []
+  private instanced: THREE.InstancedMesh[] = []
   private cars: Car[] = []
   private zone: Zone = 'earth'
   private progress = 0
@@ -84,7 +85,10 @@ export class Monorail implements GameSystem {
     }))
     this.group.add(new THREE.Mesh(railGeo, railMat))
 
-    // Support pylons from the rail down to the ground at intervals.
+    // Support pylons from the rail down to the ground at intervals. These are
+    // identical static structures, so they collapse to a single InstancedMesh:
+    // one draw call for all pylons, with per-instance matrices baked once here
+    // (they never move). Visuals are identical to per-mesh placement.
     const pylonCount = low ? 8 : 14
     const pylonH = this.y - 1.1
     const pylonGeo = this.ownG(new THREE.CylinderGeometry(0.5, 0.9, pylonH, 6))
@@ -92,13 +96,19 @@ export class Monorail implements GameSystem {
       color: 0x14181f, metalness: 0.6, roughness: 0.6,
       emissive: 0x0a2030, emissiveIntensity: 0.5,
     }))
+    const pylons = new THREE.InstancedMesh(pylonGeo, pylonMat, pylonCount)
+    const m = new THREE.Matrix4()
     for (let i = 0; i < pylonCount; i++) {
       const a = (i / pylonCount) * Math.PI * 2
       const px = Math.cos(a) * this.rx, pz = Math.sin(a) * this.rz
-      const pylon = new THREE.Mesh(pylonGeo, pylonMat)
-      pylon.position.set(px, pylonH / 2, pz)
-      this.group.add(pylon)
+      m.makeTranslation(px, pylonH / 2, pz)
+      pylons.setMatrixAt(i, m)
     }
+    pylons.instanceMatrix.needsUpdate = true
+    // Static infrastructure never moves; skip per-frame matrix recompute.
+    pylons.matrixAutoUpdate = false
+    this.instanced.push(pylons)
+    this.group.add(pylons)
   }
 
   /** Build `n` cars sharing geometry/materials and add them to the group. */
@@ -178,8 +188,11 @@ export class Monorail implements GameSystem {
   }
 
   dispose() {
+    // InstancedMesh owns a GPU instance buffer beyond its geometry/material.
+    for (const im of this.instanced) im.dispose()
     for (const g of this.geos) g.dispose()
     for (const m of this.mats) m.dispose()
+    this.instanced = []
     this.geos = []
     this.mats = []
     this.cars = []
