@@ -1,4 +1,12 @@
-// SAFETY-CRITICAL chat filter for a kids' game.
+// SAFETY-CRITICAL chat filter for a kids' game — SERVER-SIDE COPY.
+//
+// This is a SELF-CONTAINED copy of `src/game/chatSafety.ts`, kept in `party/`
+// so PartyKit's bundler can resolve it WITHOUT reaching into `../src/...`.
+// The root tsconfig excludes `party/` from `npm run typecheck`, and the existing
+// `party/save.ts` follows the same self-containment rule (it redefines `SaveBlob`
+// locally rather than importing it). So the `FilterVerdict` type and the
+// `CHAT_MAX_LEN` const below are INLINED copies of their definitions in
+// `src/game/kidShared.ts` — keep them in sync if the client copy changes.
 //
 // THE #1 REQUIREMENT: a child must NOT be able to share personal/contact info or
 // use profanity through chat, EVEN WHEN ACTIVELY TRYING TO EVADE THE FILTER.
@@ -23,8 +31,18 @@
 // No external deps. Strict-TS clean. The keyword/profanity sets are kept as plain
 // arrays at the top so a non-engineer can audit and extend them.
 
-import type { FilterVerdict } from './kidShared'
-import { CHAT_MAX_LEN } from './kidShared'
+/** Result of running candidate text through the kid-safety filter.
+ *  INLINED copy of `FilterVerdict` from `src/game/kidShared.ts` (keep in sync). */
+export interface FilterVerdict {
+  allowed: boolean
+  /** Cleaned text to send when allowed (may be masked where a token was redacted). */
+  text: string
+  /** Why it was blocked/cleaned (for a gentle "let's keep it friendly" hint). */
+  reason: 'ok' | 'contact' | 'profanity' | 'link' | 'number' | 'empty' | 'toolong' | 'spam' | 'gibberish'
+}
+
+/** Hard length cap. INLINED copy of `CHAT_MAX_LEN` from `src/game/kidShared.ts`. */
+const CHAT_MAX_LEN = 120
 
 // ---------------------------------------------------------------------------
 // AUDITABLE WORD SETS
@@ -82,22 +100,11 @@ const CONTACT_KEYWORDS: readonly string[] = [
   'comeover',
   'cometomyhouse',
   'wheredoyoulive',
-  'wheredoulive', // "where do U live" (u = you)
-  'wheredoyalive',
-  'whatsyouraddress',
-  'whatsuraddress',
   'sendpic',
   'sendpics',
-  'sendmeapic', // "send me a pic"
-  'sendmeapicture',
   'sendaphoto',
-  'sendmeaphoto',
   'sendyourpic',
-  'sendapic',
-  'wannaseeapic',
   'webcam',
-  'videochat',
-  'videocall',
   // --- identity sharing ---
   'mynameis',
   'mynamesis',
@@ -212,9 +219,6 @@ const PROFANITY: readonly string[] = [
   'sexy',
   'porn',
   'pornhub',
-  // NOTE: "pron" (the "pr0n" evasion) is intentionally NOT listed — as a bare
-  // substring it collides with "prone", "pronoun", "pronto". The standard leet
-  // form "p0rn" still de-leets to "porn" and is caught above.
   'nude',
   'nudes',
   'naked',
@@ -545,10 +549,9 @@ function looksLikeAgeShare(lightLower: string): boolean {
 /** Email address: local@domain. Detected on a digit/letter-preserving pass.
  *  After normalization "@" becomes "a", so we test the lightly-cleaned text that
  *  still has "@" and ".". */
-function looksLikeEmail(lightLower: string, compact: string): boolean {
+function looksLikeEmail(lightLower: string): boolean {
   // user@host.tld with optional spaces around the @ that a kid might add.
-  const at = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/
-  if (at.test(lightLower) || at.test(compact)) return true
+  if (/[a-z0-9._%+-]+\s*@\s*[a-z0-9.-]+\.[a-z]{2,}/.test(lightLower)) return true
   // spelled-out "<word> at <word> dot com"
   if (/\bat\b.*\bdot\b\s*(com|net|org|co|io|gov|edu)/.test(lightLower)) return true
   return false
@@ -563,21 +566,15 @@ function looksLikeAddress(lightLower: string): boolean {
 
 // --- LINK detector -----------------------------------------------------------
 
-/** `compact` = lightLower with ALL whitespace removed but "." "@" "/" kept. This
- *  defeats spaced-out URLs ("w w w . bad . com", "bad . com") which otherwise slip
- *  past the dot-domain regex. We do NOT repeat-collapse it (so "www" survives). */
-function looksLikeLink(lightLower: string, compact: string): boolean {
-  if (/https?:\/\//.test(lightLower) || /https?:\/\//.test(compact)) return true
-  // "www" — check the compact form so spaced "w w w" -> "www" is caught (the
-  // normalized form repeat-collapses "www" -> "w", so it CANNOT be used here).
-  if (/\bwww\b/.test(lightLower) || compact.includes('www')) return true
-  // a bare domain like "foo.com" / "foo.co.uk", in either spaced or compact form.
-  const domain = /[a-z0-9-]+\.(com|net|org|io|co|gg|tv|me|app|xyz|info|biz|us|uk|edu|gov)\b/
-  if (domain.test(lightLower) || domain.test(compact)) return true
-  // spelled-out "dot com" evasion.
+function looksLikeLink(lightLower: string, normalized: string): boolean {
+  if (/https?:\/\//.test(lightLower)) return true
+  if (/\bwww\b/.test(lightLower) || normalized.includes('www')) return true
+  // a bare domain like "foo.com" / "foo.co.uk"
+  if (/[a-z0-9-]+\.(com|net|org|io|co|gg|tv|me|app|xyz|info|biz|us|uk|edu|gov)\b/.test(lightLower)) return true
+  // spelled-out "dot com" evasion (also helps catch link sharing in words)
   if (/\bdot\s*(com|net|org|io|co|gg|tv|me)\b/.test(lightLower)) return true
-  if (compact.includes('dotcom') || compact.includes('dotnet') || compact.includes('dotorg')) return true
-  if (compact.includes('http')) return true
+  if (normalized.includes('dotcom') || normalized.includes('dotnet') || normalized.includes('dotorg')) return true
+  if (normalized.includes('http')) return true
   return false
 }
 
@@ -662,16 +659,13 @@ export function filterChat(text: string): FilterVerdict {
   // digit-preserving form for bare-number scans (light form already preserves
   // digits; reuse it).
   const digitPreserving = lightLower
-  // compact form: lightLower with whitespace removed (dots/@/slash kept, NOT
-  // repeat-collapsed) so spaced URLs/emails like "w w w . bad . com" reassemble.
-  const compact = lightLower.replace(/\s+/g, '')
 
   const normalized = normalizeForMatch(trimmed)
   const collapsed = collapseAll(normalized)
 
   // --- 1. CONTACT (most important; default-deny on ambiguity) ----------------
   if (
-    looksLikeEmail(lightLower, compact) ||
+    looksLikeEmail(lightLower) ||
     looksLikeAddress(lightLower) ||
     looksLikeAgeShare(lightLower) ||
     looksLikePhone(normalized) ||
@@ -689,7 +683,7 @@ export function filterChat(text: string): FilterVerdict {
   }
 
   // --- 3. LINK ---------------------------------------------------------------
-  if (looksLikeLink(lightLower, compact)) {
+  if (looksLikeLink(lightLower, normalized)) {
     return { allowed: false, text: '', reason: 'link' }
   }
 

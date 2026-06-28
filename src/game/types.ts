@@ -1,5 +1,7 @@
 // Shared types used across the engine and the React HUD layer.
 
+import type { ChatMessage } from './kidShared'
+
 export type Zone = 'earth' | 'mars' | 'moon'
 export type AssetQuality = 'low' | 'medium' | 'high'
 
@@ -83,6 +85,7 @@ export interface HudState {
   drop: { alt: number; speed: number; phase: 'dive' | 'canopy' | 'land' | 'crash'; hint: string | null; canDeploy: boolean; canTrick: boolean; result: string | null; place: string | null; boomCharge: number; combo: number; comboFade: number; showJetTip: boolean; danger: boolean } | null
   // City-raid wave tracker, shown after the skydive while repelling the assault.
   raid: { wave: number; waves: number; alive: number; incoming: boolean; shield: number; boss: { hp: number; hpMax: number } | null } | null
+  chatEnabled: boolean // parent has enabled typed chat (gates both send + receive)
 }
 
 /** Gamification state surfaced to the HUD (level/XP, streak, daily, duel rank). */
@@ -171,6 +174,14 @@ export interface GameControls {
   toggleWarp(): void // open/close the warp form picker (when charged)
   warpInto(id: string): void // teleport into a chosen sci-fi form
   warpRevert(): void // return to the robot form
+  // Kid-safe chat + anonymous cloud save.
+  sendChat(text: string): void // send a chat line (filtered + gated; no-ops when chat off / solo)
+  setChatSink(fn: (m: ChatMessage) => void): void // register where received chat lines are delivered
+  refreshChatEnabled(): void // re-read the parental chat flag after the parent panel changes it
+  saveRecoveryCode(): string // human-friendly recovery code for moving the save to another device
+  saveOnline(): boolean // true once a cloud save round-trip has succeeded this session
+  saveRestore(code: string): Promise<{ ok: boolean; error?: string }> // restore a save from a recovery code (merges, never wipes)
+  myNetId(): string // own network connection id (empty when solo / not connected)
 }
 
 export type GameAction =

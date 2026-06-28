@@ -18,6 +18,7 @@
  * shapes here in sync with `src/game/Net.ts`.
  */
 import type * as Party from 'partykit/server'
+import { filterChat } from './chatSafety'
 
 type Vec3 = [number, number, number]
 
@@ -83,6 +84,7 @@ type ClientMsg =
   | { t: 'decline'; from: string }
   | { t: 'matchDir'; dir: Dir }
   | { t: 'matchQuit' }
+  | { t: 'chat'; text: string }
 
 export default class WorldServer implements Party.Server {
   static readonly MAX_PLAYERS = 60
@@ -124,6 +126,9 @@ export default class WorldServer implements Party.Server {
   private challenges = new Map<string, { to: string; trail: number }>()
   private matches = new Map<string, Match>()
   private inMatch = new Map<string, string>() // connId -> matchId (busy guard)
+  // Per-sender timestamp of the last RELAYED chat line, for an 800ms min-interval
+  // anti-spam gate (independent of the token bucket; dropping silently, no strike).
+  private lastChatAt = new Map<string, number>()
 
   constructor(readonly room: Party.Room) {}
 
@@ -143,6 +148,7 @@ export default class WorldServer implements Party.Server {
     this.lastSeen.delete(id)
     this.buckets.delete(id)
     this.strikes.delete(id)
+    this.lastChatAt.delete(id)
     const uid = this.connUid.get(id)
     if (uid && this.uidConn.get(uid) === id) this.uidConn.delete(uid)
     this.connUid.delete(id)
@@ -394,6 +400,31 @@ export default class WorldServer implements Party.Server {
       this.broadcastScores()
       return
     }
+
+    if (msg.t === 'chat') {
+      // Defense-in-depth chat relay for a kids' game. Per-kid send/receive is gated
+      // client-side; the server's job is to re-filter, rate-limit, and relay only a
+      // sanitized name + safe text — no other identity ever crosses the wire.
+      const me = this.players.get(sender.id)
+      if (!me) return // must be a known, joined player
+      const now = Date.now()
+      // 800ms per-sender min interval. Too soon = drop silently (NOT a strike): a
+      // chatty kid mashing send is not malicious, just impatient.
+      if (now - (this.lastChatAt.get(sender.id) ?? 0) < 800) return
+      // A non-string text where a string is required is a malformed/hostile frame.
+      if (typeof msg.text !== 'string') { this.strike(sender.id, sender); return }
+      // Re-run the SAME safety filter the client runs, server-side, so a tampered
+      // or non-game client can't bypass it. Blocked = tell only the sender why.
+      const v = filterChat(msg.text)
+      if (!v.allowed) {
+        sender.send(JSON.stringify({ t: 'chatBlocked', reason: v.reason }))
+        return
+      }
+      this.lastChatAt.set(sender.id, now)
+      // Broadcast the CLEANED text + the sender's already-sanitized stored name.
+      this.room.broadcast(JSON.stringify({ t: 'chat', id: sender.id, name: me.name, text: v.text, ts: now }))
+      return
+    }
   }
 
   // --- shared-world simulation -------------------------------------------------
@@ -631,5 +662,13 @@ function sanitizeName(raw: unknown): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 16)
-  return cleaned || 'PILOT'
+  if (!cleaned) return 'PILOT'
+  // CHILD SAFETY: the callsign is broadcast to every player, so a kid must not be
+  // able to publish contact info AS their name (e.g. "callme5551234", "my@x.com",
+  // a discord handle, or a 4+ digit run). Run the cleaned name through the same
+  // chat-safety heuristics; if it isn't allowed (contact/number/link/etc.), or it
+  // packs 4+ consecutive digits, fall back to a safe default rather than relay it.
+  if (/\d{4,}/.test(cleaned)) return 'PILOT'
+  if (!filterChat(cleaned).allowed) return 'PILOT'
+  return cleaned
 }
