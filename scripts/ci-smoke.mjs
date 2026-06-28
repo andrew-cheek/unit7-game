@@ -172,6 +172,24 @@ try {
       `triangles=${metrics.triangles}`,
     )
 
+    // --- frame-time sample (logged, not asserted) -------------------------
+    // Like the determinism golden, this is for drift visibility, NOT a pass/fail
+    // gate: absolute frame times under software swiftshader on a GPU-less runner
+    // are meaningless vs real hardware. We log the percentiles so a regression
+    // (a refactor that doubles frame time on the same runner) is visible in CI
+    // history, and to prove the perfSample harness works end-to-end. Feature-
+    // detected so it no-ops cleanly against an older build.
+    const perf = await page.evaluate(async () => {
+      if (typeof window.__unit7nav.perfSample !== 'function') return null
+      return window.__unit7nav.perfSample(1500)
+    })
+    if (perf) {
+      console.log(`[ci-smoke] perfSample @ earth: ${JSON.stringify(perf)}`)
+      check(!!perf.perf && perf.perf.frames > 0, 'perfSample captured frames', `frames=${perf.perf?.frames}`)
+    } else {
+      console.log('[ci-smoke] perfSample: not available on this build (skipped)')
+    }
+
     // --- determinism proof -------------------------------------------------
     // CLAUDE.md: "same physics outcome at any frame rate." The harness runs an
     // identical scripted input through the isolated fixed step twice from one
