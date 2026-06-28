@@ -116,7 +116,7 @@ export class SkyElevator {
   private own<T extends THREE.Material>(m: T): T { this.mats.push(m); return m }
   private ownG<T extends THREE.BufferGeometry>(g: T): T { this.geos.push(g); return g }
 
-  constructor(parent: THREE.Group, opts: { radius: number }) {
+  constructor(parent: THREE.Group, opts: { radius: number; mirror?: boolean }) {
     const R = opts.radius
     const low = config.tier.name === 'low'
 
@@ -126,7 +126,10 @@ export class SkyElevator {
     // the clear zone behind the hangar toward the dive ledge — z>21 has no roof, no
     // walls and no rockets — offset left of the central dive lane so it fills the
     // otherwise-empty back-left of the deck and you pass it on the way to the edge.
-    this.root.position.set(-R * 0.36, 0, R * 0.58) // ≈ (-18, 0, 29)
+    // `mirror` puts a twin on the opposite side of the deck (the functional lift is
+    // the un-mirrored one; the twin is a matching decorative set piece).
+    const side = opts.mirror ? -1 : 1
+    this.root.position.set(-R * 0.36 * side, 0, R * 0.58 * side) // ≈ (-18, 0, 29), or mirrored
     // Face the doorway back toward the deck centre (so the doors greet the player).
     this.root.rotation.y = Math.atan2(-this.root.position.x, -this.root.position.z)
 
