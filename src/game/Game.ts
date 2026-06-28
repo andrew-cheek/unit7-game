@@ -75,6 +75,12 @@ import { MilestoneToasts } from './MilestoneToasts'
 import { AdBlimps } from './AdBlimps'
 import { Monorail } from './Monorail'
 import { CarePackages } from './CarePackages'
+import { OrbitalTraffic } from './OrbitalTraffic'
+import { CosmicSky } from './CosmicSky'
+import { ColonistNPCs } from './ColonistNPCs'
+import { Megastructure } from './Megastructure'
+import { LowGravDrift } from './LowGravDrift'
+import { MeteorStrikes } from './MeteorStrikes'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -691,6 +697,29 @@ export class Game {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onCollect: (x, y, z, credits, xp) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `SUPPLY +${credits}c`, '#9bff6a') },
       banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.6 },
+    }))
+    // --- Off-world atmosphere (Moon + Mars): make the other worlds amazing ---
+    // Orbital traffic: shuttles rising + descending around the colonies.
+    this.systems.register(new OrbitalTraffic(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // Cosmic sky: nebulae, a galaxy band, and shooting stars over the off-world.
+    this.systems.register(new CosmicSky(this.engine.scene, { focus: () => this.focus }))
+    // Colonist NPCs: spacesuited figures wandering the lunar/martian surface.
+    this.systems.register(new ColonistNPCs(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+    }))
+    // Megastructure: a space elevator (Mars) / orbital ring (Moon) on the horizon.
+    this.systems.register(new Megastructure(this.engine.scene, { focus: () => this.focus }))
+    // Low-grav drift: regolith + ice shards floating around you on the Moon.
+    this.systems.register(new LowGravDrift(this.engine.scene, { focus: () => this.focus }))
+    // Meteor strikes: telegraphed surface impacts with shockwaves (Moon + Mars).
+    this.systems.register(new MeteorStrikes(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      shockwave: (x, y, z) => this.missiles.shockwave({ x, y, z }, 0xffa64a, 6, 0.6),
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
