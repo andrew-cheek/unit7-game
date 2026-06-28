@@ -147,7 +147,13 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
       // Clamp the dragged base too, so following the finger can't push it off-edge.
       joyOrigin.current = clampOrigin(joyOrigin.current.x + (dx / len) * over, joyOrigin.current.y + (dy / len) * over)
       setJoyAt({ x: joyOrigin.current.x, y: joyOrigin.current.y })
-      dx = (dx / len) * JOY_R; dy = (dy / len) * JOY_R; len = JOY_R
+      // Recompute from the (possibly clamped) base so the knob + move vector follow
+      // the real finger-to-base direction, not the stale pre-clamp one (matters when
+      // the base pins against the top/left edge mid-drag).
+      const fdx = e.clientX - joyOrigin.current.x, fdy = e.clientY - joyOrigin.current.y
+      const flen = Math.hypot(fdx, fdy) || 1
+      len = Math.min(flen, JOY_R)
+      dx = (fdx / flen) * len; dy = (fdy / flen) * len
     }
     setKnob({ x: dx, y: dy }) // knob rests at the edge in the drag direction
     // Deadzone + magnitude rescale: a resting thumb reads as zero intent and the
