@@ -26,6 +26,22 @@ import type { Sfx } from './Audio'
 import type { MatchView, PlayerProfile, Zone } from './types'
 import type { ChatMessage, FilterVerdict } from './kidShared'
 
+// Beam Wars duel grid + cadence — mirrors the server (party/server.ts) so a solo
+// AI duel plays identically to a networked one.
+const BW_COLS = 64
+const BW_ROWS = 40
+const BW_TICK_MS = 92
+const BW_START_MS = 1600
+
+type Dir = [number, number]
+
+/** Local Beam Wars sim state for a solo duel vs an AI (beam A = you, beam B = AI). */
+interface LocalDuel {
+  grid: Uint8Array // BW_COLS*BW_ROWS, 0 empty / 1 a-trail / 2 b-trail
+  ax: number; ay: number; adx: number; ady: number; aAlive: boolean; aq: Dir | null
+  bx: number; by: number; bdx: number; bdy: number; bAlive: boolean
+}
+
 /** Dynamic self-identity the manager needs to publish profiles + build the roster. */
 export interface SelfIdentity {
   aliens: number // lifetime + this-session captures
@@ -82,6 +98,11 @@ export class MultiplayerManager implements GameSystem {
   private profilesDirty = true
   private incomingChallenge: { fromId: string; name: string } | null = null
   private matchView: MatchView | null = null
+  // Solo duel against an AI pilot: a local Beam Wars sim that drives the SAME
+  // matchView the networked duel uses, so the BeamWarsLive UI + scoring are shared.
+  private local: LocalDuel | null = null
+  private localLoop: ReturnType<typeof setInterval> | null = null
+  private localStartTimer: ReturnType<typeof setTimeout> | null = null
   private netAccum = 0
   // Deferred profile-publish timers (connect + every reconnect). Tracked so
   // dispose() can cancel them and not fire publishProfile() after teardown.
@@ -178,7 +199,11 @@ export class MultiplayerManager implements GameSystem {
   // --- duel controls (wired to GameControls) ---------------------------------
 
   challenge(id: string, trail: number) {
-    this.net?.sendChallenge(id, trail)
+    if (this.net) { this.net.sendChallenge(id, trail); return }
+    // Solo: duel a local AI pilot (the roster bots use ids of the form "bot:NAME").
+    if (this.matchView) return
+    const name = id.startsWith('bot:') ? id.slice(4) : 'RIVAL'
+    this.startLocalDuel(name, id, trail || 0x27e7ff)
   }
   accept(trail: number) {
     if (!this.incomingChallenge) return
@@ -191,12 +216,18 @@ export class MultiplayerManager implements GameSystem {
     this.incomingChallenge = null
   }
   matchDir(dx: number, dy: number) {
+    if (this.local) {
+      const d: Dir = [Math.sign(dx), Math.sign(dy)]
+      if ((d[0] === 0) !== (d[1] === 0) && this.local.aAlive) this.local.aq = d // exactly one axis
+      return
+    }
     this.net?.sendMatchDir(dx, dy)
   }
   /** Leave the live duel: forfeit if still running, then hand control back. */
   leaveMatch() {
     if (!this.matchView) return
-    if (this.matchView.status !== 'over') this.net?.sendMatchQuit()
+    if (this.local) this.stopLocal()
+    else if (this.matchView.status !== 'over') this.net?.sendMatchQuit()
     this.matchView = null
     this.host.consumePause() // drop any Escape pressed inside the duel view
     this.host.setInputLock(true)
@@ -204,8 +235,146 @@ export class MultiplayerManager implements GameSystem {
   /** Leave the current duel and immediately re-challenge the same opponent. */
   rematch(trail: number) {
     const oppId = this.matchView?.oppId
+    const oppName = this.matchView?.opp ?? 'RIVAL'
+    const wasLocal = !!this.local || !this.net
     this.leaveMatch()
-    if (oppId) this.net?.sendChallenge(oppId, trail)
+    if (!oppId) return
+    if (wasLocal) this.startLocalDuel(oppName, oppId, trail || 0x27e7ff)
+    else this.net?.sendChallenge(oppId, trail)
+  }
+
+  // --- solo AI duel (local Beam Wars) ----------------------------------------
+
+  private stopLocal() {
+    if (this.localLoop) { clearInterval(this.localLoop); this.localLoop = null }
+    if (this.localStartTimer) { clearTimeout(this.localStartTimer); this.localStartTimer = null }
+    this.local = null
+  }
+
+  /** Spin up a local Beam Wars duel against an AI pilot. You are beam A (left,
+   *  heading right); the AI is beam B. Start cells/headings match the server. */
+  private startLocalDuel(oppName: string, oppId: string, myTrail: number) {
+    this.stopLocal()
+    const C = BW_COLS, R = BW_ROWS
+    const grid = new Uint8Array(C * R)
+    const ax = Math.floor(C * 0.22), ay = Math.floor(R / 2)
+    const bx = Math.floor(C * 0.78), by = Math.floor(R / 2)
+    grid[ay * C + ax] = 1
+    grid[by * C + bx] = 2
+    this.local = { grid, ax, ay, adx: 1, ady: 0, aAlive: true, aq: null, bx, by, bdx: -1, bdy: 0, bAlive: true }
+    const oppTrail = 0xff2bd0 // the rival's beam color
+    this.host.warpRevert() // duels are robot-only
+    this.incomingChallenge = null
+    this.matchView = {
+      side: 'a', opp: oppName, oppId, cols: C, rows: R,
+      a: [ax, ay], b: [bx, by], aAlive: true, bAlive: true, status: 'ready', winner: null, seq: 0,
+      trailA: myTrail, trailB: oppTrail, result: null,
+    }
+    this.host.setInputLock(false)
+    this.host.play('ui')
+    // Begin stepping after the same "get ready" beat the server uses.
+    this.localStartTimer = setTimeout(() => {
+      this.localStartTimer = null
+      if (!this.local) return
+      this.localLoop = setInterval(() => this.stepLocal(), BW_TICK_MS)
+    }, BW_START_MS)
+  }
+
+  private stepLocal() {
+    const L = this.local, m = this.matchView
+    if (!L || !m) return
+    const C = BW_COLS, R = BW_ROWS
+    // AI picks beam B's turn (avoids walls/trails, heads for the most open space).
+    const ai = this.aiTurn(L)
+    if (ai && !(ai[0] === -L.bdx && ai[1] === -L.bdy)) { L.bdx = ai[0]; L.bdy = ai[1] }
+    // Your queued turn (no reversing straight back into your own trail).
+    if (L.aq && !(L.aq[0] === -L.adx && L.aq[1] === -L.ady)) { L.adx = L.aq[0]; L.ady = L.aq[1] }
+    L.aq = null
+    const anx = L.ax + L.adx, any = L.ay + L.ady
+    const bnx = L.bx + L.bdx, bny = L.by + L.bdy
+    const aHit = anx < 0 || anx >= C || any < 0 || any >= R || L.grid[any * C + anx] !== 0
+    const bHit = bnx < 0 || bnx >= C || bny < 0 || bny >= R || L.grid[bny * C + bnx] !== 0
+    const headOn = anx === bnx && any === bny
+    const aDead = aHit || headOn
+    const bDead = bHit || headOn
+    if (!aDead) { L.grid[any * C + anx] = 1; L.ax = anx; L.ay = any }
+    if (!bDead) { L.grid[bny * C + bnx] = 2; L.bx = bnx; L.by = bny }
+    L.aAlive = !aDead; L.bAlive = !bDead
+    m.a = [L.ax, L.ay]; m.b = [L.bx, L.by]; m.aAlive = L.aAlive; m.bAlive = L.bAlive
+    if (m.status === 'ready') m.status = 'play'
+    m.seq += 1
+    if (aDead || bDead) this.endLocal(aDead && bDead ? 'draw' : aDead ? 'b' : 'a')
+  }
+
+  /** Resolve a finished local duel: same scoring/rewards as a networked match. */
+  private endLocal(winner: 'a' | 'b' | 'draw') {
+    if (this.localLoop) { clearInterval(this.localLoop); this.localLoop = null }
+    this.local = null
+    const m = this.matchView
+    if (!m) return
+    m.status = 'over'
+    m.winner = winner
+    if (winner !== 'draw') {
+      const won = winner === m.side
+      recordGameResult('beamwars', won ? 'win' : 'loss')
+      const r = recordDuel(won)
+      m.result = { delta: r.delta, rating: r.rating, tier: r.tier.name, tierColor: r.tier.color, streak: r.streak }
+      this.host.awardXp(won ? 60 : 15)
+      if (won) {
+        const d = noteDaily('duelWins', 1)
+        if (d.completed && d.reward) this.host.grantDailyReward(d.reward)
+      }
+    } else {
+      this.host.awardXp(20)
+    }
+    this.host.refreshProgression()
+    this.publishProfile()
+  }
+
+  /** A decently-skilled light-cycle AI: among the non-reversing moves, keep only
+   *  the survivable ones, then prefer the one that leaves the most reachable open
+   *  space (a bounded flood fill), with a small bias to keep going straight and a
+   *  dash of randomness so it's competent but beatable. */
+  private aiTurn(L: LocalDuel): Dir | null {
+    const C = BW_COLS, R = BW_ROWS
+    const cands: Dir[] = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+    let best: Dir | null = null
+    let bestScore = -1
+    for (const d of cands) {
+      if (d[0] === -L.bdx && d[1] === -L.bdy) continue // no reversing
+      const nx = L.bx + d[0], ny = L.by + d[1]
+      if (nx < 0 || nx >= C || ny < 0 || ny >= R || L.grid[ny * C + nx] !== 0) continue // instant death
+      let score = this.floodArea(L.grid, nx, ny)
+      if (d[0] === L.bdx && d[1] === L.bdy) score += 4 // smoother: lean toward straight
+      score += Math.random() * 8 // imperfect, so a sharp player can out-box it
+      if (score > bestScore) { bestScore = score; best = d }
+    }
+    return best
+  }
+
+  /** Bounded BFS count of empty cells reachable from (sx,sy) — the AI's "how much
+   *  room does this move leave me" heuristic. Capped so it stays cheap at 11Hz. */
+  private floodArea(grid: Uint8Array, sx: number, sy: number): number {
+    const C = BW_COLS, R = BW_ROWS
+    const CAP = 160
+    const seen = new Set<number>()
+    const queue: number[] = [sy * C + sx]
+    seen.add(queue[0])
+    let count = 0
+    for (let qi = 0; qi < queue.length && count < CAP; qi++) {
+      const cell = queue[qi]
+      count++
+      const cx = cell % C, cy = (cell / C) | 0
+      const nbrs = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]]
+      for (const [nx, ny] of nbrs) {
+        if (nx < 0 || nx >= C || ny < 0 || ny >= R) continue
+        const ni = ny * C + nx
+        if (seen.has(ni) || grid[ni] !== 0) continue
+        seen.add(ni)
+        queue.push(ni)
+      }
+    }
+    return count
   }
 
   // --- lifecycle -------------------------------------------------------------
@@ -394,6 +563,7 @@ export class MultiplayerManager implements GameSystem {
     // Cancel any deferred publish so it can't fire after teardown.
     for (const t of this.publishTimers) clearTimeout(t)
     this.publishTimers.clear()
+    this.stopLocal() // cancel any live solo-duel timers
     this.net?.close()
     this.net = null
     this.remotePlayers.dispose()
