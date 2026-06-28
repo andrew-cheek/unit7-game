@@ -2131,6 +2131,7 @@ export class Game {
     if (this.vehicles.current) {
       const exitPos = this.vehicles.exit()
       this.player.exitVehicle(exitPos)
+      this.audio.play('exit_vehicle')
       trackEvent('ability_used', { ability: 'vehicle' }) // G = exit
       return
     }
@@ -2165,6 +2166,7 @@ export class Game {
       this.warpRevert() // step out of the warp form to pilot
       this.player.enterVehicle()
       this.vehicles.enter(v)
+      this.audio.play('enter_vehicle')
       trackEvent('ability_used', { ability: 'vehicle' }) // G = enter
       trackEvent('vehicle_entered', { type: v.kind })
       // Mech / titan boot-up moment: name banner, camera shake + an energy/steam
@@ -2537,6 +2539,7 @@ export class Game {
     } else if (kind === 'shield') {
       this.fx.shield = 10
       this.player.shield = true
+      this.audio.play('buff_shield')
     } else if (kind === 'score') {
       this.fx.score = 10
       this.scoreMul = 2
@@ -3264,6 +3267,7 @@ export class Game {
       this.heroLight.color.setHex(0x9fd8ff)
     }
     this.hud.objective = this.launchPad ? 'Step off the edge to skydive' : this.raidActive ? this.raidObjective() : this.missions.update({
+      dt,
       zone: this.zone,
       playerPos: this.player.position,
       captured: this.hud.captured,
