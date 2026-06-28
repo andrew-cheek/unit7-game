@@ -46,6 +46,11 @@ const CONTACT_KEYWORDS: readonly string[] = [
   'cellnumber',
   'mynumber',
   'mynumberis',
+  'numba', // slang "number"
+  'urdigits', // "your/ur digits" -> phone solicitation
+  'yourdigits',
+  'urnumber',
+  'yournumber',
   'callme',
   'textme',
   'phoneme',
@@ -86,6 +91,8 @@ const CONTACT_KEYWORDS: readonly string[] = [
   'wheredoyalive',
   'whatsyouraddress',
   'whatsuraddress',
+  'uraddy', // slang "your address"
+  'youraddy',
   'sendpic',
   'sendpics',
   'sendmeapic', // "send me a pic"
@@ -128,6 +135,8 @@ const CONTACT_KEYWORDS: readonly string[] = [
   //     raw substrings (they don't appear inside common English words) ---
   'snapchat',
   'mysnap',
+  'snapme', // "snap me <handle>" — handle solicitation (distinct from "oh snap")
+  'admeon', // "add me on <platform>" surviving double-letter collapse ("addddd me on")
   'instagram',
   'myinsta',
   'tiktok',
@@ -150,6 +159,63 @@ const CONTACT_KEYWORDS: readonly string[] = [
   'venmo',
   'cashapp',
   'paypal',
+]
+
+/** GROOMING / PREDATOR phrases — curated, highest-priority blocklist. Matched as
+ *  substrings against the NORMALIZED (separator-stripped, de-leet) view, so spacing
+ *  / leet / unicode evasion is already folded. Each entry is the joined-ascii form
+ *  of a realistic predator opener. These are real-world-coercion phrases with no
+ *  benign in-game reading, so blocking them costs nothing in normal play. */
+const GROOMING_PHRASES: readonly string[] = [
+  'donttellyourparents',
+  'donttellyourmom',
+  'donttellyourdad',
+  'donttellanyone',
+  'keepitsecret',
+  'ourlittlesecret',
+  'areyourparentshome',
+  'areyourparentsthere',
+  'whereareyourparents',
+  'isanyonewatching',
+  'areyoualone',
+  'homealone',
+  'icancomepickyou', // "i can come pick you up"
+  'comepickyouup',
+  'illpickyouup',
+  'pickyouup',
+  'sendaselfie',
+  'sendselfie',
+  'sendapic',
+  'turnonyourcamera',
+  'turnonyourcam',
+  'turnoncamera',
+  'onyourcamera',
+  'letstalksomewhereelse',
+  'talksomewhereelse',
+  'somewhereelsenothere',
+  'notherelets', // "...not here, lets..."
+  'meetirl',
+  'meetinreallife',
+  'videochat',
+  'videocall',
+  'whatdoyoulooklike',
+]
+
+/** IDENTITY / SCHOOL / AGE keywords — personal-info disclosure, matched against the
+ *  NORMALIZED view. Real-world identity a child should not share. */
+const IDENTITY_KEYWORDS: readonly string[] = [
+  'whatschool',
+  'gotoschool', // "where do you go to school"
+  'mybday',
+  'mybirthday',
+  'birthdayis',
+  'housenumber',
+  'realnameis',
+  'irlimcalled',
+  'imcalled', // "irl im called <name>"
+  'middleschool',
+  'highschool',
+  'elementaryschool',
 ]
 
 /** Platform/handle names that ARE common English substrings ("snap" in
@@ -269,6 +335,99 @@ const NUMBER_WORDS: readonly string[] = [
   'nine',
 ]
 
+/** The DIGIT number-words (no homophone padding) used to detect a concatenated
+ *  spelled-out run ("fivefivefive onetwothree"). Ordered longest-first so the
+ *  greedy chunker prefers "three"/"seven"/"eight" over a shorter prefix. Only the
+ *  unambiguous digit words live here — homophones like "to"/"for"/"ate" are NOT
+ *  greedily chunked because they collide with ordinary English ("i want to win",
+ *  "go for it"). */
+const DIGIT_WORDS: readonly string[] = [
+  'zero',
+  'three',
+  'seven',
+  'eight',
+  'four',
+  'five',
+  'nine',
+  'one',
+  'two',
+  'six',
+  'oh',
+]
+
+/** US state names + common abbreviations, plus a handful of well-known US cities,
+ *  used by the LOCATION detector. Real-world geography a child should not disclose.
+ *  Kept as an auditable flat list. Multi-word names are stored space-joined to be
+ *  matched against the separator-stripped form is NOT done here; instead we match
+ *  against word-boundary text (see looksLikeLocation). */
+const US_STATES: readonly string[] = [
+  'alabama',
+  'alaska',
+  'arizona',
+  'arkansas',
+  'california',
+  'colorado',
+  'connecticut',
+  'delaware',
+  'florida',
+  'georgia',
+  'hawaii',
+  'idaho',
+  'illinois',
+  'indiana',
+  'iowa',
+  'kansas',
+  'kentucky',
+  'louisiana',
+  'maine',
+  'maryland',
+  'massachusetts',
+  'michigan',
+  'minnesota',
+  'mississippi',
+  'missouri',
+  'montana',
+  'nebraska',
+  'nevada',
+  'ohio',
+  'oklahoma',
+  'oregon',
+  'pennsylvania',
+  'tennessee',
+  'texas',
+  'utah',
+  'vermont',
+  'virginia',
+  'washington',
+  'wisconsin',
+  'wyoming',
+]
+
+/** Well-known real-world city names that a child might disclose. We keep this list
+ *  curated and distinctive (names that don't collide with in-game vocabulary). */
+const REAL_CITIES: readonly string[] = [
+  'chicago',
+  'houston',
+  'phoenix',
+  'philadelphia',
+  'dallas',
+  'austin',
+  'seattle',
+  'denver',
+  'boston',
+  'atlanta',
+  'miami',
+  'detroit',
+  'portland',
+  'springfield',
+  'london',
+  'manchester',
+  'toronto',
+  'sydney',
+  'melbourne',
+  'losangeles',
+]
+
 /** Homoglyph / fancy-unicode -> ascii. Covers the common attack surface a kid can
  *  reach from a phone keyboard / "fancy text" generators: fullwidth Latin,
  *  mathematical bold/script/double-struck/sans/monospace blocks, and a handful of
@@ -372,8 +531,12 @@ const SEPARATORS = /[ \t\r\n._\-+*~^=/\\|·•,'"`()[\]{}<>:;]/g
  * "the same string". "p h o n e", "ph0ne", "𝓹𝓱𝓸𝓷𝓮" all normalize to "phone".
  */
 export function normalizeForMatch(text: string): string {
+  // 0. Strip zero-width / invisible chars (ZWSP, ZWNJ, ZWJ, word-joiner, BOM,
+  //    soft hyphen) that a kid inserts INSIDE a trigger word ("sn<zwsp>ap").
+  // eslint-disable-next-line no-misleading-character-class
+  let s = text.replace(/[​-‍⁠﻿­]/g, '')
   // 1. Decompose + strip diacritics (café -> cafe, ñ -> n).
-  let s = text.normalize('NFKD').replace(/[̀-ͯ]/g, '')
+  s = s.normalize('NFKD').replace(/[̀-ͯ]/g, '')
 
   // 2. Homoglyph / fullwidth / fancy-alphabet folding, codepoint by codepoint.
   let folded = ''
@@ -415,6 +578,97 @@ export function normalizeForMatch(text: string): string {
  *  used for display. */
 function collapseAll(s: string): string {
   return s.replace(/(.)\1+/g, '$1')
+}
+
+// ---------------------------------------------------------------------------
+// DIGIT FOLDING (the root-cause fix for separated / disguised phone numbers)
+// ---------------------------------------------------------------------------
+
+/** Map a single codepoint to its ascii digit (0-9) if it IS a digit in some
+ *  unicode script, else null. Covers ascii, fullwidth (U+FF10..U+FF19), circled
+ *  (①..⑨ and ⓪), parenthesized, fullwidth, and mathematical digit blocks. The
+ *  keycap-emoji digits ("5️⃣") are sequences (ascii digit + VS16 + U+20E3) and so
+ *  are handled by the ascii branch automatically once we strip the combiners. */
+function unicodeDigit(cp: number): string | null {
+  if (cp >= 0x30 && cp <= 0x39) return String.fromCharCode(cp) // ascii 0-9
+  if (cp >= 0xff10 && cp <= 0xff19) return String.fromCharCode(cp - 0xff10 + 0x30) // fullwidth
+  if (cp === 0x24ea) return '0' // ⓪ circled zero
+  if (cp >= 0x2460 && cp <= 0x2468) return String.fromCharCode(cp - 0x2460 + 0x31) // ①..⑨
+  if (cp >= 0x2474 && cp <= 0x247c) return String.fromCharCode(cp - 0x2474 + 0x31) // ⑴..⑼ paren
+  if (cp >= 0x2776 && cp <= 0x277e) return String.fromCharCode(cp - 0x2776 + 0x31) // ❶..❾ neg circled
+  // Mathematical digit blocks (bold, double-struck, sans, mono, etc.) are 8
+  // contiguous 10-codepoint ranges starting at U+1D7CE.
+  if (cp >= 0x1d7ce && cp <= 0x1d7ff) return String.fromCharCode(((cp - 0x1d7ce) % 10) + 0x30)
+  return null
+}
+
+/** Characters that, in a NUMERIC context, are commonly used as digits via leet
+ *  ("5o5" where o=0, "l"=1). We only fold these to digits when they sit adjacent to
+ *  real digits, so ordinary words ("hello") are not turned into digit soup. */
+const LEET_DIGIT: Record<string, string> = {
+  o: '0',
+  i: '1',
+  l: '1',
+  s: '5',
+  z: '2',
+  b: '8',
+  g: '9',
+  q: '9',
+}
+
+/** Build the count of TOTAL digits in a message, tolerant of every grouping /
+ *  separator / unicode-digit evasion. We:
+ *    1. NFKD-decompose and DROP combining marks + the keycap-combiner U+20E3 and
+ *       variation selectors, so "5️⃣" collapses to "5".
+ *    2. Fold each codepoint through unicodeDigit() to ascii 0-9 where possible.
+ *    3. Additionally, fold leet letters (o,i,l,s,...) to digits ONLY when they are
+ *       immediately adjacent to a real digit (numeric context), so "5o5 123" counts
+ *       o as 0 but "hello" stays untouched.
+ *  Returns the digit-only string; its length is the total digit count. Separators
+ *  never appear here because non-digits are simply skipped. */
+function digitFold(text: string): string {
+  // Strip combining marks, variation selectors, keycap combiner, zero-width chars.
+  const cleaned = text
+    .normalize('NFKD')
+    // eslint-disable-next-line no-misleading-character-class
+    .replace(/[̀-ͯ︀-️⃣​-‍⁠﻿­]/g, '')
+
+  const chars = Array.from(cleaned.toLowerCase())
+  // First pass: classify each char as a digit (from unicode) or a leet-candidate.
+  const slots: { digit: string | null; leet: string | null }[] = []
+  for (const ch of chars) {
+    const cp = ch.codePointAt(0)
+    if (cp === undefined) {
+      slots.push({ digit: null, leet: null })
+      continue
+    }
+    const d = unicodeDigit(cp)
+    if (d !== null) {
+      slots.push({ digit: d, leet: null })
+    } else {
+      slots.push({ digit: null, leet: LEET_DIGIT[ch] ?? null })
+    }
+  }
+  // Second pass: promote a leet-candidate to a digit only if it neighbours a real
+  // (or already-promoted) digit, so a leet run riding a phone number ("5o5o123")
+  // folds wholesale while stray letters do not.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i].digit !== null || slots[i].leet === null) continue
+      const prev = i > 0 ? slots[i - 1].digit : null
+      const next = i < slots.length - 1 ? slots[i + 1].digit : null
+      if (prev !== null || next !== null) {
+        slots[i].digit = slots[i].leet
+        slots[i].leet = null
+        changed = true
+      }
+    }
+  }
+  let out = ''
+  for (const s of slots) if (s.digit !== null) out += s.digit
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +775,66 @@ function spelledOutNumberRun(rawLower: string): boolean {
       run = 0
     }
   }
+  // CONCATENATED spelled digits ("fivefivefive onetwothree"): greedily chunk each
+  // word-token into digit-words. A token that decomposes entirely into >= 2 digit
+  // words, summed across the message to >= 5 total digit-words, is a number share.
+  // We require WHOLE-TOKEN decomposition so an ordinary word ("everyone" ->
+  // "every"+"one"?) does not falsely chunk: "everyone" fails because "every" is not
+  // a digit word, so the greedy parse rejects the token entirely.
+  let total = 0
+  for (const w of words) {
+    const n = countConcatenatedDigitWords(w)
+    if (n >= 2) total += n // only count tokens that are clearly digit-runs
+  }
+  if (total >= 5) return true
+  return false
+}
+
+/** If `word` is ENTIRELY a concatenation of digit-words ("fivefivefive" ->
+ *  ["five","five","five"]), return how many digit-words it contains; else 0.
+ *  Greedy longest-match from the front; any leftover non-digit-word residue means
+ *  the token is not a pure digit run, so we return 0 (no partial credit). */
+function countConcatenatedDigitWords(word: string): number {
+  let i = 0
+  let count = 0
+  outer: while (i < word.length) {
+    for (const dw of DIGIT_WORDS) {
+      if (word.startsWith(dw, i)) {
+        i += dw.length
+        count++
+        continue outer
+      }
+    }
+    return 0 // residue that isn't a digit word -> not a pure digit-word token
+  }
+  return count
+}
+
+/** ROOT-CAUSE phone rule: count TOTAL digits in the message regardless of grouping.
+ *  A phone number is 7+ digits however it's split ("555-123-4567", "5 5 5 1 2 3 4",
+ *  fullwidth/keycap/leet digits). Game numbers stay well under 7 ("scored 9000" = 4,
+ *  "level 7" = 1, "3 lives and 5 stars" = 2), so 7 is a safe floor. */
+function looksLikeTotalDigits(text: string): boolean {
+  return digitFold(text).length >= 7
+}
+
+/** LOCATION disclosure: real-world city/state names introduced by a geo lead-in
+ *  ("i'm from", "i live in"), bare US-state / well-known-city mentions, and postal
+ *  codes (UK postcode, US zip). Gated on REAL geography keywords so in-game
+ *  location phrasing ("from the moon base", "in the arcade") stays allowed. */
+function looksLikeLocation(lightLower: string): boolean {
+  const words = lightLower.split(/[^a-z]+/).filter(Boolean)
+  const wordSet = new Set(words)
+  // Bare real-world place name anywhere (these don't collide with game vocab).
+  for (const st of US_STATES) if (wordSet.has(st)) return true
+  for (const ct of REAL_CITIES) if (wordSet.has(ct)) return true
+  // "from/live/in/stay <Place>" lead-in followed by a Capitalized-looking proper
+  // noun is too broad; instead we rely on the curated lists above for names and
+  // add postal-code patterns here.
+  // UK postcode: e.g. "SW1A 1AA", "M1 1AE", "EC1A 1BB".
+  if (/\b[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}\b/i.test(lightLower)) return true
+  // US ZIP introduced by a zip lead-in OR a bare 5-digit "from/in" geo context.
+  if (/\bzip\b/.test(lightLower) && /\b\d{5}(-\d{4})?\b/.test(lightLower)) return true
   return false
 }
 
@@ -528,7 +842,7 @@ function spelledOutNumberRun(rawLower: string): boolean {
  *  child-plausible age. Age is personal info a groomer fishes for, so we block it
  *  regardless of the "i am" phrasing (which we no longer keyword on). Number-words
  *  are covered too ("nine years old"). */
-function looksLikeAgeShare(lightLower: string): boolean {
+function looksLikeAgeShare(lightLower: string, normalized: string): boolean {
   if (/\b(\d{1,2})\s*(years?\s*old|yrs?\s*old|y\/?o)\b/.test(lightLower)) return true
   if (
     /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)\s*(years?\s*old|yrs?\s*old)\b/.test(
@@ -539,6 +853,18 @@ function looksLikeAgeShare(lightLower: string): boolean {
   // "im 9" / "i am 12" stated as an age-looking bare statement.
   if (/\bi\s*a?m\s*\d{1,2}\b\s*(years?|yrs?|yo)?/.test(lightLower) && /\b\d{1,2}\s*(years?|yrs?|yo)\b/.test(lightLower))
     return true
+  // "im 8 and a half" — a bare "im <small age> and a half" is an age disclosure.
+  if (/\bi('?m| am)\s*\d{1,2}\s*and\s*a\s*half\b/.test(lightLower)) return true
+  // Spelled-out age survives separator evasion ("im n.i.n.e years old") via the
+  // normalized view: "<number-word>yearsold" / "<number-word>yrsold".
+  if (
+    /(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)(years?old|yrsold)/.test(
+      normalized,
+    )
+  )
+    return true
+  // "<digit>yearsold" in the normalized (de-dotted) view.
+  if (/\d{1,2}(years?old|yrsold|yo)\b/.test(normalized)) return true
   return false
 }
 
@@ -546,19 +872,73 @@ function looksLikeAgeShare(lightLower: string): boolean {
  *  After normalization "@" becomes "a", so we test the lightly-cleaned text that
  *  still has "@" and ".". */
 function looksLikeEmail(lightLower: string, compact: string): boolean {
+  // De-leet copies so a leetspeak email ("j0hn@gmai1.c0m") surfaces a real tld.
+  // We fold ONLY digit-leet (0->o, 1->i, 3->e, 5->s, 7->t) so "c0m"->"com",
+  // "gmai1"->"gmail" — we must NOT fold "@" (->a) since it carries the email shape.
+  const DIGIT_LEET: Record<string, string> = { '0': 'o', '1': 'i', '3': 'e', '5': 's', '7': 't' }
+  const deleet = (s: string) => {
+    let o = ''
+    for (const ch of s) o += DIGIT_LEET[ch] ?? ch
+    return o
+  }
+  const lightDeleet = deleet(lightLower)
+  const compactDeleet = deleet(compact)
   // user@host.tld with optional spaces around the @ that a kid might add.
   const at = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/
   if (at.test(lightLower) || at.test(compact)) return true
+  if (at.test(lightDeleet) || at.test(compactDeleet)) return true
   // spelled-out "<word> at <word> dot com"
   if (/\bat\b.*\bdot\b\s*(com|net|org|co|io|gov|edu)/.test(lightLower)) return true
   return false
 }
 
-/** Street address: a number followed by a street-type word. */
+/** Street address: a number (digit OR spelled-out) followed by a street-type word,
+ *  plus cross-street shapes ("5th and main", "elm and oak"). Real-world location. */
 function looksLikeAddress(lightLower: string): boolean {
-  return /\b\d{1,6}\s+([a-z]+\s+)*(street|st|avenue|ave|road|rd|lane|ln|drive|dr|blvd|boulevard|court|ct|way|circle|cir|place|pl|terrace|highway|hwy|route)\b/.test(
-    lightLower,
+  const streetType =
+    '(street|st|avenue|ave|road|rd|lane|ln|drive|dr|blvd|boulevard|court|ct|way|circle|cir|place|pl|terrace|highway|hwy|route|elm|oak|maple|pine|main)'
+  // digit house number + street type
+  if (
+    new RegExp(`\\b\\d{1,6}\\s+([a-z]+\\s+)*${streetType}\\b`).test(lightLower)
   )
+    return true
+  // spelled-out house number ("house number is fourteen on elm", "fourteen on elm")
+  const numWord =
+    '(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)'
+  if (
+    new RegExp(`\\bhouse\\s*(number|num|no)\\b`).test(lightLower) ||
+    new RegExp(`\\b${numWord}\\s+(on|at)\\s+([a-z]+\\s+)*${streetType}\\b`).test(lightLower)
+  )
+    return true
+  // cross-street: "<ordinal> and main", "5th and main", "elm and oak"
+  if (/\b(\d{1,3}(st|nd|rd|th)|[a-z]+)\s+and\s+(main|elm|oak|maple|pine|broadway|[0-9]+(st|nd|rd|th))\b/.test(lightLower))
+    return true
+  return false
+}
+
+/** SCHOOL / GRADE / TEACHER / CLASSROOM disclosure. Real-world identity context.
+ *  Gated on school vocabulary, so in-game phrasing is unaffected. */
+function looksLikeSchoolOrIdentity(lightLower: string): boolean {
+  if (/\bschool\b/.test(lightLower)) return true
+  if (/\b(grade|teacher|classroom|homeroom)\b/.test(lightLower)) return true
+  if (/\b(mr|mrs|ms|miss|mister)\s+[a-z]+(s)?\s+(class|room)\b/.test(lightLower)) return true
+  if (/\broom\s*\d{1,3}\b/.test(lightLower)) return true
+  if (/\b(elementary|kindergarten)\b/.test(lightLower)) return true
+  if (/\bgo\s+to\s+[a-z]+\s+(elementary|middle|high|elem)\b/.test(lightLower)) return true
+  if (/\bgrade\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/.test(lightLower)) return true
+  // "irl im called <name>" / "im called <name>" real-name disclosure
+  if (/\b(irl\s+)?i('?m| am)\s+called\b/.test(lightLower)) return true
+  // birthday/bday reveal
+  if (/\b(bday|birthday)\b/.test(lightLower)) return true
+  return false
+}
+
+/** Social-handle share: an "@" immediately followed by handle characters
+ *  ("@coolkid99"). A bare @handle is a third-party contact share with no benign
+ *  in-game use. We run on the lightly-cleaned text (homoglyphs folded, "@" intact).
+ *  We require >= 3 trailing handle chars so a stray "@" doesn't fire. */
+function looksLikeAtHandle(lightLower: string): boolean {
+  return /@[a-z0-9._]{3,}/.test(lightLower)
 }
 
 // --- LINK detector -----------------------------------------------------------
@@ -568,15 +948,29 @@ function looksLikeAddress(lightLower: string): boolean {
  *  past the dot-domain regex. We do NOT repeat-collapse it (so "www" survives). */
 function looksLikeLink(lightLower: string, compact: string): boolean {
   if (/https?:\/\//.test(lightLower) || /https?:\/\//.test(compact)) return true
+  // Defanged scheme "hxxp://" / "hxxps://".
+  if (/hxxps?:\/\//.test(lightLower) || compact.includes('hxxp')) return true
   // "www" — check the compact form so spaced "w w w" -> "www" is caught (the
   // normalized form repeat-collapses "www" -> "w", so it CANNOT be used here).
   if (/\bwww\b/.test(lightLower) || compact.includes('www')) return true
   // a bare domain like "foo.com" / "foo.co.uk", in either spaced or compact form.
-  const domain = /[a-z0-9-]+\.(com|net|org|io|co|gg|tv|me|app|xyz|info|biz|us|uk|edu|gov)\b/
+  const domain = /[a-z0-9-]+\.(com|net|org|io|co|gg|tv|me|app|xyz|info|biz|us|uk|edu|gov|ee|ly)\b/
   if (domain.test(lightLower) || domain.test(compact)) return true
-  // spelled-out "dot com" evasion.
-  if (/\bdot\s*(com|net|org|io|co|gg|tv|me)\b/.test(lightLower)) return true
+  // Known URL shorteners / link aggregators (with any dot variant collapsed).
+  const shorteners = ['linktr.ee', 'tinyurl', 'bit.ly', 't.co', 'discord.gg', 'cash.app']
+  for (const s of shorteners) {
+    if (compact.includes(s) || compact.includes(s.replace('.', ''))) return true
+  }
+  // spelled-out / bracketed "dot" + tld evasion: "site dot com", "mysite (dot) com",
+  // "site [.] com". Normalize bracketed/spelled dots then look for "dot<tld>".
+  const dotted = lightLower
+    .replace(/\(\s*dot\s*\)/g, 'dot')
+    .replace(/\[\s*\.?\s*\]/g, 'dot')
+    .replace(/\{\s*dot\s*\}/g, 'dot')
+  if (/\bdot\s*(com|net|org|io|co|gg|tv|me|ee|ly|app|xyz)\b/.test(dotted)) return true
   if (compact.includes('dotcom') || compact.includes('dotnet') || compact.includes('dotorg')) return true
+  // "<word> slash <path>" alongside a domain-ish or shortener mention = a URL share.
+  if (/\bslash\b/.test(lightLower) && /\b(com|net|org|dot|tinyurl|bit|linktr|discord)\b/.test(lightLower)) return true
   if (compact.includes('http')) return true
   return false
 }
@@ -648,13 +1042,18 @@ export function filterChat(text: string): FilterVerdict {
     return { allowed: false, text: trimmed.slice(0, CHAT_MAX_LEN), reason: 'toolong' }
   }
 
+  // Strip zero-width / invisible chars up front so every derived view (raw, light,
+  // compact) is immune to "sn<zwsp>ap" / "em<soft-hyphen>ail" evasion.
+  // eslint-disable-next-line no-misleading-character-class
+  const clean = trimmed.replace(/[​-‍⁠﻿­]/g, '')
+
   // Build the several views the detectors need.
-  const rawLower = trimmed.toLowerCase()
+  const rawLower = clean.toLowerCase()
   // "light" form: lowercased, diacritics + homoglyphs folded, but punctuation and
   // digits PRESERVED — needed for email/URL/address shapes that depend on "@", "."
   // and real digits.
   let light = ''
-  for (const ch of trimmed.normalize('NFKD').replace(/[̀-ͯ]/g, '')) {
+  for (const ch of clean.normalize('NFKD').replace(/[̀-ͯ]/g, '')) {
     const cp = ch.codePointAt(0)
     light += cp !== undefined ? mapHomoglyph(cp) ?? ch : ch
   }
@@ -673,11 +1072,17 @@ export function filterChat(text: string): FilterVerdict {
   if (
     looksLikeEmail(lightLower, compact) ||
     looksLikeAddress(lightLower) ||
-    looksLikeAgeShare(lightLower) ||
+    looksLikeAgeShare(lightLower, normalized) ||
     looksLikePhone(normalized) ||
     looksLikePhone(digitPreserving) ||
+    looksLikeTotalDigits(clean) ||
     spelledOutNumberRun(rawLower) ||
+    looksLikeLocation(lightLower) ||
+    looksLikeSchoolOrIdentity(lightLower) ||
+    looksLikeAtHandle(lightLower) ||
     mentionsContactPlatform(rawLower) ||
+    containsAny(normalized, collapsed, GROOMING_PHRASES) ||
+    containsAny(normalized, collapsed, IDENTITY_KEYWORDS) ||
     containsAny(normalized, collapsed, CONTACT_KEYWORDS)
   ) {
     return { allowed: false, text: '', reason: 'contact' }
