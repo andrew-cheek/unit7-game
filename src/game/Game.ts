@@ -67,6 +67,8 @@ import { NightMarket } from './NightMarket'
 import { SkyDreadnought } from './SkyDreadnought'
 import { LevelUpShow } from './LevelUpShow'
 import { WanderingMerchant } from './WanderingMerchant'
+import { DataRelics } from './DataRelics'
+import { TurretNests } from './TurretNests'
 import { OffworldCritters } from './OffworldCritters'
 import { WorldEvents } from './WorldEvents'
 import { ExplorationPoints } from './ExplorationPoints'
@@ -638,6 +640,20 @@ export class Game {
       spend: (cost) => { if (this.credits < cost) return false; this.addCredits(-cost); return true },
       buff: (kind) => this.applyPowerup(kind),
       notify: (x, y, z, label, color) => this.popups.pop(x, y, z, label, color),
+    }))
+    // Data relics: a curated collect-them-all set hidden around the city.
+    this.systems.register(new DataRelics(this.engine.scene, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onScan: (got, total, x, y, z) => { this.addCredits(30); this.awardXp(20); this.popups.pop(x, y, z, `DATA ${got}/${total}`, '#9bd4ff'); this.hud.banner = `DATA RELIC ${got}/${total}`; this.bannerTimer = 1.6 },
+      onComplete: (credits, xp) => { this.addCredits(credits); this.awardXp(xp) },
+      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.8 },
+    }))
+    // Turret nests: fixed hostile turrets that make certain spots dangerous.
+    this.systems.register(new TurretNests(this.engine.scene, this.capturables, {
+      focus: () => this.player.position,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onZap: (kx, kz, ky) => { this.player.velocity.x += kx; this.player.velocity.z += kz; this.player.velocity.y += ky; this.player.grounded = false },
     }))
     // Floating "+score" reward popups at captures / pickups.
     this.popups = this.systems.register(new FloatingPopups(this.engine.scene))
