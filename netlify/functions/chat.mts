@@ -43,11 +43,22 @@ interface RoomBlob {
 
 const STORE_NAME = 'unit7-chat'
 const ROOM_RE = /^[a-z0-9]{1,24}$/i
-const ID_RE = /^[a-z0-9]{6,40}$/i
+const ID_RE = /^[a-z0-9]{16,40}$/i
 const MAX_MSGS = 60
 const MIN_INTERVAL_MS = 800 // anti-spam: min gap between a player's accepted messages
 const LAST_AT_TTL_MS = 60_000 // prune rate-limit entries older than this
+const MAX_LAST_AT = 200 // cap lastAt entries against id-rotation memory growth
 const NAME_MAX_LEN = 16
+
+// Prototype-pollution sentinels: never copy/merge/store these keys.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+// Origins allowed to issue cross-site POSTs. Same-origin / no-Origin / localhost
+// are also allowed (handled in originAllowed).
+const ALLOWED_ORIGINS = new Set([
+  'https://unit7.humanoidrobots.com',
+  'https://humanoidrobots.com',
+])
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
@@ -57,6 +68,21 @@ function json(body: unknown, status = 200): Response {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+// CSRF/origin guard for state-changing POSTs. Reject only when an Origin header
+// is present AND not allowlisted. Missing Origin (same-origin fetches, server
+// callers) and localhost (dev) are allowed.
+function originAllowed(origin: string | null): boolean {
+  if (!origin) return true
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  try {
+    const host = new URL(origin).hostname
+    if (host === 'localhost' || host === '127.0.0.1') return true
+  } catch {
+    return false
+  }
+  return false
 }
 
 function keyFor(room: string): string {
@@ -88,6 +114,8 @@ function coerceBlob(raw: unknown): RoomBlob {
   const lastAt: Record<string, number> = {}
   if (isPlainObject(raw.lastAt)) {
     for (const [k, v] of Object.entries(raw.lastAt)) {
+      // Prototype-pollution strip: never copy/round-trip these keys.
+      if (FORBIDDEN_KEYS.has(k)) continue
       if (typeof v === 'number') lastAt[k] = v
     }
   }
@@ -130,6 +158,11 @@ export default async (req: Request, _context: unknown): Promise<Response> => {
 
     // --- POST: submit a message ---------------------------------------------
     if (req.method === 'POST') {
+      // CSRF/origin guard: block drive-by cross-site writes.
+      if (!originAllowed(req.headers.get('origin'))) {
+        return json({ error: 'forbidden origin' }, 403)
+      }
+
       let body: unknown
       try {
         body = await req.json()
@@ -182,6 +215,15 @@ export default async (req: Request, _context: unknown): Promise<Response> => {
       for (const [k, ts] of Object.entries(blob.lastAt)) {
         if (now - ts > LAST_AT_TTL_MS) delete blob.lastAt[k]
       }
+      // Bound memory against id-rotation: if still oversized after TTL pruning,
+      // drop the oldest entries down to the cap.
+      const lastAtKeys = Object.keys(blob.lastAt)
+      if (lastAtKeys.length > MAX_LAST_AT) {
+        lastAtKeys
+          .sort((a, b) => blob.lastAt[a] - blob.lastAt[b]) // oldest first
+          .slice(0, lastAtKeys.length - MAX_LAST_AT)
+          .forEach((k) => delete blob.lastAt[k])
+      }
 
       // Read-modify-write: two concurrent POSTs to the same room can race and one
       // append may be lost (last writer wins). Acceptable at this scale — a 60-line
@@ -192,6 +234,8 @@ export default async (req: Request, _context: unknown): Promise<Response> => {
 
     return json({ error: 'method not allowed' }, 405)
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'internal error' }, 500)
+    // Log server-side only; never leak internal detail to the client.
+    console.error('chat function error:', err)
+    return json({ error: 'internal error' }, 500)
   }
 }
