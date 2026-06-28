@@ -41,7 +41,10 @@ export class Aurora implements GameSystem {
     this.tex = this.makeGradient()
     // A wide, tall curtain; waved along its width so overlapping ribbons read as
     // folding sheets of light rather than flat billboards.
-    this.geo = new THREE.PlaneGeometry(170, 90, 24, 1)
+    // LOW tier: shrink the plane ~20% (170->136, 90->72) to cut the additive
+    // fill footprint while still reading as atmospheric glow. High/medium full size.
+    const low = config.tier.name === 'low'
+    this.geo = new THREE.PlaneGeometry(low ? 136 : 170, low ? 72 : 90, 24, 1)
     const pos = this.geo.attributes.position as THREE.BufferAttribute
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
@@ -49,7 +52,6 @@ export class Aurora implements GameSystem {
     }
     this.geo.computeVertexNormals()
 
-    const low = config.tier.name === 'low'
     const n = low ? 2 : 4
     const hues = [0.38, 0.5, 0.78, 0.33] // green, cyan, violet, green
     for (let i = 0; i < n; i++) {
