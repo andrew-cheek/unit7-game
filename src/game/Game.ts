@@ -99,11 +99,16 @@ import { config } from './config'
 import { detectTier, resolveTier, TIERS } from './tiers'
 import { clamp, damp, lerp, vibrate } from './utils'
 import { trackEvent } from '../lib/analytics'
-import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, loadMissionProgress, saveMissionProgress, type Profile } from './storage'
+import { loadProfile, saveProfile, loadHighScore, saveHighScore, loadStats, loadCallsign, loadMissionProgress, saveMissionProgress, type Profile } from './storage'
 import {
   loadProgression, addXp, noteLogin, noteDaily, levelForXp, levelInfo, tierForRating, cosmeticById,
   ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
 } from './progression'
+import { createStore } from './saveStore'
+import { httpSaveTransport } from './saveTransport'
+import { isChatEnabled } from './parental'
+import { filterChat } from './chatSafety'
+import type { ChatMessage, KidStore } from './kidShared'
 import type { GameAction, HudState, MinigameKind, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
@@ -330,6 +335,15 @@ export class Game {
   private bubbleShotGeo = new THREE.SphereGeometry(0.5, 12, 10)
   private bubbleShotMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
   private progression: Progression = loadProgression()
+  // Anonymous cloud save (mirrors localStorage; localStorage stays the source of
+  // truth). LocalStore until attachSave() injects a transport for the resolved
+  // multiplayer host.
+  private saveStore!: KidStore
+  // Per-kid chat gate: the parent's chatEnabled flag, cached. Gates BOTH send and
+  // receive — a kid whose parent disabled chat never sends or sees a line.
+  private chatEnabled = false
+  // Where received (and locally-gated) chat lines are delivered to the UI.
+  private chatSink: ((m: ChatMessage) => void) | null = null
   private morningSunrise = false // true while the scripted opening sunrise is slowing the clock
   // Warp ability: a charge fills over 30s of play; press R to open the picker and
   // teleport into one of seven sci-fi forms.
@@ -918,6 +932,20 @@ export class Game {
       toggleWarp: () => this.toggleWarp(),
       warpInto: (id: string) => this.warpInto(id),
       warpRevert: () => this.warpRevert(),
+      // Kid-safe chat: SEND gate (parent flag) + filter, then relay to the net.
+      sendChat: (text: string) => {
+        if (!this.chatEnabled) return
+        const v = filterChat(text)
+        if (!v.allowed) return
+        this.mp.sendChat(v.text)
+      },
+      setChatSink: (fn: (m: ChatMessage) => void) => { this.chatSink = fn },
+      refreshChatEnabled: () => { this.chatEnabled = isChatEnabled() },
+      // Anonymous cloud save surface for the save / recovery panel.
+      saveRecoveryCode: () => this.saveStore?.recoveryCode() ?? '',
+      saveOnline: () => !!this.saveStore?.online,
+      saveRestore: (code: string) => this.saveStore?.restore(code) ?? Promise.resolve({ ok: false, error: 'nostore' }),
+      myNetId: () => this.mp.myId ?? '',
     }
 
     this.hud = {
@@ -946,6 +974,7 @@ export class Game {
       heat: { stars: 0, max: config.heat.max, wanted: false },
       drop: null,
       raid: null,
+      chatEnabled: this.chatEnabled,
     }
     // After hud + world exist: apply the persisted neon level (sets density + bloom).
     this.applyNeon()
@@ -954,6 +983,12 @@ export class Game {
     noteLogin()
     this.refreshProgression()
     this.applyAccentCosmetic()
+
+    // Default to a pure-local save store so solo / offline play is fully wired even
+    // if the shell never calls attachSave(). The shell re-calls attachSave(host)
+    // right after construction to upgrade to the anonymous cloud save; that re-fold
+    // is idempotent (localStorage stays the source of truth).
+    this.attachSave()
 
     this.engine.onUpdate = this.update
     this.engine.onRender = this.renderFrame
@@ -1251,7 +1286,7 @@ export class Game {
       this.audio.play('portal')
       vibrate(120)
       this.profile.motherships += 1
-      saveProfile(this.profile)
+      this.persist()
       this.refreshProgression() // unlock Sky Breaker / Fleet Bane
     }
     // Mothership ground-strike: a big shield hit (and knockback) if it catches you;
@@ -1691,6 +1726,11 @@ export class Game {
        *  never their result. `hash` is a stable golden a CI test can pin. Restores
        *  all state afterwards (a no-op for the live game). */
       determinism: (steps = 240) => this.proveDeterminism(Math.max(1, Math.min(Number(steps) || 240, 6000))),
+
+      /** Run text through the live kid-safety chat filter. Lets an automated test
+       *  drive the real filter against an attack/benign corpus headless (the chat
+       *  safety equivalent of the determinism proof). Returns the FilterVerdict. */
+      filter: (text: string) => filterChat(String(text ?? '')),
     }
 
     const w = window as unknown as { __unit7nav?: typeof nav; __unit7?: { test?: typeof nav } }
@@ -2104,7 +2144,7 @@ export class Game {
         this.addCredits(-cost)
         this.unlocked.add(v.kind)
         this.profile.unlocks = [...this.unlocked]
-        saveProfile(this.profile)
+        this.persist()
         this.hud.banner = `${v.name} UNLOCKED  -${cost} CR`
         this.bannerTimer = 1.8
         this.audio.play('objective')
@@ -2540,6 +2580,62 @@ export class Game {
     this.mp.connect(username, host)
   }
 
+  /**
+   * Wire the anonymous cloud save. Called by the shell right after construction
+   * with the resolved multiplayer host. With a host we get a CloudStore (HTTP
+   * transport); with none we get a LocalStore so solo / offline play is unchanged.
+   *
+   * localStorage remains the source of truth: we seed the cloud envelope from the
+   * existing on-device blobs (so a returning player's progress is uploaded, not
+   * overwritten by an empty cloud), then kick a sync that reconciles with whatever
+   * the cloud already holds via the never-lose merge.
+   */
+  attachSave(host?: string) {
+    this.saveStore = createStore(host ? httpSaveTransport(host) : undefined)
+    // Fold current on-device progress into the envelope so the first sync uploads
+    // it. MissionSystem.serialize() is the live source for mission idx; fall back
+    // to the persisted blob if it isn't available.
+    this.saveStore.patch({
+      profile: loadProfile(),
+      progression: loadProgression(),
+      stats: loadStats(),
+      missions: this.missions?.serialize?.() ?? loadMissionProgress(),
+      callsign: loadCallsign(),
+    })
+    void this.saveStore.sync()
+    // Cache the parental chat flag once the save layer is up.
+    this.chatEnabled = isChatEnabled()
+    this.hud.chatEnabled = this.chatEnabled
+  }
+
+  /**
+   * Snapshot every save family into one store patch. Called wherever we used to
+   * call saveProfile(this.profile): local persistence is unchanged (we still write
+   * the profile blob directly), and the cloud envelope is updated alongside it.
+   * The store debounces the actual upload, so calling this on every progress event
+   * is cheap and allocation-light.
+   */
+  private persist() {
+    // Local write-through first: localStorage stays the source of truth.
+    saveProfile(this.profile)
+    this.saveStore?.patch({
+      profile: this.profile,
+      progression: loadProgression(),
+      stats: loadStats(),
+      missions: this.missions?.serialize?.() ?? loadMissionProgress(),
+      callsign: loadCallsign(),
+    })
+  }
+
+  /**
+   * A chat line arrived from the net. RECEIVE GATE: a kid whose parent has chat
+   * disabled never sees other players' lines, even if the room relays them.
+   */
+  private onNetChat(m: ChatMessage) {
+    if (!this.chatEnabled) return
+    this.chatSink?.(m)
+  }
+
   /** The callback surface the MultiplayerManager uses to read player state and
    *  push rewards/HUD/audio back into the game, keeping the net glue out of Game. */
   private multiplayerHost(): MultiplayerHost {
@@ -2573,6 +2669,7 @@ export class Game {
       awardXp: (amount) => this.awardXp(amount),
       grantDailyReward: (reward) => this.grantDailyReward(reward),
       refreshProgression: () => this.refreshProgression(),
+      onChat: (m) => this.onNetChat(m),
     }
   }
 
@@ -2663,7 +2760,7 @@ export class Game {
   private onShardCollected(value: number, x: number, y: number, z: number) {
     this.addCredits(value)
     this.profile.shardsFound += 1
-    saveProfile(this.profile)
+    this.persist()
     const c = this.collectibles.counts()
     this.hud.banner = `DATA SHARD  ${c.found}/${c.total}  +${value}c`
     this.bannerTimer = 1.4
@@ -2694,7 +2791,7 @@ export class Game {
     vibrate(80)
     if (!this.profile.zonesArchived.includes(this.zone)) {
       this.profile.zonesArchived.push(this.zone)
-      saveProfile(this.profile)
+      this.persist()
     }
     this.refreshProgression() // unlock Sweep / Completionist
   }
@@ -3533,7 +3630,7 @@ export class Game {
     // Track + persist the best score (only writes storage when it improves).
     if (this.hud.score > this.profile.best) {
       this.profile.best = this.hud.score
-      saveProfile(this.profile)
+      this.persist()
     }
     this.hud.best = this.profile.best
 
@@ -3546,6 +3643,7 @@ export class Game {
     }
 
     this.hud.fps = Math.round(this.engine.fps)
+    this.hud.chatEnabled = this.chatEnabled
     this.hud.stamina = this.player.stamina / config.player.staminaMax
     this.hud.fuel = this.player.fuel / config.jetpack.fuelMax
     this.hud.speed = piloting ? this.vehicles.currentSpeed : this.player.speed
@@ -3613,7 +3711,9 @@ export class Game {
     // Persist session takings (credits + best are already saved live).
     this.profile.lifetimeCaptured += this.hud.captured
     this.profile.credits = this.credits
-    saveProfile(this.profile)
+    this.persist()
+    // Best-effort final flush of session takings to the cloud before teardown.
+    void this.saveStore?.sync()
     this.clearWarpModel()
     // Tears down registered systems (multiplayer net + renderers, pooled FX).
     this.systems.dispose()

@@ -6,6 +6,7 @@
 // message shapes in sync with the server.
 
 import type { PlayerMode, Zone } from './types'
+import type { ChatMessage, FilterVerdict } from './kidShared'
 
 export type NetVec3 = [number, number, number]
 
@@ -69,6 +70,10 @@ export interface NetHandlers {
   onMatchStart(info: { side: MatchSide; opp: string; oppId: string; cols: number; rows: number; a: [number, number]; b: [number, number]; trailA: number; trailB: number; startIn: number }): void
   onMatchTick(a: [number, number], b: [number, number], aAlive: boolean, bAlive: boolean): void
   onMatchEnd(winner: MatchSide | 'draw'): void
+  // Kid-safe typed chat (server re-filters + relays). Only fires when the room
+  // has chat enabled; each client decides whether to render it per parental gate.
+  onChat(msg: ChatMessage): void
+  onChatBlocked?(reason: FilterVerdict['reason']): void
 }
 
 export type MatchSide = 'a' | 'b'
@@ -255,6 +260,14 @@ export class Net {
       case 'full':
         this.handlers.onFull?.()
         break
+      case 'chat':
+        // The wire uses `ts` for the timestamp because `t` is the message-type
+        // discriminator; map `ts` -> ChatMessage.t here.
+        this.handlers.onChat({ id: msg.id as string, name: msg.name as string, text: msg.text as string, t: (msg.ts as number) ?? 0 })
+        break
+      case 'chatBlocked':
+        this.handlers.onChatBlocked?.(msg.reason as FilterVerdict['reason'])
+        break
     }
   }
 
@@ -270,6 +283,12 @@ export class Net {
 
   sendCapture(p: NetVec3, award: number) {
     this.send({ t: 'capture', p, award })
+  }
+
+  /** Send a chat line. The server re-filters it and relays the cleaned text (or
+   *  replies with `chatBlocked`); raw input never reaches another player. */
+  sendChat(text: string) {
+    this.send({ t: 'chat', text })
   }
 
   /** Try to claim a shared alien; the server decides first-claim-wins. */

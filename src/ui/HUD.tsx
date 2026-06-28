@@ -46,6 +46,8 @@ export function HUD({
   onEquip,
   onWarp,
   onArcade,
+  onSave,
+  onChat,
   hideTopCenter,
   hideCorners,
   botMode = false,
@@ -60,6 +62,10 @@ export function HUD({
   onEquip?: (slot: 'trail' | 'accent', id: string) => void
   onWarp?: () => void
   onArcade?: () => void
+  // Open the kid-safe Save / Restore panel (always available).
+  onSave?: () => void
+  // Toggle the typed-chat dock. The CHAT button only shows when chat is enabled.
+  onChat?: () => void
   // While the one-time join/solo gate is up it occupies the top-centre on touch;
   // suppress the top-centre HUD elements so they don't collide behind it.
   hideTopCenter?: boolean
@@ -330,6 +336,25 @@ export function HUD({
           onClick={() => { setStoreOpen((v) => !v); setRosterOpen(false) }}
         >
           STORE
+        </button>
+      )}
+      {/* SAVE / RESTORE — always available. CHAT — only when a parent has turned
+          typed chat on (hud.chatEnabled). Both sit left of STORE/PILOTS; on touch
+          they tuck into the bottom-center cluster clear of the thumb zones. */}
+      {onSave && !hud.minigame && !hud.intro && !hud.onPlatform && (
+        <button
+          style={touch ? { ...saveBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(-212%)' } : saveBtn}
+          onClick={onSave}
+        >
+          SAVE
+        </button>
+      )}
+      {onChat && hud.chatEnabled && !hud.minigame && !hud.intro && !hud.onPlatform && (
+        <button
+          style={touch ? { ...chatBtn, right: 'auto', left: '50%', bottom: 14, transform: 'translateX(112%)' } : chatBtn}
+          onClick={onChat}
+        >
+          CHAT
         </button>
       )}
       {storeOpen && !hud.minigame && (
@@ -924,6 +949,40 @@ const storeBtn: CSSProperties = {
   font: '700 11px/1 ui-monospace, Menlo, monospace',
   letterSpacing: '0.16em',
   boxShadow: '0 0 14px rgba(255,138,30,0.22)',
+  zIndex: 24,
+}
+// CHAT sits left of STORE (right:128); SAVE sits left of CHAT. Fixed offsets so
+// they never overlap whether or not the (conditional) CHAT button is present.
+const chatBtn: CSSProperties = {
+  position: 'absolute',
+  right: 242,
+  bottom: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.72)',
+  border: '1px solid rgba(39,231,255,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 14px rgba(39,231,255,0.22)',
+  zIndex: 24,
+}
+const saveBtn: CSSProperties = {
+  position: 'absolute',
+  right: 332,
+  bottom: 14,
+  pointerEvents: 'auto',
+  cursor: 'pointer',
+  padding: '7px 14px',
+  background: 'rgba(6,10,22,0.72)',
+  border: '1px solid rgba(138,92,255,0.5)',
+  borderRadius: 999,
+  color: 'rgba(223,238,255,0.92)',
+  font: '700 11px/1 ui-monospace, Menlo, monospace',
+  letterSpacing: '0.16em',
+  boxShadow: '0 0 14px rgba(138,92,255,0.22)',
   zIndex: 24,
 }
 const swatchGrid: CSSProperties = {

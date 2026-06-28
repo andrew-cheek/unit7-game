@@ -24,6 +24,7 @@ import { trackEvent } from '../lib/analytics'
 import type { GameSystem } from './System'
 import type { Sfx } from './Audio'
 import type { MatchView, PlayerProfile, Zone } from './types'
+import type { ChatMessage, FilterVerdict } from './kidShared'
 
 /** Dynamic self-identity the manager needs to publish profiles + build the roster. */
 export interface SelfIdentity {
@@ -59,6 +60,11 @@ export interface MultiplayerHost {
   awardXp(amount: number): void
   grantDailyReward(reward: { credits: number; xp: number }): void
   refreshProgression(): void
+  /** A relayed, already-filtered chat line from another pilot (or self echo). The
+   *  host decides whether to surface it per the local parental chat setting. */
+  onChat(msg: ChatMessage): void
+  /** Our outgoing line was filtered out server-side (gentle "keep it friendly" hint). */
+  onChatBlocked?(reason: FilterVerdict['reason']): void
 }
 
 export class MultiplayerManager implements GameSystem {
@@ -144,6 +150,12 @@ export class MultiplayerManager implements GameSystem {
   /** Tell the room about a local capture so others see the same ring pop. */
   broadcastCapture(pos: [number, number, number], award: number) {
     this.net?.sendCapture(pos, award)
+  }
+
+  /** Send a chat line to the room. The server re-filters + rate-limits it and
+   *  relays the cleaned text; no-ops cleanly when playing solo. */
+  sendChat(text: string) {
+    this.net?.sendChat(text)
   }
 
   /**
@@ -307,6 +319,8 @@ export class MultiplayerManager implements GameSystem {
           this.host.refreshProgression()
           this.publishProfile()
         },
+        onChat: (m) => this.host.onChat(m),
+        onChatBlocked: (r) => this.host.onChatBlocked?.(r),
       },
       { host: serverHost },
     )

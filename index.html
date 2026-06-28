@@ -9,12 +9,21 @@
     <meta name="theme-color" content="#05060b" />
     <link rel="icon" href="data:," />
     <title>Unit 7 — Sci-Fi City</title>
-    <!-- Google Analytics (hostname-aware: game vs main site) -->
+    <!-- Google Analytics (hostname-aware: game vs main site).
+         The GAME host is treated as a kids' service: analytics are hardened to
+         basic page metrics only — Google Signals (cross-device / advertising
+         identifiers) and ad personalization are OFF and ad data is redacted, so
+         no advertising/cross-site tracking of children occurs. This is the COPPA
+         posture for a public kids' build. The MAIN site keeps standard config.
+         (To go even further, set DISABLE_GAME_ANALYTICS = true to skip GA on the
+         game host entirely.) -->
     <script>
       (function () {
+          var DISABLE_GAME_ANALYTICS = false; // flip true to drop GA on the game host completely
           var GAME_ID = 'G-68V3G2JBXV';
           var MAIN_ID = 'G-RCCCLCQX95';
           var isGame = (window.location.hostname === 'unit7.humanoidrobots.com');
+          if (isGame && DISABLE_GAME_ANALYTICS) return; // no analytics at all on the kids' build
           var id = isGame ? GAME_ID : MAIN_ID;
           var s = document.createElement('script');
           s.async = true;
@@ -23,15 +32,13 @@
           window.dataLayer = window.dataLayer || [];
           window.gtag = function () { window.dataLayer.push(arguments); };
           window.gtag('js', new Date());
-          // COPPA hardening for the kids' GAME host ONLY (reversible: delete this
-          // `if` block to restore default behavior). The main marketing site
-          // (MAIN_ID) is intentionally left untouched. We keep basic, non-ad
-          // analytics (analytics_storage granted) but switch OFF everything that
-          // builds an advertising / cross-device profile of a child:
+          // COPPA posture for the kids' GAME host: keep basic non-ad page metrics
+          // but switch OFF everything that builds an advertising / cross-device
+          // profile of a child, layered for defense in depth:
           //   - Consent Mode denies ad storage, ad user-data and ad personalization.
-          //   - Google Signals + ad-personalization signals disabled at config.
+          //   - Google Signals + ad-personalization signals off; ad data redacted.
           //   - Restricted Data Processing on; IPs anonymized.
-          var cfg = { send_page_view: true };
+          // The MAIN marketing site keeps the standard config.
           if (isGame) {
               window.gtag('consent', 'default', {
                   ad_storage: 'denied',
@@ -39,13 +46,18 @@
                   ad_personalization: 'denied',
                   analytics_storage: 'granted'
               });
+              window.gtag('set', 'ads_data_redaction', true);
               window.gtag('set', 'allow_ad_personalization_signals', false);
-              cfg.allow_google_signals = false;
-              cfg.allow_ad_personalization_signals = false;
-              cfg.restricted_data_processing = true;
-              cfg.anonymize_ip = true;
+              window.gtag('config', id, {
+                  send_page_view: true,
+                  allow_google_signals: false,
+                  allow_ad_personalization_signals: false,
+                  restricted_data_processing: true,
+                  anonymize_ip: true
+              });
+          } else {
+              window.gtag('config', id, { send_page_view: true });
           }
-          window.gtag('config', id, cfg);
       })();
     </script>
     <style>

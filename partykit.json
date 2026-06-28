@@ -2,5 +2,8 @@
   "$schema": "https://www.partykit.io/schema.json",
   "name": "unit7-world",
   "main": "party/server.ts",
+  "parties": {
+    "save": "party/save.ts"
+  },
   "compatibilityDate": "2024-11-01"
 }
