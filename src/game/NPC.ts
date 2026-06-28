@@ -39,6 +39,24 @@ const NPC_RADIUS = 0.4
 const NPC_HEIGHT = 1.6
 const approach = (c: number, t: number, m: number) => (c < t ? Math.min(c + m, t) : Math.max(c - m, t))
 
+// Time-of-day crowd clustering: a fixed handful of "hubs" the wander-target pick
+// gently biases toward. By day the crowd drifts to central plazas; by night to
+// the edges/alleys/market. These only nudge the INITIAL target pick (see
+// pickWanderPoint) — the agent AI, separation, flee and retarget cadence are all
+// unchanged, so the crowd still spreads out and clips nothing. Coords are kept
+// well inside config.world.half (220) so hubs stay on the playable district.
+const DAY_HUBS: ReadonlyArray<readonly [number, number]> = [
+  [0, 0], // central plaza / Portal Plaza area
+  [70, -30],
+  [-60, 40],
+]
+const NIGHT_HUBS: ReadonlyArray<readonly [number, number]> = [
+  [150, 150], // far corners / alleys
+  [-160, -120],
+  [-140, 150], // night-market side
+  [160, -150],
+]
+
 /**
  * Crowd of wandering townspeople. Each agent seeks a roaming target, with
  * boids-style separation from its neighbors and hard building collision, so the
@@ -67,9 +85,15 @@ export class NPCManager {
   private bubbleGeo = new THREE.SphereGeometry(1.15, 16, 12)
   private bubbleMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
 
-  constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], count = config.npc.count) {
+  // Optional, back-compat: the world's day factor (0=night .. 1=day). When wired,
+  // fresh wander targets gently cluster toward day/night hubs (see pickWanderPoint).
+  // When absent, the wander pick is exactly today's uniform-random behavior.
+  private dayFactor?: () => number
+
+  constructor(scene: THREE.Scene, physics: Physics, capturables: Capturable[], count = config.npc.count, dayFactor?: () => number) {
     this.scene = scene
     this.physics = physics
+    this.dayFactor = dayFactor
     for (let i = 0; i < count; i++) {
       const agent = this.makeAgent(i)
       this.agents.push(agent)
@@ -92,6 +116,24 @@ export class NPCManager {
       if (!inside) return new THREE.Vector3(x, 0, z)
     }
     return new THREE.Vector3(randRange(-20, 20), 0, randRange(-20, 20))
+  }
+
+  /**
+   * Pick a fresh wander target. By default this is the uniform-random randomPoint
+   * (today's exact behavior). When the day-factor dep is wired AND we're not on
+   * low tier, ~57% of picks snap toward a time-of-day hub (day hubs in daylight,
+   * night hubs after dark, either set in between) plus a small jitter, so the
+   * crowd softly clusters around plazas by day and the edges/market by night.
+   * Zero allocation beyond the returned Vector3: dayFactor is read once, hub
+   * coords are const, jitter is scalar.
+   */
+  private pickWanderPoint(): THREE.Vector3 {
+    if (!this.dayFactor || config.tier.name === 'low' || Math.random() > 0.57) return this.randomPoint()
+    const day = this.dayFactor()
+    // Daylight -> day hubs, night -> night hubs, dusk/dawn -> either set uniformly.
+    const hubs = day > 0.6 ? DAY_HUBS : day < 0.4 ? NIGHT_HUBS : (Math.random() < 0.5 ? DAY_HUBS : NIGHT_HUBS)
+    const h = hubs[(Math.random() * hubs.length) | 0]
+    return new THREE.Vector3(h[0] + randRange(-18, 18), 0, h[1] + randRange(-18, 18))
   }
 
   private makeAgent(i: number): Agent {
@@ -151,7 +193,7 @@ export class NPCManager {
       pos,
       vel: new THREE.Vector3(),
       yaw: 0,
-      target: this.randomPoint(),
+      target: this.pickWanderPoint(),
       model,
       alive: true,
       respawn: 0,
@@ -315,7 +357,7 @@ export class NPCManager {
         const tx = a.target.x - a.pos.x
         const tz = a.target.z - a.pos.z
         const td = Math.hypot(tx, tz)
-        if (td < a.retargetR) a.target = this.randomPoint()
+        if (td < a.retargetR) a.target = this.pickWanderPoint()
         else {
           a.pos.x += (tx / td) * maxSp * dt
           a.pos.z += (tz / td) * maxSp * dt
@@ -342,7 +384,7 @@ export class NPCManager {
         const tx = a.target.x - a.pos.x
         const tz = a.target.z - a.pos.z
         const td = Math.hypot(tx, tz)
-        if (td < a.retargetR) a.target = this.randomPoint()
+        if (td < a.retargetR) a.target = this.pickWanderPoint()
         this.desired.set(td > 0.01 ? (tx / td) * maxSp : 0, 0, td > 0.01 ? (tz / td) * maxSp : 0)
       }
 
@@ -411,7 +453,7 @@ export class NPCManager {
     const g = this.physics.sampleGround(p.x, p.z, 40)
     a.pos.set(p.x, g ? g.y : 0, p.z)
     a.vel.set(0, 0, 0)
-    a.target = this.randomPoint()
+    a.target = this.pickWanderPoint()
     a.alive = true
     a.cap.alive = true
     a.model.group.visible = this.visible
