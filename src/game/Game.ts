@@ -790,6 +790,7 @@ export class Game {
     // Cargo run: a repeatable timed delivery job that gives traversal a purpose.
     this.systems.register(new CargoRun(this.engine.scene, {
       focus: () => this.player.position,
+      facing: () => this.player.yaw,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onDeliver: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `DELIVERED +${credits}c`, '#9bff6a') },
       banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.4 },

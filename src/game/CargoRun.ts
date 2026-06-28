@@ -6,6 +6,8 @@ import type { Zone } from './types'
 interface Deps {
   /** Player world position. */
   focus: () => THREE.Vector3
+  /** Player facing yaw (radians) so the carried crate rides in front, held. */
+  facing: () => number
   /** Sampled ground height at an XZ so beacons sit on the floor. */
   groundY: (x: number, z: number) => number
   /** Called on a successful delivery: award credits + XP and pop a label at the dropoff. */
@@ -209,9 +211,12 @@ export class CargoRun implements GameSystem {
     }
 
     if (this.state === 'CARRYING') {
-      // Crate follows the player, hovering ~2.5 above with a bob + spin.
-      this.carried.position.set(f.x, f.y + 2.5 + Math.sin(this.t * 2.2) * 0.15, f.z)
-      this.carried.rotation.y += dt * 1.6
+      // Carry it in the robot's arms - just in front of the chest - instead of
+      // floating it over the head (which read as "a cube stuck to his head").
+      const yaw = this.deps.facing()
+      const fwdX = Math.sin(yaw), fwdZ = Math.cos(yaw)
+      this.carried.position.set(f.x + fwdX * 0.85, f.y + 1.15 + Math.sin(this.t * 2.2) * 0.08, f.z + fwdZ * 0.85)
+      this.carried.rotation.y = yaw // face the way you do, like it's held
 
       this.timeLeft = Math.max(0, this.timeLeft - dt)
       // Urgency: as time runs low the gold column shifts hot and pulses faster.
