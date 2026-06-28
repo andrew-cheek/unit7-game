@@ -172,15 +172,51 @@ export class World {
   private elevatorClimbers: { mesh: THREE.Mesh; t: number; speed: number }[] = []
   private elevatorRing?: THREE.Object3D
   private hangarBots: { mesh: THREE.Mesh; baseY: number; phase: number }[] = []
+  // The 3 repair-bot eyes, collapsed from 3 child meshes into one InstancedMesh
+  // (3->1 draw). Each eye rides its parent bot, which bobs AND spins every frame,
+  // so the instance matrices are rebuilt in update() as bot.matrix * eyeLocal —
+  // identical world transform to the old eye parented under the bot.
+  private hangarEyeInst: THREE.InstancedMesh | null = null
+  private hangarEyeLocal = new THREE.Matrix4().compose(
+    new THREE.Vector3(0, 0, 0.6), new THREE.Quaternion(), new THREE.Vector3(0.5, 0.2, 0.2),
+  )
+  private hangarEyeMat = new THREE.Matrix4() // scratch reused per frame
   // Hangar ambience: a pulsing energy ring on the pad + rising steam vents.
   private hangarRingMat: THREE.MeshStandardMaterial | null = null
   private hangarSteam: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number; baseY: number }[] = []
   private spaceportBeacon?: THREE.Object3D
-  private spaceportWarn: THREE.MeshStandardMaterial[] = []
+  // The 4 spaceport warning posts collapse from 4 static meshes (each its own
+  // material) into one InstancedMesh sharing a single material. Their staggered
+  // emissive pulse is preserved per-instance via instanceColor (onBeforeCompile
+  // multiplies totalEmissiveRadiance by vColor), so each post still blinks on its
+  // own phase. Matrices are baked once (static); only the colors update per frame.
+  private spaceportWarnInst: THREE.InstancedMesh | null = null
+  private spaceportWarnCol = new THREE.Color() // scratch reused per frame
   private launchShip?: { mesh: THREE.Mesh; state: 'parked' | 'rising'; timer: number; vy: number; baseY: number }
   private trainSamples: THREE.Vector3[] = []
-  private trainCars: THREE.Object3D[] = []
   private trainT = 0
+  // Hover-train cars, now drawn as two InstancedMeshes (bodies + window strips)
+  // instead of 6 Groups (~18 meshes). Per-car world matrices are written each
+  // frame in update() from the shared rail samples, preserving each car's exact
+  // position AND orientation (lookAt the point two samples ahead, as before).
+  private trainCarCount = 6
+  private trainBodyInst: THREE.InstancedMesh | null = null
+  private trainWinInst: THREE.InstancedMesh | null = null
+  // Window strip's car-space offset, baked once (matches the old w.position.y).
+  private trainWinLocal = new THREE.Matrix4().makeTranslation(0, 0.4, 0)
+  // Scratch reused every frame for the train's per-instance matrices (no heap
+  // allocation in the update loop). carMat = a car's world transform.
+  private trainCarMat = new THREE.Matrix4()
+  private trainWinMat = new THREE.Matrix4()
+  private trainQuat = new THREE.Quaternion()
+  private trainScale = new THREE.Vector3(1, 1, 1)
+  // Up vector + scratch used to build each car's orientation matrix the same way
+  // Object3D.lookAt does (target ahead on the rail), so visuals are unchanged.
+  private trainUp = new THREE.Vector3(0, 1, 0)
+  private trainLookMat = new THREE.Matrix4()
+  // New InstancedMeshes created in World (own a GPU instance buffer beyond their
+  // shared geo/mat); tracked here and disposed in dispose().
+  private instancedMeshes: THREE.InstancedMesh[] = []
   private tickers: { tex: THREE.CanvasTexture; speed: number; redraw: (lines: string[]) => void }[] = []
   private breaking: string[] = [] // runtime "BREAKING" headlines, newest first
   // Rooftop aircraft-warning beacons. Were 100 individual blinking Meshes (one
@@ -1280,8 +1316,15 @@ export class World {
     }
     this.group.add(g)
 
-    // Bobbing repair bots near the pad (world space, animated in update).
+    // Bobbing repair bots near the pad (world space, animated in update). The
+    // three glowing eyes collapse into one InstancedMesh (3->1 draw); their world
+    // matrices are rebuilt each frame from each bot's matrix (the bots bob+spin).
     const botMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3140, metalness: 0.7, roughness: 0.4 }))
+    const eyeInst = new THREE.InstancedMesh(this.boxGeo, this.glow(config.palette.lime, 3), 3)
+    eyeInst.frustumCulled = false
+    this.hangarEyeInst = eyeInst
+    this.instancedMeshes.push(eyeInst)
+    this.group.add(eyeInst)
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2
       const bx = cx + Math.cos(a) * 16
@@ -1291,8 +1334,6 @@ export class World {
       const baseY = 3 + i
       bot.position.set(bx, baseY, bz)
       this.group.add(bot)
-      const eye = new THREE.Mesh(this.boxGeo, this.glow(config.palette.lime, 3))
-      eye.scale.set(0.5, 0.2, 0.2); eye.position.set(0, 0, 0.6); bot.add(eye)
       this.hangarBots.push({ mesh: bot, baseY, phase: a })
     }
   }
@@ -1372,14 +1413,33 @@ export class World {
       g.add(con)
     }
 
-    // Pulsing warning lights around the pads.
-    for (const [wx, wz] of [[2, 18], [-14, 10], [30, 2], [-12, -18]] as Array<[number, number]>) {
-      const mat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: config.palette.orange, emissiveIntensity: 2 }))
-      const post = new THREE.Mesh(this.boxGeo, mat)
-      post.scale.set(0.5, 3, 0.5); post.position.set(wx, 1.5, wz)
-      g.add(post)
-      this.spaceportWarn.push(mat)
+    // Pulsing warning lights around the pads. Four identical static posts -> one
+    // InstancedMesh (4->1 draw). Matrices are baked once here (the posts never
+    // move). Base emissive is white@1 and the per-post orange tint + staggered
+    // pulse brightness ride instanceColor, so totalEmissiveRadiance *= vColor
+    // reproduces each post's original emissive(orange)*intensity exactly.
+    const warnSpots: Array<[number, number]> = [[2, 18], [-14, 10], [30, 2], [-12, -18]]
+    const warnMat = this.own(new THREE.MeshStandardMaterial({ color: 0x05060b, emissive: 0xffffff, emissiveIntensity: 1 }))
+    warnMat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n#ifdef USE_INSTANCING_COLOR\n totalEmissiveRadiance *= vColor;\n#endif',
+      )
     }
+    const warnInst = new THREE.InstancedMesh(this.boxGeo, warnMat, warnSpots.length)
+    warnInst.frustumCulled = false
+    for (let i = 0; i < warnSpots.length; i++) {
+      const [wx, wz] = warnSpots[i]
+      this.scratchMat.compose(this.scratchPos.set(wx, 1.5, wz), ROT_NONE, this.scratchScale.set(0.5, 3, 0.5))
+      warnInst.setMatrixAt(i, this.scratchMat)
+      // Initialize each instance color so it shows correctly before the first update.
+      warnInst.setColorAt(i, this.spaceportWarnCol.setHex(config.palette.orange).multiplyScalar(1.4))
+    }
+    warnInst.instanceMatrix.needsUpdate = true
+    if (warnInst.instanceColor) warnInst.instanceColor.needsUpdate = true
+    g.add(warnInst)
+    this.spaceportWarnInst = warnInst
+    this.instancedMeshes.push(warnInst)
 
     // One ship that periodically lifts off from the first pad.
     const ship = new THREE.Group()
@@ -1424,18 +1484,24 @@ export class World {
       this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })),
     )
     this.group.add(rail)
-    // Train cars: sleek body + bright window strip.
+    // Train cars: sleek body + bright window strip. Identical geometry/materials
+    // as before, but collapsed from 6 Groups (~18 meshes) into two InstancedMeshes
+    // — one for the car bodies, one for the window strips — a pure draw-call win.
+    // Per-car world matrices are written each frame in update(); the window strip
+    // rides each car via a baked car-space offset (trainWinLocal).
     const carGeo = this.ownG(new THREE.BoxGeometry(2.6, 2.0, 7))
     const winGeo = this.ownG(new THREE.BoxGeometry(2.7, 0.7, 6))
     const carMat = this.own(new THREE.MeshBasicMaterial({ color: 0x16345a, fog: false }))
     const winMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe6ff, fog: false }))
-    for (let i = 0; i < 6; i++) {
-      const car = new THREE.Group()
-      car.add(new THREE.Mesh(carGeo, carMat))
-      const w = new THREE.Mesh(winGeo, winMat); w.position.y = 0.4; car.add(w)
-      this.group.add(car)
-      this.trainCars.push(car)
-    }
+    const n = this.trainCarCount
+    this.trainBodyInst = new THREE.InstancedMesh(carGeo, carMat, n)
+    this.trainWinInst = new THREE.InstancedMesh(winGeo, winMat, n)
+    // The convoy spans the whole rail loop and instances move independently of the
+    // shared bounding box, so a frustum test would cull all-or-nothing; skip it.
+    this.trainBodyInst.frustumCulled = false
+    this.trainWinInst.frustumCulled = false
+    this.instancedMeshes.push(this.trainBodyInst, this.trainWinInst)
+    this.group.add(this.trainBodyInst, this.trainWinInst)
   }
 
   /**
@@ -2047,11 +2113,20 @@ export class World {
     }
     for (const d of this.dishes) d.rotation.y += dt * 0.5
 
-    // Mech-hangar repair bots bob + slowly spin.
-    for (const b of this.hangarBots) {
+    // Mech-hangar repair bots bob + slowly spin. Each bot's eye instance tracks
+    // its parent: eye world = bot.matrix * eyeLocal (the bots sit directly under
+    // world.group, so bot.matrix is its world transform).
+    for (let i = 0; i < this.hangarBots.length; i++) {
+      const b = this.hangarBots[i]
       b.mesh.position.y = b.baseY + Math.sin(this.time * 1.6 + b.phase) * 0.5
       b.mesh.rotation.y += dt * 0.8
+      if (this.hangarEyeInst) {
+        b.mesh.updateMatrix() // recompose from the position/rotation just set
+        this.hangarEyeMat.multiplyMatrices(b.mesh.matrix, this.hangarEyeLocal)
+        this.hangarEyeInst.setMatrixAt(i, this.hangarEyeMat)
+      }
     }
+    if (this.hangarEyeInst) this.hangarEyeInst.instanceMatrix.needsUpdate = true
     // Hangar energy ring pulse + steam vents rising and fading on a loop.
     if (this.hangarRingMat) this.hangarRingMat.emissiveIntensity = 1.8 + Math.sin(this.time * 2.5) * 1.2
     for (const s of this.hangarSteam) {
@@ -2063,8 +2138,16 @@ export class World {
 
     // Spaceport: sweeping beacon, pulsing warning lights, periodic ship launch.
     if (this.spaceportBeacon) this.spaceportBeacon.rotation.y += dt * 1.6
-    for (let i = 0; i < this.spaceportWarn.length; i++) {
-      this.spaceportWarn[i].emissiveIntensity = 1.4 + Math.sin(this.time * 4 + i * 1.7) * 1.2
+    // Warning posts: drive each instance's emissive via instanceColor = orange *
+    // pulse. Same per-post staggered intensity (i*1.7 phase) as the old per-mesh
+    // emissiveIntensity; the shader multiplies totalEmissiveRadiance by vColor.
+    if (this.spaceportWarnInst) {
+      const inst = this.spaceportWarnInst
+      for (let i = 0; i < inst.count; i++) {
+        const intensity = 1.4 + Math.sin(this.time * 4 + i * 1.7) * 1.2
+        inst.setColorAt(i, this.spaceportWarnCol.setHex(config.palette.orange).multiplyScalar(intensity))
+      }
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true
     }
     if (this.launchShip) {
       const s = this.launchShip
@@ -2090,18 +2173,30 @@ export class World {
       this.routeDashes[i].opacity = 0.32 + Math.max(0, Math.cos(phase * Math.PI)) * 0.6
     }
 
-    // Hover-train: cars follow the rail in a tight convoy.
-    if (this.trainSamples.length && this.trainCars.length) {
+    // Hover-train: cars follow the rail in a tight convoy. Bodies and window
+    // strips are instanced; each car's world matrix is rebuilt here from the same
+    // rail samples and orientation (lookAt the point two samples ahead) as before.
+    if (this.trainSamples.length && this.trainBodyInst && this.trainWinInst) {
       const S = this.trainSamples.length
       this.trainT = (this.trainT + dt * 0.014) % 1
-      for (let i = 0; i < this.trainCars.length; i++) {
+      for (let i = 0; i < this.trainCarCount; i++) {
         const t = (this.trainT - i * 0.012 + 1) % 1
         const idx = Math.floor(t * S) % S
         const p = this.trainSamples[idx]
         const ahead = this.trainSamples[(idx + 2) % S]
-        this.trainCars[i].position.copy(p)
-        this.trainCars[i].lookAt(ahead)
+        // Match Object3D.lookAt: build a look matrix (eye=p, target=ahead) and
+        // pull its rotation, then compose the full transform at p. Identical to
+        // the old position.copy(p) + lookAt(ahead) on a per-car Group.
+        this.trainLookMat.lookAt(p, ahead, this.trainUp)
+        this.trainQuat.setFromRotationMatrix(this.trainLookMat)
+        this.trainCarMat.compose(p, this.trainQuat, this.trainScale)
+        this.trainBodyInst.setMatrixAt(i, this.trainCarMat)
+        // Window strip = car transform * its baked car-space offset (y +0.4).
+        this.trainWinMat.multiplyMatrices(this.trainCarMat, this.trainWinLocal)
+        this.trainWinInst.setMatrixAt(i, this.trainWinMat)
       }
+      this.trainBodyInst.instanceMatrix.needsUpdate = true
+      this.trainWinInst.instanceMatrix.needsUpdate = true
     }
 
     // Space elevator: climbers ride the tether, the orbital ring slowly turns.
@@ -2119,6 +2214,14 @@ export class World {
   }
 
   dispose() {
+    // InstancedMeshes own a GPU instance buffer beyond their shared geo/mat (the
+    // shared geos/mats are freed via ownedGeos/ownedMats / boxGeo below).
+    for (const im of this.instancedMeshes) im.dispose()
+    this.instancedMeshes = []
+    this.trainBodyInst = null
+    this.trainWinInst = null
+    this.hangarEyeInst = null
+    this.spaceportWarnInst = null
     this.boxGeo.dispose()
     this.sky.dispose()
     this.ownedMats.forEach((m) => m.dispose())
