@@ -45,6 +45,11 @@ import { CityLife } from './CityLife'
 import { GrindRails } from './GrindRails'
 import { MeteorShower } from './MeteorShower'
 import { DustDevils } from './DustDevils'
+import { OrbitalBodies } from './OrbitalBodies'
+import { OrbitalSilhouettes } from './OrbitalSilhouettes'
+import { ThermalVents } from './ThermalVents'
+import { CraterAmbience } from './CraterAmbience'
+import { BiolumiPods } from './BiolumiPods'
 import { Aurora } from './Aurora'
 import { SkyLeviathans } from './SkyLeviathans'
 import { CompanionDrone } from './CompanionDrone'
@@ -523,6 +528,17 @@ export class Game {
     this.dustDevils = this.systems.register(new DustDevils(this.engine.scene, {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
     }))
+    // Off-world spectacle (Moon/Mars only; each hides on Earth + the other zone).
+    const owGroundY = (x: number, z: number) => this.physics.sampleGround(x, z, 120)?.y ?? 0
+    // Celestial bodies in the sky (Moon: Earth + sun; Mars: twin moons + sun) and
+    // distant orbital stations on the horizon.
+    this.systems.register(new OrbitalBodies(this.engine.scene, { focus: () => this.focus, zone: () => this.zone }))
+    this.systems.register(new OrbitalSilhouettes(this.engine.scene, { focus: () => this.focus, zone: () => this.zone }))
+    // Mars ground life + atmosphere: steam geysers and bioluminescent pods.
+    this.systems.register(new ThermalVents(this.engine.scene, { zone: () => this.zone, groundY: owGroundY }))
+    this.systems.register(new BiolumiPods(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY }))
+    // Moon stark crater-rim + boulder-field landmarks.
+    this.systems.register(new CraterAmbience(this.engine.scene, { zone: () => this.zone, groundY: owGroundY }))
     // Night aurora over the city: shimmering curtains that fade in after dusk and
     // out at dawn. Earth-only ambient set dressing.
     this.systems.register(new Aurora(this.engine.scene, {
