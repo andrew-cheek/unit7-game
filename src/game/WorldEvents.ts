@@ -33,6 +33,8 @@ export class WorldEvents {
   private zone: Zone = 'earth'
   private focus = new THREE.Vector3()
   private timer: number
+  /** Shared additive material for every drone swarm; created lazily, reused, freed in dispose(). */
+  private droneSwarmMat?: THREE.MeshBasicMaterial
   /** Optional hook so the HUD can flash a tiny banner when an event fires. */
   onEvent?: (label: string) => void
 
@@ -145,7 +147,8 @@ export class WorldEvents {
   private makeDroneSwarm(): Effect {
     const group = new THREE.Group()
     const n = Math.round(10 * this.fx) + 4
-    const mat = new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    // Shared material across all swarms (created once); only the geometry is per-swarm.
+    const mat = (this.droneSwarmMat ??= new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     const geo = new THREE.SphereGeometry(0.45, 8, 6)
     const nodes: { m: THREE.Mesh; ox: number; oy: number; oz: number; ph: number }[] = []
     for (let i = 0; i < n; i++) {
@@ -174,7 +177,8 @@ export class WorldEvents {
         }
         return t >= dur
       },
-      dispose: () => disposeGroup(group),
+      // Dispose only the per-swarm geometry; the shared material is freed in the system dispose().
+      dispose: () => geo.dispose(),
     }
   }
 
@@ -310,6 +314,9 @@ export class WorldEvents {
       e.dispose()
     }
     this.active = []
+    // Free the shared drone-swarm material once, after all effects are gone.
+    this.droneSwarmMat?.dispose()
+    this.droneSwarmMat = undefined
   }
 }
 

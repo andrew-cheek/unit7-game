@@ -546,6 +546,8 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
   streak.visible = false
   group.add(streak)
   const streakDir = new THREE.Vector3()
+  // Scratch reused for the per-launch lookAt target, so we don't clone a Vector3 each launch.
+  const streakLook = new THREE.Vector3()
   let nextStreak = 3 + Math.random() * 5
 
   let t = 0
@@ -578,7 +580,7 @@ export function createSky(top = 0x05070f, horizon = 0x150a28, starCount = 1500):
           streak.position.set((Math.random() - 0.5) * 800, 250 + Math.random() * 200, -300 - Math.random() * 350)
           const a = Math.random() * Math.PI * 2
           streakDir.set(Math.cos(a), -0.2 - Math.random() * 0.25, Math.sin(a)).normalize()
-          streak.lookAt(streak.position.clone().add(streakDir))
+          streak.lookAt(streakLook.copy(streak.position).add(streakDir))
           streakMat.opacity = 0.9
           streak.visible = true
         }

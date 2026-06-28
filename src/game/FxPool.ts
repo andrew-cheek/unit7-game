@@ -18,6 +18,7 @@ interface Puff {
   vy: number
   baseOpacity: number
   growth: number
+  baseScale: number // starting radius, captured at spawn so growth is computed absolutely from life fraction
 }
 
 export interface PuffOptions {
@@ -49,7 +50,7 @@ export class FxPool implements GameSystem {
     const mesh = new THREE.Mesh(this.geo, mat)
     mesh.visible = false
     this.scene.add(mesh)
-    const p: Puff = { mesh, mat, active: false, t: 0, ttl: 1, vy: 0, baseOpacity: 0.5, growth: 0.9 }
+    const p: Puff = { mesh, mat, active: false, t: 0, ttl: 1, vy: 0, baseOpacity: 0.5, growth: 0.9, baseScale: 1 }
     this.pool.push(p)
     return p
   }
@@ -72,13 +73,18 @@ export class FxPool implements GameSystem {
       p.ttl = ttl * (0.8 + Math.random() * 0.5)
       p.vy = rise * (0.7 + Math.random() * 0.7)
       p.baseOpacity = opacity
-      p.growth = 0.7 + Math.random() * 0.5
+      // Total fractional growth over the whole lifetime. Derived from the old per-frame
+      // rate (0.7..1.2) compounded across ttl (exp(rate*ttl) - 1) so the end-state size
+      // matches the previous frame-rate-dependent behaviour, but now applied absolutely.
+      const rate = 0.7 + Math.random() * 0.5
+      p.growth = Math.expm1(rate * p.ttl)
       p.mat.color.setHex(color)
       p.mat.opacity = opacity
       p.mat.blending = blending
       p.mat.needsUpdate = true
       p.mesh.position.set(x + (Math.random() * 2 - 1) * spread, y + Math.random() * 1.5, z + (Math.random() * 2 - 1) * spread)
-      p.mesh.scale.setScalar(scale * (0.7 + Math.random() * 0.8))
+      p.baseScale = scale * (0.7 + Math.random() * 0.8)
+      p.mesh.scale.setScalar(p.baseScale)
       p.mesh.visible = true
     }
   }
@@ -88,7 +94,10 @@ export class FxPool implements GameSystem {
       if (!p.active) continue
       p.t += dt
       p.mesh.position.y += p.vy * dt
-      p.mesh.scale.multiplyScalar(1 + dt * p.growth)
+      // Grow deterministically from the life fraction (set absolutely, not compounded),
+      // so a puff reaches the same size at any frame rate / on any device.
+      const frac = Math.min(1, p.t / p.ttl)
+      p.mesh.scale.setScalar(p.baseScale * (1 + frac * p.growth))
       p.mat.opacity = p.baseOpacity * Math.max(0, 1 - p.t / p.ttl)
       if (p.t >= p.ttl) {
         p.active = false

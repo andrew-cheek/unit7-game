@@ -244,7 +244,10 @@ export class Net {
         this.handlers.onLeave(msg.id as string)
         break
       case 'state':
-        this.handlers.onState(msg.id as string, msg as unknown as NetState)
+        // Validate the wire shape before it reaches interpolation: a malformed
+        // p[] or non-finite field would otherwise feed NaN into the lerp and
+        // permanently corrupt a remote avatar's smoothed position.
+        if (isValidState(msg)) this.handlers.onState(msg.id as string, msg as unknown as NetState)
         break
       case 'capture':
         this.handlers.onCapture(msg.id as string, msg.p as NetVec3, (msg.award as number) ?? 0)
@@ -322,4 +325,15 @@ export class Net {
       this.ws = null
     }
   }
+}
+
+/** Three finite numbers. */
+function isVec3(v: unknown): v is NetVec3 {
+  return Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === 'number' && Number.isFinite(n))
+}
+
+/** Shape-check a relayed 'state' message so a malformed/partial payload can't
+ *  feed NaN (or a missing id) into the remote-player interpolation. */
+function isValidState(msg: Record<string, unknown>): boolean {
+  return typeof msg.id === 'string' && isVec3(msg.p) && typeof msg.y === 'number' && Number.isFinite(msg.y)
 }

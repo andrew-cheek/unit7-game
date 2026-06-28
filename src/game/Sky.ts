@@ -307,7 +307,11 @@ export class Sky {
     this.extraGeos.forEach((g) => g.dispose())
     this.group.traverse((o) => {
       const m = o as THREE.Mesh
-      if (m.geometry && (m.material as THREE.Material)?.transparent) m.geometry.dispose()
+      // Dispose every traversed geometry, not just transparent-material meshes:
+      // opaque parts (e.g. the highway deck/rails) were leaking their geometry.
+      // BufferGeometry.dispose() is idempotent, so geometries already freed via
+      // extraGeos above are safely re-disposed here without harm.
+      if (m.geometry) m.geometry.dispose()
     })
     this.scene.remove(this.group)
   }

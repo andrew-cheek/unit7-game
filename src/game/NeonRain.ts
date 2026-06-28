@@ -37,7 +37,8 @@ export class NeonRain implements GameSystem {
 
   constructor(scene: THREE.Scene, private deps: Deps) {
     this.low = config.tier.name === 'low'
-    this.n = this.low ? 110 : 260
+    // Medium (iPad-class) sits ~65% of high, matching the tier's reduced fxScale.
+    this.n = this.low ? 110 : (config.tier.name === 'medium' ? 170 : 260)
     this.timer = 20 + Math.random() * 25 // initial dry spell
 
     this.pos = new Float32Array(this.n * 3)

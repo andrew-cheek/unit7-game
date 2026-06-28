@@ -43,7 +43,9 @@ export class StepRipples implements GameSystem {
   private wasGrounded = true
 
   constructor(scene: THREE.Scene, private deps: Deps) {
-    const n = config.tier.name === 'low' ? 8 : 14
+    // Pool size scales with tier: medium gets a trimmed count between low and high.
+    const tier = config.tier.name
+    const n = tier === 'low' ? 8 : tier === 'medium' ? 10 : 14
     this.ringGeo.rotateX(-Math.PI / 2) // bake flat-on-the-ground orientation
     for (let i = 0; i < n; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: 0x49e0ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })

@@ -573,6 +573,10 @@ export class CityLife implements GameSystem {
 
   dispose() {
     this.scene.remove(this.group)
+    // InstancedMesh owns a GPU instance buffer beyond its shared geometry/material,
+    // so dispose the meshes themselves before dropping the refs to free it.
+    this.pods?.dispose()
+    this.cars?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
     this.geos = []

@@ -51,7 +51,10 @@ export class RemotePlayers {
   }
 
   private add(id: string, name: string) {
-    if (this.players.has(id)) return
+    // On a rapid same-id reconnect, tear down the prior avatar first so its
+    // geometry/material/textures are disposed once and we don't leak (and so the
+    // fresh model/tag replace the stale ones cleanly).
+    if (this.players.has(id)) this.remove(id)
     const trim = TRIMS[hashId(id) % TRIMS.length]
     const model = createRobot({ trim, accent: trim })
     const group = new THREE.Group()
@@ -79,13 +82,15 @@ export class RemotePlayers {
   }
 
   remove(id: string) {
+    // Idempotent: a second call (e.g. double leave/dispose) is a no-op, so the
+    // model/material/texture are never disposed twice.
     const r = this.players.get(id)
     if (!r) return
+    this.players.delete(id) // drop the entry first so re-entrancy can't re-dispose
     this.scene.remove(r.group)
     r.model.dispose()
     r.tagMat.dispose()
     r.tagTex.dispose()
-    this.players.delete(id)
   }
 
   /** Add (if new) and snap a player to a roster snapshot, with no slide-in. */

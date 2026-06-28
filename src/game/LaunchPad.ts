@@ -603,7 +603,12 @@ export class LaunchPad {
     ctx.beginPath(); oct.forEach(([x, y], i) => { const px = cx + x, py = cy + y; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) }); ctx.closePath(); ctx.stroke()
     ctx.shadowBlur = 18; ctx.lineWidth = 12
     const hw = 46
-    ctx.beginPath(); ctx.roundRect(cx - hw, cy - hw + 8, hw * 2, hw * 2, 16); ctx.stroke()
+    // roundRect is unsupported on older browsers; fall back to a square rect so the
+    // hangar logo never renders blank.
+    ctx.beginPath()
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(cx - hw, cy - hw + 8, hw * 2, hw * 2, 16)
+    else ctx.rect(cx - hw, cy - hw + 8, hw * 2, hw * 2)
+    ctx.stroke()
     ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(cx, cy - hw + 8); ctx.lineTo(cx, cy - hw - 18); ctx.stroke()
     ctx.beginPath(); ctx.arc(cx, cy - hw - 24, 8, 0, Math.PI * 2); ctx.fill()
     ctx.beginPath(); ctx.arc(cx - 20, cy + 12, 13, 0, Math.PI * 2); ctx.fill()
@@ -1175,7 +1180,8 @@ export class LaunchPad {
     ctx.fillStyle = '#070b14'; ctx.fillRect(0, 0, 1024, 384)
     ctx.fillStyle = 'rgba(39,231,255,0.05)'; for (let y = 0; y < 384; y += 6) ctx.fillRect(0, y, 1024, 2)
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 30; ctx.fillStyle = '#ff2bd0'
+    // Tighter glow keeps 'DROP ZONE' legible on small screens (was 30; same neon color).
+    ctx.shadowColor = '#ff2bd0'; ctx.shadowBlur = 16; ctx.fillStyle = '#ff2bd0'
     ctx.font = '900 150px ui-monospace, Menlo, monospace'; ctx.fillText('DROP ZONE', 512, 150)
     ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 18; ctx.fillStyle = '#bfefff'
     ctx.font = '800 62px ui-monospace, Menlo, monospace'; ctx.fillText('STEP OFF TO SKYDIVE  ▼', 512, 285)

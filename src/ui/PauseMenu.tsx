@@ -96,7 +96,8 @@ const muteBtn: CSSProperties = {
 }
 const grid: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'auto 1fr',
+  // Give the value column a floor so long descriptions don't wrap repeatedly on narrow viewports
+  gridTemplateColumns: 'auto minmax(120px, 1fr)',
   columnGap: 16,
   rowGap: 7,
   font: '600 12px/1.4 ui-monospace, Menlo, monospace',
