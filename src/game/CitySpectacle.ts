@@ -27,7 +27,7 @@ export class CitySpectacle {
   constructor(scene: THREE.Scene) {
     const low = config.tier.name === 'low'
     this.buildHologram()
-    this.buildSearchlights(low ? 3 : 6)
+    this.buildSearchlights(low ? 2 : 6)
     this.buildBlimps(low ? 1 : 2)
     scene.add(this.group)
   }
@@ -68,8 +68,11 @@ export class CitySpectacle {
 
   /** Tall sweeping searchlight beams anchored around the city edge. */
   private buildSearchlights(n: number) {
-    const beamMat = this.own(new THREE.MeshBasicMaterial({ color: 0xcdeaff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
-    const beamGeo = this.ownG(new THREE.ConeGeometry(6, 150, 16, 1, true))
+    // LOW tier: halve the cone's radial segments and render single-sided to cut
+    // overdraw/fill-rate on mobile. High/medium keep 16-seg DoubleSide beams.
+    const low = config.tier.name === 'low'
+    const beamMat = this.own(new THREE.MeshBasicMaterial({ color: 0xcdeaff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: low ? THREE.FrontSide : THREE.DoubleSide, fog: false }))
+    const beamGeo = this.ownG(new THREE.ConeGeometry(6, 150, low ? 8 : 16, 1, true))
     const baseMat = this.own(new THREE.MeshStandardMaterial({ color: 0x161d2e, metalness: 0.7, roughness: 0.4, emissive: 0x0c2030, emissiveIntensity: 0.5 }))
     const baseGeo = this.ownG(new THREE.CylinderGeometry(1.6, 2.2, 4, 10))
     for (let i = 0; i < n; i++) {

@@ -54,7 +54,10 @@ export class SpeedRibbons implements GameSystem {
     this.segN = tier === 'low' ? 16 : tier === 'medium' ? 20 : 24
 
     const head = new THREE.Color(0x49e0ff)
-    for (const side of [-1, 1]) {
+    // LOW tier: stream a single shoulder ribbon (left only) to halve the
+    // additive-overdraw cost during fast movement. High/medium keep both.
+    const sides = tier === 'low' ? [-1] : [-1, 1]
+    for (const side of sides) {
       // A triangle strip: segN cross-sections, 2 verts each -> 2*segN verts.
       const verts = this.segN * 2
       const geo = this.ownG(new THREE.BufferGeometry())
