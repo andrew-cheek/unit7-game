@@ -31,7 +31,7 @@ export const config = {
   },
 
   world: {
-    half: 220, // half-extent of the playable district (meters)
+    half: 220, // half-extent of the playable district (meters) - overridden per-tier in Game.ts
     block: 56, // city block pitch
     roadWidth: 16,
     sidewalk: 3,
