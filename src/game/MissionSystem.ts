@@ -52,6 +52,12 @@ export class MissionSystem {
     this.minigamePlayed = true
   }
 
+  /** Debug/test only: jump the objective chain to a given step (clamped). Used by
+   *  the gated automation harness so an agent can set up a specific objective. */
+  debugSetIndex(i: number) {
+    this.idx = Math.max(0, Math.min(Math.floor(Number(i) || 0), config.missions.length))
+  }
+
   /** Snapshot of the chain position for persistence (see storage.ts). */
   serialize(): MissionProgress {
     return { idx: this.idx, minigamePlayed: this.minigamePlayed }

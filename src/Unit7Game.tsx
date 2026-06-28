@@ -43,9 +43,21 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
   // Shared-world multiplayer: show the join/username prompt once, unless disabled.
   const [mpJoined, setMpJoined] = useState(false)
   const multiplayer = config?.multiplayer !== false
-  // Touch UI shows on touch-capable devices; `?touch` forces it for testing on desktop.
+  // Touch UI shows on touch-capable devices; `?touch` (or `?forceTouch`) forces it
+  // for testing the mobile path on a desktop runner.
   const touch = useMemo(
-    () => isTouchDevice() || (typeof location !== 'undefined' && location.search.includes('touch')),
+    () => isTouchDevice() || (typeof location !== 'undefined' && /[?&](touch|forceTouch)\b/.test(location.search)),
+    [],
+  )
+  // Browser-automation entry: `?debug&bot` auto-dismisses the join panel so an
+  // agent lands straight in free roam without a click. Requires the same `?debug`
+  // gate as the rest of the test harness (or a DEV build), so a stray `?bot` can
+  // never change a real player's flow.
+  const botMode = useMemo(
+    () =>
+      typeof location !== 'undefined' &&
+      /[?&]bot\b/.test(location.search) &&
+      (import.meta.env.DEV || /[?&]debug\b/.test(location.search)),
     [],
   )
   // Portrait phones squeeze the landscape-first HUD into a thin strip; nudge a rotate.
@@ -126,6 +138,17 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
       wasPanelRef.current = false
     }
   }, [joinPanelVisible])
+
+  // Bot mode: once the world is up, auto-pick "solo" (dismissing the join panel)
+  // and put the engine in synthetic-input mode so automation can drive without a
+  // pointer-lock gesture. Gated to `?bot`, so a normal player flow is untouched.
+  useEffect(() => {
+    if (!botMode || !hud || mpJoined) return
+    gameRef.current?.startSolo()
+    setMpJoined(true)
+    const nav = (window as unknown as { __unit7nav?: { setInputMode(m: string): void } }).__unit7nav
+    nav?.setInputMode('synthetic')
+  }, [botMode, hud, mpJoined])
 
   // J = warp to the arcade entrance (the GAMES shortcut). Ignored while typing in
   // a text field; the engine-side guard handles zone/drop/minigame eligibility.
@@ -379,8 +402,8 @@ function JoinWorld({ onJoin, onSolo, touch }: { onJoin: (name: string) => void; 
       {mode === 'choice' ? (
         <>
           <div style={welcomeSub}>Choose how to play.</div>
-          <button style={welcomeBtnPrimary} onClick={onSolo}>ROAM &amp; PLAY SOLO ▸</button>
-          <button style={welcomeBtnGhost} onClick={() => setMode('name')}>MULTIPLAYER ▸</button>
+          <button data-testid="play-solo" style={welcomeBtnPrimary} onClick={onSolo}>ROAM &amp; PLAY SOLO ▸</button>
+          <button data-testid="play-multiplayer" style={welcomeBtnGhost} onClick={() => setMode('name')}>MULTIPLAYER ▸</button>
         </>
       ) : (
         <>
@@ -394,7 +417,7 @@ function JoinWorld({ onJoin, onSolo, touch }: { onJoin: (name: string) => void; 
             onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
             style={welcomeInput}
           />
-          <button style={welcomeBtnPrimary} onClick={submit} disabled={!name.trim()}>JOIN WORLD ▸</button>
+          <button data-testid="join-world" style={welcomeBtnPrimary} onClick={submit} disabled={!name.trim()}>JOIN WORLD ▸</button>
           <button style={welcomeBtnGhost} onClick={() => setMode('choice')}>◂ BACK</button>
         </>
       )}
@@ -434,7 +457,7 @@ function IntroOverlay({ onSkip }: { onSkip: () => void }) {
         <div style={{ color: '#27e7ff', textShadow: '0 0 16px #27e7ff' }}>UNIT 7</div>
         <div style={{ fontSize: 12, letterSpacing: '0.35em', color: 'rgba(223,238,255,0.6)', marginTop: 8 }}>ASSEMBLY SEQUENCE</div>
       </div>
-      <button style={skipBtn} onClick={onSkip}>SKIP ▸</button>
+      <button data-testid="skip-intro" style={skipBtn} onClick={onSkip}>SKIP ▸</button>
     </>
   )
 }

@@ -97,7 +97,7 @@ import {
   loadProgression, addXp, noteLogin, noteDaily, levelForXp, levelInfo, tierForRating, cosmeticById,
   ownCosmetic, equipCosmetic as equipCosmeticStore, evaluateAchievements, ACHIEVEMENTS, type Progression,
 } from './progression'
-import type { HudState, MinigameKind, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
+import type { GameAction, HudState, MinigameKind, ProgressHud, RadarBlip, Unit7Config, Zone } from './types'
 
 /** Something the net can catch (NPCs, aliens). Registered by their systems. */
 export interface Capturable {
@@ -269,6 +269,11 @@ export class Game {
   // travel. Stored as a plain trigger so checkPortals can route it like a ring.
   private plazaMars: { pos: THREE.Vector3; radius: number } | null = null
   private rocketGate: THREE.Group | null = null
+  // Browser-automation ("synthetic input") mode: set by the debug-gated test
+  // harness so an agent can drive the game without pointer lock. When true, the
+  // auto-pause-on-pointer-unlock is suppressed (an automation context never holds
+  // a real lock, so a stray unlock must not freeze the sim). Off for real players.
+  private botMode = false
   private inMinigame = false
   private activePortal = new THREE.Vector3()
   private arcadeCooldown = 0
@@ -371,6 +376,13 @@ export class Game {
       if (t != null && !Number.isNaN(Number(t))) { this.world.setDebugTime(Number(t)); this.timeFromQuery = true }
       const z = q.get('zone')
       if (z === 'moon' || z === 'mars' || z === 'earth') this.zone = z
+      // Browser-automation entry: ?bot drops straight into free roam (no
+      // launch-pad / skydive opening) so an agent can drive the world without
+      // waiting out the cinematic. Gated behind the same DEV/?debug flag as the
+      // rest of the test harness, so a stray ?bot can never change a real
+      // player's flow. The React shell separately auto-dismisses the join panel.
+      const debugGated = import.meta.env.DEV || q.has('debug')
+      if (debugGated && q.has('bot')) this.cfg.startInIntro = false
     }
     this.input = new Input(this.engine.renderer.domElement)
     this.physics = new Physics(this.world.groundMeshes, this.world.colliders)
@@ -852,6 +864,9 @@ export class Game {
     this.engine.scene.add(this.netLine)
 
     this.input.onUnlock = () => {
+      // Automation (synthetic input) never holds a real pointer lock, so an
+      // unlock here is meaningless and must not pause the sim mid-test.
+      if (this.botMode) return
       // The warp picker frees the cursor on purpose (so its buttons are clickable
       // on desktop); don't treat that as a pause request.
       if (!this.paused && !this.warpMenuOpen) this.setPaused(true)
@@ -936,6 +951,9 @@ export class Game {
     // remote playtest reach internals without a dev build).
     if (import.meta.env.DEV || /[?&]debug\b/.test(window.location.search)) {
       (window as unknown as { __unit7?: Game }).__unit7 = this
+      // A small, stable navigation/test surface for browser automation (e.g.
+      // Claude Chrome). Same debug gate -> zero impact on normal players.
+      this.installNav()
     }
 
     // Spawn directly into an off-world zone if requested.
@@ -1361,6 +1379,227 @@ export class Game {
     this.hud.banner = 'ARCADE'
     this.bannerTimer = 2.2
     trackEvent('arcade_warp', {})
+  }
+
+  // --- automation / test harness -------------------------------------------
+
+  /** Named teleport targets for the current zone (world-space XZ). */
+  private navLandmarks(): Record<string, { x: number; z: number }> {
+    const m: Record<string, { x: number; z: number }> = {
+      spawn: { x: this.world.spawn.x, z: this.world.spawn.z },
+      origin: { x: 0, z: 0 },
+    }
+    if (this.zone === 'earth') {
+      m.arcade = { x: 0, z: 24 }
+      m.factory = { x: this.robotFactory.entrance.x, z: this.robotFactory.entrance.z }
+      m.raceGate = { x: 64, z: 8 }
+      if (this.plazaMars) m.marsPortal = { x: this.plazaMars.pos.x, z: this.plazaMars.pos.z }
+      const moon = this.zones.earthPortals.find((p) => p.target === 'moon')
+      if (moon) m.moonPortal = { x: moon.position.x, z: moon.position.z }
+    }
+    return m
+  }
+
+  /** Snap the player to a ground position (debug teleport). Crash-safe: clamps
+   *  NaN and samples the live terrain for Y when not given. */
+  private navTeleport(x: number, z: number, y?: number, faceYaw?: number) {
+    x = Number.isFinite(x) ? x : 0
+    z = Number.isFinite(z) ? z : 0
+    const gy = Number.isFinite(y as number) ? (y as number) : (this.physics.sampleGround(x, z, 400)?.y ?? 0) + 0.2
+    if (Number.isFinite(faceYaw as number)) { this.input.yaw = faceYaw as number; this.player.yaw = faceYaw as number }
+    this.player.exitVehicle(new THREE.Vector3(x, gy, z))
+    this.camera.snap(this.player.position)
+  }
+
+  /**
+   * Build the debug-only browser-automation surface (window.__unit7.test, aliased
+   * as window.__unit7nav). It is installed only inside the same `?debug` / DEV gate
+   * that exposes window.__unit7, so production players never get it. Every method
+   * routes through the SAME code paths real input/UI use (virtual move/look,
+   * pressAction, doTravel, enterMinigame, …) so an agent tests the real game; it
+   * just bypasses the browser's pointer-lock gesture requirement. Methods are
+   * crash-safe (validate/default args) so poking at them can't wedge a session.
+   */
+  private installNav() {
+    const ACTIONS: GameAction[] = ['sprint', 'jet', 'net', 'enter', 'boost', 'morph', 'chute', 'dance', 'bubble', 'board', 'warp', 'grapple']
+    const MINIGAMES: MinigameKind[] = ['beamwars', 'digduel', 'merge2048', 'invaders', 'snake', 'raceloop', 'mecharena', 'drivemad']
+    const ZONES: Zone[] = ['earth', 'moon', 'mars']
+
+    const nav = {
+      /** Library version, so a script can feature-detect the surface. */
+      version: 2,
+
+      /** True once the world is interactive (no intro / launch pad / drop / minigame). */
+      ready: () => !this.intro && !this.launchPad && !this.dropIn && !this.inMinigame,
+
+      /**
+       * Turn on synthetic-input mode: the player is driven by setMove/setLook/press
+       * below instead of the browser's pointer-locked mouse + keyboard, and the
+       * auto-pause-on-unlock is suppressed. 'normal' restores real input.
+       */
+      setInputMode: (mode: 'synthetic' | 'normal') => {
+        this.botMode = mode === 'synthetic'
+        if (this.botMode) {
+          this.input.setLockEnabled(false)
+          this.input.exitLock()
+          this.setPaused(false)
+        } else {
+          this.input.setLockEnabled(true)
+        }
+        return mode
+      },
+
+      /** Skip the opening (intro -> launch pad -> skydive) straight to free roam. */
+      skip: () => { this.controls.skipIntro(); return nav.state() },
+
+      /** Analog move intent in [-1,1] (camera-relative): y+ forward, x+ strafe right. */
+      setMove: (x: number, y: number) => this.input.setVirtualMove(clamp(Number(x) || 0, -1, 1), clamp(Number(y) || 0, -1, 1)),
+
+      /** Nudge the look angles (delta units match the touch look path). */
+      setLook: (dx: number, dy: number) => this.input.setVirtualLook(Number(dx) || 0, Number(dy) || 0),
+
+      /** Set the absolute camera yaw/pitch (radians). */
+      setYaw: (yaw: number, pitch?: number) => { if (Number.isFinite(yaw)) this.input.yaw = yaw; if (Number.isFinite(pitch as number)) this.input.pitch = pitch as number },
+
+      /** Fire one action (jump=jet, capture=net, enter, board, …). Held actions get
+       *  a brief pulse; one-shot actions register a single edge. Unknown = no-op. */
+      press: (action: GameAction) => {
+        if (!ACTIONS.includes(action)) return false
+        this.input.pressAction(action, true)
+        const held: GameAction[] = ['sprint', 'jet', 'boost', 'grapple']
+        if (held.includes(action)) setTimeout(() => this.input.pressAction(action, false), 120)
+        return true
+      },
+
+      /** Hold a sustained action (sprint/jet/boost/grapple) for `ms`. */
+      hold: (action: GameAction, ms = 500) => {
+        if (!ACTIONS.includes(action)) return false
+        this.input.pressAction(action, true)
+        setTimeout(() => this.input.pressAction(action, false), Math.max(0, Math.min(Number(ms) || 0, 20000)))
+        return true
+      },
+
+      /** Hard-swap to a zone (instant, no transition fade — deterministic for tests). */
+      goto: (zone: Zone) => {
+        if (!ZONES.includes(zone)) return { ok: false, error: `unknown zone "${zone}"; try ${ZONES.join('/')}` }
+        if (zone !== this.zone) this.doTravel(zone)
+        return nav.state()
+      },
+
+      /** Teleport to absolute coords on the current zone (Y auto-sampled if omitted). */
+      teleport: (x: number, z: number, y?: number) => { this.navTeleport(Number(x), Number(z), y); return nav.state() },
+
+      /** List the named landmarks you can gotoLandmark() on the current zone. */
+      landmarks: () => Object.keys(this.navLandmarks()),
+
+      /** Teleport to a named landmark (spawn/arcade/factory/marsPortal/moonPortal/…). */
+      gotoLandmark: (name: string) => {
+        const lm = this.navLandmarks()[name]
+        if (!lm) return { ok: false, error: `unknown landmark "${name}"; try ${Object.keys(this.navLandmarks()).join(', ')}` }
+        this.navTeleport(lm.x, lm.z)
+        return nav.state()
+      },
+
+      /** The portals reachable on the current zone, with positions + targets. */
+      portals: () => {
+        const out: { kind: string; target?: string; x: number; z: number; radius: number }[] = []
+        for (const p of this.zones.portalsFor(this.zone)) out.push({ kind: 'zone', target: p.target, x: p.position.x, z: p.position.z, radius: p.radius })
+        if (this.zone === 'earth') {
+          if (this.plazaMars) out.push({ kind: 'zone', target: 'mars', x: this.plazaMars.pos.x, z: this.plazaMars.pos.z, radius: this.plazaMars.radius })
+          for (const a of this.arcadePortals) out.push({ kind: 'minigame', target: a.kind, x: a.pos.x, z: a.pos.z, radius: 2.4 })
+        }
+        return out
+      },
+
+      /** Open a cabinet minigame by id, without needing a portal context. */
+      enterMinigame: (id: MinigameKind) => {
+        if (!MINIGAMES.includes(id)) return { ok: false, error: `unknown minigame "${id}"; try ${MINIGAMES.join('/')}` }
+        if (this.inMinigame) this.exitMinigame()
+        const portal = this.arcadePortals.find((a) => a.kind === id)
+        const pos = portal ? portal.pos.clone() : new THREE.Vector3(this.player.position.x, this.player.position.y, this.player.position.z)
+        this.enterMinigame(id, pos)
+        return { ok: true, minigame: id }
+      },
+
+      /** Close any open minigame and step the player back out. */
+      exitMinigame: () => { this.exitMinigame(); return nav.state() },
+
+      /** Jump the guided objective chain to a step index (clamped). */
+      setObjective: (index: number) => { this.missions.debugSetIndex(Number(index) || 0); return { ok: true, index: Number(index) || 0 } },
+
+      /** Trigger / clear the city raid (must be on Earth for it to take effect). */
+      startRaid: () => { if (this.zone === 'earth' && !this.raidActive) this.beginCityRaid(this.player.position.clone()); return { ok: this.raidActive } },
+      endRaid: () => { if (this.raidActive) this.endCityRaid(); return { ok: !this.raidActive } },
+
+      /** Set the day/night clock (seconds into the 120s cycle). day()/night() helpers. */
+      time: (t: number) => { if (Number.isFinite(t)) this.world.setDebugTime(t); return nav.state() },
+      day: () => { this.world.setDebugTime(35); return nav.state() },
+      night: () => { this.world.setDebugTime(95); return nav.state() },
+
+      pause: () => { this.setPaused(true); return nav.state() },
+      resume: () => { this.setPaused(false); return nav.state() },
+
+      /** Live render stats for assertions / perf regressions. */
+      metrics: () => {
+        const mem = this.engine.renderer.info.memory
+        return {
+          fps: Math.round(this.engine.fps),
+          drawCalls: this.engine.drawCalls,
+          triangles: this.engine.triangles,
+          renderScale: Number(this.engine.scale.toFixed(3)),
+          geometries: mem.geometries,
+          textures: mem.textures,
+          zone: this.zone,
+          raidActive: this.raidActive,
+        }
+      },
+
+      /** A compact, JSON-safe snapshot of where/what the player is. */
+      state: () => {
+        const p = this.player.position
+        return {
+          ready: nav.ready(),
+          zone: this.zone,
+          pos: { x: Number(p.x.toFixed(2)), y: Number(p.y.toFixed(2)), z: Number(p.z.toFixed(2)) },
+          yaw: Number(this.input.yaw.toFixed(3)),
+          mode: this.player.mode,
+          grounded: this.player.grounded,
+          paused: this.paused,
+          inMinigame: this.inMinigame,
+          minigame: this.hud.minigame,
+          raidActive: this.raidActive,
+          botMode: this.botMode,
+          fps: Math.round(this.engine.fps),
+          objective: this.hud.objective,
+        }
+      },
+    }
+
+    const w = window as unknown as { __unit7nav?: typeof nav; __unit7?: { test?: typeof nav } }
+    w.__unit7nav = nav
+    if (w.__unit7) w.__unit7.test = nav
+
+    // URL-driven navigation so an agent can drive purely via the address bar:
+    //   ?bot              -> (handled at boot) skip the opening, auto-solo
+    //   &goto=arcade      -> teleport to a named landmark once ready
+    //   &zone=moon        -> travel to a zone once ready
+    // Applied after a tick so the world has finished its first build.
+    try {
+      const q = new URLSearchParams(location.search)
+      if (q.has('bot')) nav.setInputMode('synthetic')
+      const goZone = q.get('zone')
+      const goLm = q.get('goto')
+      if ((q.has('bot') || q.has('debug')) && (goZone || goLm)) {
+        const apply = () => {
+          if (!nav.ready()) { setTimeout(apply, 120); return }
+          if (goZone && ZONES.includes(goZone as Zone) && goZone !== 'earth') nav.goto(goZone as Zone)
+          if (goLm) nav.gotoLandmark(goLm)
+        }
+        setTimeout(apply, 200)
+      }
+    } catch {
+      /* no location (SSR / tests) - skip URL nav */
+    }
   }
 
   /**
