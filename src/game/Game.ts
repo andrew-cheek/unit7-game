@@ -66,6 +66,9 @@ import { HostileDrones } from './HostileDrones'
 import { StuntScore } from './StuntScore'
 import { UpgradePylons } from './UpgradePylons'
 import { NeonCrates } from './NeonCrates'
+import { NeonReflections } from './NeonReflections'
+import { HiddenCaches } from './HiddenCaches'
+import { WeeklyBeacons } from './WeeklyBeacons'
 import { DroneSiege } from './DroneSiege'
 import { BountyHunt } from './BountyHunt'
 import { CargoRun } from './CargoRun'
@@ -260,6 +263,13 @@ export class Game {
   private boundary!: Boundary // bouncy alien-blob world edge (Earth)
   private guide!: GuideBot // spawn greeter that leads you to the arcade (Earth)
   private landingFx!: LandingFx // one-shot celebration burst played at every drop-in touchdown
+  // Landing-impact juice: the airborne->grounded transition is detected at the
+  // player.update() call site (grounded state captured immediately before the
+  // step), so no cross-step grounded field is needed here. landImpactSpeed stashes
+  // the last touchdown's downward speed (captured BEFORE the controller zeroes
+  // velocity.y on contact) for debugging via window.__unit7.
+  private landImpactSpeed = 0
+  private landScratch = new THREE.Vector3() // reused FX position (no per-landing alloc)
   private launchPad: LaunchPad | null = null // the floating factory you start on (step off to dive)
   private launchCineT = -1 // >=0 while the opening establishing-orbit cinematic plays
   private launchPadColliders: THREE.Box3[] = [] // factory AABBs added to physics while on the pad
@@ -632,6 +642,25 @@ export class Game {
       focus: () => this.player.position,
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onSmash: (x, y, z, credits) => { this.addCredits(credits); this.popups.pop(x, y, z, `+${credits}c`, '#9bff6a'); this.audio.play('ui') },
+    }))
+    // Reflected neon glow washing across the wet streets around the player (ambient).
+    this.systems.register(new NeonReflections(this.engine.scene, {
+      playerPos: () => this.player.position,
+      zone: () => this.zone,
+    }))
+    // Hidden caches: kid-friendly discovery stashes that pop + reward when you find them.
+    this.systems.register(new HiddenCaches(this.engine.scene, {
+      playerPos: () => this.player.position,
+      zone: () => this.zone,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onCollect: (x, y, z, credits, xp) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `CACHE +${credits}c`, '#7df0ff'); this.audio.play('ui') },
+    }))
+    // Weekly beacons: a rotating set of bonus light-columns that changes each week.
+    this.systems.register(new WeeklyBeacons(this.engine.scene, {
+      playerPos: () => this.player.position,
+      zone: () => this.zone,
+      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
+      onCollect: (x, y, z, credits, xp) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `WEEKLY BONUS +${credits}c`, '#ffd24a'); this.hud.banner = `WEEKLY BEACON  +${credits}c`; this.bannerTimer = 2.2; this.audio.play('objective') },
     }))
     // Drone siege: walk into the beacon for an opt-in escalating wave-defense fight.
     this.systems.register(new DroneSiege(this.engine.scene, this.capturables, {
@@ -2411,6 +2440,41 @@ export class Game {
     }
   }
 
+  /**
+   * On-foot landing impact: when the player touches down from the air, kick the
+   * camera + bloom a ground dust ring scaled by how hard they hit. `fallSpeed` is
+   * the downward speed (m/s) captured the step BEFORE the controller zeroed it on
+   * contact. A deadzone (config.juice.landMinSpeed) means a gentle step or small
+   * hop produces nothing; only real falls shake and dust.
+   *
+   * Tier-gated: full strength on high, trimmed on medium, OFF on low (mobile
+   * keeps the frame budget). Frame-rate-independent: the shake decay lives in
+   * Camera (exponential), and LandingFx advances on the fixed sim step.
+   */
+  private onPlayerLanded(fallSpeed: number) {
+    const j = config.juice
+    const tier = config.tier.name
+    if (tier === 'low') return // low tier: no landing juice (mobile budget)
+    if (fallSpeed < j.landMinSpeed) return // deadzone: gentle step / small hop
+    // Normalise the impact into 0..1 across the deadzone -> full-impact band, so a
+    // just-over-the-line touchdown barely registers and a long plummet maxes out.
+    const span = Math.max(1e-3, j.landMaxSpeed - j.landMinSpeed)
+    const intensity = clamp((fallSpeed - j.landMinSpeed) / span, 0, 1)
+    this.landImpactSpeed = fallSpeed // exposed for debugging via window.__unit7
+    const tierScale = tier === 'medium' ? j.shakeScaleMedium : 1
+    // Camera shake scaled by impact (Camera clamps + decays it exponentially).
+    this.camera.shake(j.shakeMax * intensity * tierScale)
+    // Heavy landings also bloom a ground dust ring (reuse the pooled LandingFx
+    // burst; celebrate=false keeps it a plain shockwave, not confetti).
+    if (intensity >= j.fxThreshold) {
+      const p = this.player.position
+      const gy = this.physics.sampleGround(p.x, p.z, p.y + 2.5)?.y ?? p.y
+      this.landingFx.trigger(this.landScratch.set(p.x, gy, p.z), 0xbfe6ff, false)
+      this.audio.play('land') // existing touchdown SFX; no new sound added
+      vibrate(Math.round(10 + intensity * 30))
+    }
+  }
+
   /** Apply a missile blast: capture every live target inside the radius. */
   private detonate(pos: THREE.Vector3, radius: number) {
     const r2 = radius * radius
@@ -3172,7 +3236,14 @@ export class Game {
       this.mechAirborne = false
       // Low-G bubbles scale the player's gravity down locally (floaty triple-hops).
       const pg = gravity * this.playground.lowGFactor(this.zone, this.player.position.x, this.player.position.y, this.player.position.z)
+      // Capture the pre-update touchdown state for landing juice: the controller
+      // zeroes velocity.y the moment it grounds, so the downward speed at impact
+      // must be read BEFORE update(). Grounded-before tells us if this step is the
+      // actual airborne->grounded transition.
+      const fallSpeed = this.player.grounded ? 0 : Math.max(0, -this.player.velocity.y)
+      const wasAirborne = !this.player.grounded
       this.player.update(dt, this.input, this.physics, pg)
+      if (wasAirborne && this.player.grounded) this.onPlayerLanded(fallSpeed)
       if (this.zone === 'earth' && !this.launchPad) {
         // Bouncy alien-blob edge (replaces the old hard square clamp on Earth): it
         // shoves you back inside the ring and, on foot/flying, flings you up and

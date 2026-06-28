@@ -1455,8 +1455,11 @@ export class World {
     places.forEach((p, i) => {
       const ph = p.w * 0.16 // sign height
       // A fixed-width canvas; the strip is drawn (and re-drawn on BREAKING news).
+      // Tier-gated width: desktop keeps the wide 3200px strip; non-high tiers use
+      // ~1200px (≈7x less texture VRAM/bandwidth). The scroll still reads — at this
+      // sign size, with anisotropy already low on mobile, the extra px are invisible.
       const H = 72
-      const W = 3200
+      const W = config.tier.name === 'high' ? 3200 : 1200
       const cv = document.createElement('canvas')
       cv.width = W; cv.height = H
       const ctx = cv.getContext('2d')!

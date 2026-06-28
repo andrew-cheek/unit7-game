@@ -32,6 +32,7 @@ interface Agent {
   driftZ: number
   bubble: THREE.Mesh | null
   rayPhase: number // 0/1: which frame parity this agent samples the ground on
+  lastGroundY: number // cached ground height, reused on the off (un-sampled) frames
 }
 
 const NPC_RADIUS = 0.4
@@ -57,6 +58,11 @@ export class NPCManager {
   // agent instead of the old O(n^2) all-pairs loop. Cell size = separation radius.
   private frame = 0
   private grid = new Map<number, Agent[]>()
+  // Pool of reusable bucket arrays so the per-frame hash rebuild allocates zero
+  // arrays: buckets are cleared in place (length=0) and re-handed-out, instead of
+  // dropping every array each frame and letting new ones churn the GC.
+  private bucketPool: Agent[][] = []
+  private bucketUsed = 0
   // Shared bubble visuals (one geometry/material reused by every bubbled agent).
   private bubbleGeo = new THREE.SphereGeometry(1.15, 16, 12)
   private bubbleMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
@@ -161,6 +167,7 @@ export class NPCManager {
       driftZ: 0,
       bubble: null,
       rayPhase: i % 2,
+      lastGroundY: 0,
       cap: {
         position: pos,
         alive: true,
@@ -197,6 +204,7 @@ export class NPCManager {
       const dz = a.pos.z - center.z
       if (dx * dx + dz * dz > r2) continue
       a.floatT = 5
+      a.lastGroundY = a.pos.y // seed staggered raycast cache so the first off-frame is correct
       a.driftX = randRange(-1.2, 1.2)
       a.driftZ = randRange(-1.2, 1.2)
       const b = new THREE.Mesh(this.bubbleGeo, this.bubbleMat)
@@ -216,8 +224,16 @@ export class NPCManager {
   }
 
   private updateBubbled(a: Agent, dt: number) {
-    const g = this.physics.sampleGround(a.pos.x, a.pos.z, a.pos.y + 4)
-    const groundY = g ? g.y : 0
+    // Stagger the ground raycast the same way the normal path does (rayPhase +
+    // frame parity), reusing the cached height on the off frames — bubbled agents
+    // only drift slowly, so groundY barely changes frame-to-frame. Gated to
+    // medium/low; high tier keeps the per-frame raycast to stay visually identical.
+    let groundY = a.lastGroundY
+    if (config.tier.name === 'high' || (this.frame + a.rayPhase) % 2 === 0) {
+      const g = this.physics.sampleGround(a.pos.x, a.pos.z, a.pos.y + 4)
+      groundY = g ? g.y : 0
+      a.lastGroundY = groundY
+    }
     if (a.floatT > 0) {
       a.floatT -= dt
       a.pos.x += a.driftX * dt
@@ -257,6 +273,7 @@ export class NPCManager {
     // so separation below is a local 3x3-cell scan instead of an all-pairs loop.
     this.frame++
     this.grid.clear()
+    this.bucketUsed = 0 // reset pool cursor; buckets are reused, not reallocated
     for (const a of this.agents) {
       if (!a.alive) continue
       // Packed integer cell key (cell indices stay well inside +/-1024 given the
@@ -264,7 +281,15 @@ export class NPCManager {
       const key = (Math.floor(a.pos.x / sepR) + 1024) * 4096 + (Math.floor(a.pos.z / sepR) + 1024)
       const cell = this.grid.get(key)
       if (cell) cell.push(a)
-      else this.grid.set(key, [a])
+      else {
+        // Hand out a pooled bucket (cleared in place) instead of allocating one.
+        let bucket = this.bucketPool[this.bucketUsed]
+        if (bucket) bucket.length = 0
+        else { bucket = []; this.bucketPool[this.bucketUsed] = bucket }
+        this.bucketUsed++
+        bucket.push(a)
+        this.grid.set(key, bucket)
+      }
     }
 
     for (const a of this.agents) {
