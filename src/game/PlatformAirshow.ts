@@ -49,12 +49,18 @@ const PLANE_BANK = 0.22         // roll (radians) into the pass for a little lif
 const PLANE_BOB = 0.6           // gentle vertical bob amplitude
 
 // ---- Parachutist tuning (all local units) ---------------------------------
-const CHUTE_TOP = 90            // local y a parachutist resets to (drops from up high)
+// They now drop ONTO the deck (within the rim), land, drop the canopy, then walk
+// either to the factory line or back to the rim and step off into a dive.
+const CHUTE_TOP = 52            // local y a parachutist resets to (high, but in view as it comes down)
 const CHUTE_FALL_MIN = 4.5      // descent speed floor (m/s)
 const CHUTE_FALL_VAR = 2.5      // + up to this much descent speed
-const CHUTE_BOTTOM = -60        // local y at which a parachutist has sunk out of view -> reset
-const CHUTE_SWAY = 1.4          // horizontal sway amplitude (softened under reduced motion)
-const CHUTE_RIM_PAD = 4         // how far beyond `radius` they spawn, so they pass the edge
+const CHUTE_SWAY = 1.4          // horizontal sway amplitude under canopy (softened under reduced motion)
+const CHUTE_LAND_MAX = 0.7      // land within radius*this, so they touch down ON the deck, in view
+const CHUTE_STAND_Y = 0.6       // body height so the landed robot's feet sit on the deck
+const CHUTE_WALK_SPEED = 3.4    // deck walk speed after landing (local m/s)
+const CHUTE_FACTORY_X = 0       // walk-to-factory target: the assembly line / belt at deck centre-front
+const CHUTE_FACTORY_Z = 8
+const CHUTE_SINK_Y = -30        // y a diver-off-the-ledge sinks to before re-dropping from the top
 
 // Neon palette shared by both craft accents and parachute canopies.
 const PALETTE = [0x49e0ff, 0x9bff6a, 0xffd24a, 0xff5ad0, 0xb07cff, 0xff8a4a]
@@ -70,12 +76,19 @@ interface Plane {
 
 interface Chute {
   group: THREE.Group
-  angle: number          // bearing around the rim (where over the edge it sits)
-  radius: number         // horizontal distance from centre
+  canopy: THREE.Object3D // hidden once it lands (chute cut away)
+  risers: THREE.Object3D[]
+  state: 'descend' | 'walk'
+  x: number              // local deck position
+  z: number
   y: number              // current local height
   fall: number           // descent speed
   swayPhase: number      // sway phase offset
   swaySpeed: number      // sway frequency
+  tx: number             // walk target (factory line or a point past the rim)
+  tz: number
+  toFactory: boolean     // true = head to the line; false = step off the ledge
+  bob: number            // walk-cycle phase
 }
 
 export class PlatformAirshow {
@@ -194,12 +207,14 @@ export class PlatformAirshow {
       head.position.y = 0.75
       g.add(head)
 
-      // Two crossed risers angling up to the canopy.
+      // Two crossed risers angling up to the canopy (cut away on landing).
+      const risers: THREE.Object3D[] = []
       for (let r = 0; r < 2; r++) {
         const riser = new THREE.Mesh(riserGeo, riserMat)
         riser.position.set(r === 0 ? -0.4 : 0.4, 1.6, 0)
         riser.rotation.z = r === 0 ? 0.18 : -0.18
         g.add(riser)
+        risers.push(riser)
       }
 
       // Canopy glow: per-chute tint so the sky reads as a few different divers.
@@ -212,12 +227,19 @@ export class PlatformAirshow {
       this.root.add(g)
       this.chutes.push({
         group: g,
-        angle: 0,
-        radius: 0,
+        canopy,
+        risers,
+        state: 'descend',
+        x: 0,
+        z: 0,
         y: 0,
         fall: 0,
         swayPhase: Math.random() * Math.PI * 2,
         swaySpeed: 0.6 + Math.random() * 0.5,
+        tx: 0,
+        tz: 0,
+        toFactory: false,
+        bob: 0,
       })
       // Stagger initial heights so they don't all reset in lockstep.
       this.respawnChute(this.chutes[i], true)
@@ -256,17 +278,26 @@ export class PlatformAirshow {
     g.rotation.set(0, Math.atan2(p.dir.x, p.dir.z), PLANE_BANK)
   }
 
-  /** Send a parachutist back to the top to drift down again. They spawn just
-   *  beyond the deck rim (radius + pad) so their descent visibly crosses the
-   *  platform edge. `stagger` spreads start heights on first spawn. */
+  /** Send a parachutist back to the top to drift down again, this time aimed at a
+   *  fresh touchdown point ON the deck (within the rim, biased to the front half so
+   *  the player sees them come in). `stagger` spreads start heights on first spawn. */
   private respawnChute(c: Chute, stagger = false) {
-    c.angle = Math.random() * Math.PI * 2
-    c.radius = this.radius + CHUTE_RIM_PAD + Math.random() * 8
+    // Touchdown point: a ring between the centre and CHUTE_LAND_MAX*radius, biased
+    // toward the front (+z, where the spawn faces) so the descent is in view.
+    const r = this.radius * (0.2 + Math.random() * (CHUTE_LAND_MAX - 0.2))
+    const a = Math.random() * Math.PI * 2
+    c.x = Math.cos(a) * r
+    c.z = Math.abs(Math.sin(a)) * r * 0.7 + this.radius * 0.12 // lean front-of-deck
     c.fall = CHUTE_FALL_MIN + Math.random() * CHUTE_FALL_VAR
     c.swayPhase = Math.random() * Math.PI * 2
-    // Fresh start near the top; stagger drops some partway down so the sky is
-    // already populated on the first frame.
-    c.y = stagger ? CHUTE_BOTTOM + Math.random() * (CHUTE_TOP - CHUTE_BOTTOM) : CHUTE_TOP
+    c.state = 'descend'
+    c.bob = Math.random() * Math.PI * 2
+    c.canopy.visible = true
+    for (const ri of c.risers) ri.visible = true
+    c.group.rotation.set(0, Math.random() * Math.PI * 2, 0)
+    // Fresh start near the top; stagger drops some partway down so a couple are
+    // already on their way in on the first frame.
+    c.y = stagger ? CHUTE_STAND_Y + Math.random() * (CHUTE_TOP - CHUTE_STAND_Y) : CHUTE_TOP
   }
 
   update(dt: number) {
@@ -291,28 +322,60 @@ export class PlatformAirshow {
       }
     }
 
-    // ----- Parachutists: sink past the edge, sway, reset at the bottom -------
+    // ----- Parachutists: descend onto the deck, cut the chute, walk off -------
     for (let i = 0; i < this.chutes.length; i++) {
       const c = this.chutes[i]
-      c.y -= c.fall * dt
-      if (c.y < CHUTE_BOTTOM) {
-        this.respawnChute(c)
+      const g = c.group
+
+      if (c.state === 'descend') {
+        c.y -= c.fall * dt
+        // Sway under canopy, plus a tiny rig lean (flattened under reduced motion).
+        const sway = Math.sin(this.t * c.swaySpeed + c.swayPhase) * swayAmp
+        g.position.set(c.x + sway, c.y, c.z)
+        g.rotation.z = reduced ? 0 : Math.sin(this.t * c.swaySpeed + c.swayPhase) * 0.12
+        if (c.y <= CHUTE_STAND_Y) {
+          // Touchdown: plant on the deck, cut the canopy, pick a destination.
+          c.y = CHUTE_STAND_Y
+          g.position.set(c.x, c.y, c.z)
+          g.rotation.z = 0
+          c.canopy.visible = false
+          for (const ri of c.risers) ri.visible = false
+          c.toFactory = Math.random() < 0.5
+          if (c.toFactory) {
+            c.tx = CHUTE_FACTORY_X + (Math.random() * 2 - 1) * 3
+            c.tz = CHUTE_FACTORY_Z
+          } else {
+            // Step off the nearest ledge: aim radially outward, past the rim.
+            const len = Math.hypot(c.x, c.z) || 1
+            c.tx = (c.x / len) * (this.radius + 12)
+            c.tz = (c.z / len) * (this.radius + 12)
+          }
+          c.state = 'walk'
+        }
+        continue
       }
 
-      // Sway: a gentle horizontal oscillation along the tangent at the rim, plus
-      // a tiny lean so the canopy rocks. Reused scratch for the tangent dir.
-      const sway = Math.sin(this.t * c.swaySpeed + c.swayPhase) * swayAmp
-      const tx = -Math.sin(c.angle)   // tangent to the rim circle
-      const tz = Math.cos(c.angle)
-      this.scratchV.set(
-        Math.cos(c.angle) * c.radius + tx * sway,
-        c.y,
-        Math.sin(c.angle) * c.radius + tz * sway,
-      )
-      const g = c.group
-      g.position.copy(this.scratchV)
-      // Lean the whole rig into the sway (flattened under reduced motion).
-      g.rotation.z = reduced ? 0 : Math.sin(this.t * c.swaySpeed + c.swayPhase) * 0.12
+      // Walk toward the target; face the way they're going.
+      const dx = c.tx - c.x, dz = c.tz - c.z
+      const d = Math.hypot(dx, dz)
+      if (d > 0.01) {
+        const step = Math.min(d, CHUTE_WALK_SPEED * dt)
+        c.x += (dx / d) * step
+        c.z += (dz / d) * step
+        g.rotation.y = Math.atan2(dx, dz)
+      }
+      c.bob += dt * 9
+      if (!c.toFactory && Math.hypot(c.x, c.z) > this.radius) {
+        // Off the rim: pitch into a dive and sink out of view, then re-drop.
+        c.y -= (CHUTE_FALL_MIN + 3) * dt
+        g.position.set(c.x, c.y, c.z)
+        g.rotation.x = 0.6
+        if (c.y < CHUTE_SINK_Y) { g.rotation.set(0, 0, 0); this.respawnChute(c) }
+      } else {
+        // A small up/down bob sells the walk without legs.
+        g.position.set(c.x, CHUTE_STAND_Y + Math.abs(Math.sin(c.bob)) * 0.12, c.z)
+        if (c.toFactory && d < 2) this.respawnChute(c) // reached the line -> re-drop from the top
+      }
     }
   }
 
