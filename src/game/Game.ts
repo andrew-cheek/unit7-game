@@ -547,7 +547,7 @@ export class Game {
       if (credits) this.addCredits(credits)
       if (xp) this.awardXp(xp)
       this.popups.pop(x, y + 1, z, label, '#7df0ff')
-      this.audio.play('ui')
+      this.audio.play('collect')
     }
     this.systems.register(new LowGravLeap(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
     this.systems.register(new OffworldSamples(this.engine.scene, { playerPos: () => this.player.position, zone: () => this.zone, groundY: owGroundY, onReward: owReward }))
@@ -2176,6 +2176,7 @@ export class Game {
     this.player.setVisible(true)
     this.camera.snap(this.player.position)
     this.hud.banner = `ENTERING ${zone.toUpperCase()}`
+    this.audio.play('zone_enter')
     this.bannerTimer = 2.6
     this.audio.play('portal')
     if (zone !== 'earth') this.world.pushHeadline(`UNIT 7 PILOT TOUCHES DOWN ON ${zone.toUpperCase()}`)
@@ -2669,6 +2670,7 @@ export class Game {
     if (kind === 'speed') {
       this.fx.speed = 8
       this.player.speedMul = 1.5
+      this.audio.play('buff')
     } else if (kind === 'shield') {
       this.fx.shield = 10
       this.player.shield = true
@@ -2676,17 +2678,19 @@ export class Game {
     } else if (kind === 'score') {
       this.fx.score = 10
       this.scoreMul = 2
+      this.audio.play('buff')
     } else {
       this.player.fuel = config.jetpack.fuelMax
       this.hud.banner = 'JETPACK REFUELED'
       this.bannerTimer = 1.4
+      this.audio.play('buff')
     }
   }
 
   private updateEffects(dt: number) {
-    if (this.fx.speed > 0 && (this.fx.speed -= dt) <= 0) this.player.speedMul = 1
-    if (this.fx.shield > 0 && (this.fx.shield -= dt) <= 0) this.player.shield = false
-    if (this.fx.score > 0 && (this.fx.score -= dt) <= 0) this.scoreMul = 1
+    if (this.fx.speed > 0 && (this.fx.speed -= dt) <= 0) { this.player.speedMul = 1; this.audio.play('buff_expire') }
+    if (this.fx.shield > 0 && (this.fx.shield -= dt) <= 0) { this.player.shield = false; this.audio.play('buff_expire') }
+    if (this.fx.score > 0 && (this.fx.score -= dt) <= 0) { this.scoreMul = 1; this.audio.play('buff_expire') }
   }
 
   private checkPortals() {

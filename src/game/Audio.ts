@@ -12,6 +12,7 @@ export type Sfx =
   | 'capture' | 'explosion' | 'fire' | 'mechOnline' | 'land' | 'step'
   | 'soak' | 'portal' | 'objective' | 'ui'
   | 'buff_shield' | 'enter_vehicle' | 'exit_vehicle'
+  | 'collect' | 'buff' | 'buff_expire' | 'zone_enter'
 
 export class AudioManager {
   private ctx: AudioContext | null = null
@@ -153,6 +154,10 @@ export class AudioManager {
       case 'buff_shield': this.tone(330, 0.15, 'sine', 0.25, 660); break // short rising shield-up sweep
       case 'enter_vehicle': this.tone(1200, 0.08, 'square', 0.18, 2000); break // short rising boot-up beep
       case 'exit_vehicle': this.tone(660, 0.12, 'square', 0.18, 330); break // short falling power-down beep
+      case 'collect': this.tone(660, 0.1, 'sine', 0.2, 1100); break // bright pickup chime (samples / leap rings)
+      case 'buff': this.tone(440, 0.16, 'sine', 0.22, 880); this.tone(660, 0.14, 'sine', 0.08, 990); break // warm rising power-up
+      case 'buff_expire': this.tone(420, 0.14, 'sine', 0.14, 210); break // soft falling wear-off
+      case 'zone_enter': this.noise(0.4, 0.18, 1400, 200); this.tone(220, 0.5, 'sine', 0.16, 660); break // arrival whoosh
     }
   }
 
