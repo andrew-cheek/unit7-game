@@ -3,6 +3,8 @@
  * lifetime captures, and credits earned (for future unlocks). All access is
  * guarded - private-mode / disabled storage just degrades to in-memory.
  */
+import { filterChat } from './chatSafety'
+
 export interface Profile {
   best: number
   lifetimeCaptured: number
@@ -154,9 +156,38 @@ export function loadCallsign(): string {
   }
 }
 
+/** Safe fallback when a callsign is rejected — never echoes the unsafe input. */
+const SAFE_CALLSIGN = 'PILOT'
+
+/**
+ * CHILD-SAFETY: the callsign is broadcast to other players, so it is a contact
+ * vector just like chat — a kid must not be able to put a phone number, real
+ * name, or third-party handle in it. This is a PURE helper (no storage) so the
+ * React shell can run it on the input field too.
+ *
+ * Rules:
+ *  - strip all digits (a 4+ digit run is phone/number-shaped; we drop digits
+ *    entirely rather than try to guess intent),
+ *  - run the de-digited name through the same contact/profanity filter chat uses,
+ *  - on any rejection (or if nothing usable survives), fall back to a safe default,
+ *  - clamp to 16 chars to match the existing wire/UI limit.
+ */
+export function sanitizeCallsign(name: string): string {
+  const raw = typeof name === 'string' ? name : ''
+  // Drop digits up front: a callsign has no legitimate need for them and they are
+  // the raw material of a leaked phone number / zip / address.
+  const stripped = raw.replace(/\d+/g, '').trim()
+  if (!stripped) return SAFE_CALLSIGN
+  // Reuse the chat filter's contact + profanity heuristics. A blocked name is
+  // replaced wholesale (never partially echoed) with the safe default.
+  const verdict = filterChat(stripped)
+  const safe = verdict.allowed ? verdict.text : SAFE_CALLSIGN
+  return safe.slice(0, 16) || SAFE_CALLSIGN
+}
+
 export function saveCallsign(name: string) {
   try {
-    localStorage.setItem(CALLSIGN_KEY, name.slice(0, 16))
+    localStorage.setItem(CALLSIGN_KEY, sanitizeCallsign(name))
   } catch {
     /* ignore */
   }
