@@ -1042,8 +1042,15 @@ export class DropIn {
     // turning always turns the view and left/right never invert.
     if (diving || this.phase === 'canopy') this.camHeading = dampAngle(this.camHeading, this.diveHeading, 6, dt)
     else if (hs > 0.5) this.camHeading = dampAngle(this.camHeading, Math.atan2(this.hVel.x, this.hVel.z), 7, dt)
-    // Full forward tilt = straight down (PI/2); flared = near belly-flat.
-    const bodyPitch = diving ? THREE.MathUtils.lerp(0.1, Math.PI / 2, Math.min(1, this.pitch * 1.05)) : 0
+    // HEAD-FIRST dive: the body tips PAST horizontal so the head leads down toward
+    // the ground (matches the velocity vector). PI/2 is belly-flat/superman; adding
+    // the dive angle on top points the head down. Flared eases back toward flat so
+    // pulling up reads as levelling out. (Not full PI, so it never goes dead-upside-
+    // down — it's a steep head-first dive, head + shoulders leading.)
+    const tpPose = Math.min(1, this.pitch * 1.05)
+    // Flared (~86°) reads as belly-flat / levelling out; a full dive (~155°) is a
+    // steep head-first plunge. So pulling back pitches up and diving tips head-down.
+    const bodyPitch = diving ? THREE.MathUtils.lerp(1.5, 2.7, tpPose) : 0
     const flip = this.flipT > 0 ? (1 - this.flipT / DropIn.FLIP_DUR) * Math.PI * 2 : 0
     // Bank into the turn (roll with moveX) while diving for a steered feel.
     const roll = diving ? clamp(this.steerX * 0.5, -0.6, 0.6) : clamp(-this.hVel.x * 0.02, -0.5, 0.5)
@@ -1057,7 +1064,10 @@ export class DropIn {
     // Arms react to steering: sweep back when diving forward, spread when flaring,
     // and bank asymmetrically when steering left/right.
     this.rb.setSteer?.(this.input.moveX, this.input.moveY)
-    this.rb.setWings(diving ? 1 : 0) // wingsuit: wings spread through the freefall, fold under canopy
+    // Wings spread when flared (a glide) and FOLD back as the dive steepens, so a
+    // committed plunge reads as a streamlined head-first dive (arms/legs trailing)
+    // rather than a flying-V; under canopy they're stowed entirely.
+    this.rb.setWings(diving ? THREE.MathUtils.lerp(0.95, 0.3, tpPose) : 0)
     this.rb.setThrust(this.phase === 'dive' && this.input.held.jet ? 1 : 0) // jetpack flame
     this.rb.update(dt, diving ? 0.4 : 0.15, false)
 
@@ -1448,23 +1458,26 @@ export class DropIn {
     let want: THREE.Vector3
     let lookWant: THREE.Vector3
     if (this.phase === 'canopy') {
-      // Under canopy: sit ABOVE and behind the diver and aim down the glide path,
-      // so the ground you're steering toward fills most of the frame while the
-      // open chute + diver stay framed in the upper third. Pulled in close so the
-      // robot reads big. (Y offsets folded in to avoid per-frame Vector3 allocs.)
-      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -6.5); want.y += 3.6
-      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 7); lookWant.y -= 2.6
+      // Under canopy: a slower, calmer cam — sit a bit FARTHER back and ABOVE than
+      // the dive (the chute + diver read against the sky) and aim down the glide
+      // path so the ground you're steering toward fills the centre. (Y offsets
+      // folded in to avoid per-frame Vector3 allocs.)
+      want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -9.5); want.y += 5.0
+      lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, 9); lookWant.y -= 4.0
     } else {
-      // Dive: an over-the-shoulder DOWN-shot. The STEEPER the dive (pitch), the
-      // higher the camera rises and tucks in over the diver while aiming well below
-      // it — so you look DOWN past the head-down robot at the city rushing up, with
-      // the robot framed in the upper-centre. A flared glide eases back to a level
-      // chase that keeps the horizon.
+      // Dive: third-person chase from behind + ABOVE, looking DOWN over the diver
+      // along the fall line at the city/portal below. Target framing — robot in the
+      // lower third, the destination centred, a sliver of horizon up top. The camera
+      // sits above the diver and aims at a point well AHEAD-and-down, so the diver
+      // (close, below the camera) projects into the lower third while the distant
+      // ground fills the centre. Medium distance: the path reads, the robot stays a
+      // good size (not tiny, not blocking). Steeper dive -> a touch higher + further
+      // down the line.
       const steep = Math.min(1, this.pitch * 1.05)
-      const back = THREE.MathUtils.lerp(5.0, 2.6, steep)  // pull IN closer behind when steep
-      const up = THREE.MathUtils.lerp(2.6, 6.4, steep)    // rise HIGH above the diver when steep
-      const ahead = THREE.MathUtils.lerp(5.5, 1.0, steep) // look almost straight below when steep
-      const down = THREE.MathUtils.lerp(5.5, 18, steep)   // aim far down past the diver
+      const back = THREE.MathUtils.lerp(8.5, 7.2, steep) // medium chase distance
+      const up = THREE.MathUtils.lerp(3.2, 6.2, steep)   // above the diver, higher when steep
+      const ahead = THREE.MathUtils.lerp(7.0, 12.0, steep) // look down the fall line
+      const down = THREE.MathUtils.lerp(3.2, 7.5, steep) // modest down so the robot stays low, not centred
       want = this.camPos.copy(this.pos).addScaledVector(this.fwd, -back); want.y += up
       lookWant = this.camLook.copy(this.pos).addScaledVector(this.fwd, ahead); lookWant.y -= down
     }
