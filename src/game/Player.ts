@@ -81,6 +81,9 @@ export class Player {
   private morphT = 0
   private chuteT = 0
   private airTime = 0
+  // Skydive lean: eased head-first tilt (radians) applied while falling fast on
+  // foot, so a freefall reads as a dive instead of an upright drop. Visual only.
+  private diveLean = 0
   // Counts down after a hop is tapped a hair too early (airborne, past coyote);
   // the hop fires on the next grounded step while it's still > 0.
   private jumpBufferT = 0
@@ -449,6 +452,23 @@ export class Player {
       this.object.rotation.set(0, this.yaw, this.boardLean)
     } else if (this.mode === 'parachute') {
       this.object.rotation.set(0, this.yaw, 0)
+    }
+
+    // Skydive pose: when falling fast on foot (a freefall, not a little hop), tip
+    // the robot HEAD-FIRST into the dive — eased in/out by fall speed. Visual only
+    // (rotation never feeds collision). The follow camera adds the matching look-
+    // down via fall01, so the plunge reads as a dive with the robot still in frame.
+    const diveAir = this.mode === 'robot' && !this.grounded && !this.boarding && !this.grinding && !dancing
+    const fallSpd = diveAir ? Math.max(0, -this.velocity.y) : 0
+    const dive01 = clamp((fallSpd - 7) / 36, 0, 1) // 0 below ~7m/s, full by ~43m/s
+    this.diveLean = damp(this.diveLean, diveAir ? dive01 * 1.9 : 0, diveAir ? 5 : 9, dt) // up to ~109deg: head-first
+    if (diveAir && dive01 > 0.001) {
+      this.object.rotation.x = this.diveLean      // tip head-first into the dive
+      this.model.setFlyPose(dive01)               // arms up/limbs trailing
+      this.model.setWings(dive01 * 0.7)           // a little wing for speed read
+    } else if (this.mode === 'robot' && !this.boarding) {
+      this.model.setFlyPose(0)
+      this.model.setWings(0)
     }
 
     this.speed = Math.hypot(this.velocity.x, this.velocity.z)

@@ -194,7 +194,10 @@ export const config = {
     // frame). Track much tighter while falling, and tip the view down the fall
     // line so you see where you're heading. Both scale with fall intensity (0..1).
     fallFollowLambda: 18,
-    fallLookDown: 0.22,
+    // How far (radians) the camera tips DOWN at full fall speed, on top of the
+    // manual pitch — strong enough to look down the fall line at the city/portal
+    // below (was 0.22 ≈ 13°, which barely dipped off the horizon). ~0.62 ≈ 35°.
+    fallLookDown: 0.62,
     rotateLambda: 16,
     pitchMin: -0.85,
     pitchMax: 1.05, // look further up so tall rockets / portals / towers are visible
