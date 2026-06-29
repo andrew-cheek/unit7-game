@@ -88,7 +88,6 @@ import { CityCheer } from './CityCheer'
 import { WeeklyBeacons } from './WeeklyBeacons'
 import { DroneSiege } from './DroneSiege'
 import { BountyHunt } from './BountyHunt'
-import { CargoRun } from './CargoRun'
 import { RogueTitan } from './RogueTitan'
 import { NightMarket } from './NightMarket'
 import { SkyDreadnought } from './SkyDreadnought'
@@ -786,14 +785,6 @@ export class Game {
       groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
       onCaught: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `BOUNTY +${credits}c`, '#ffd24a') },
       banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.6 },
-    }))
-    // Cargo run: a repeatable timed delivery job that gives traversal a purpose.
-    this.systems.register(new CargoRun(this.engine.scene, {
-      focus: () => this.player.position,
-      facing: () => this.player.yaw,
-      groundY: (x, z) => this.physics.sampleGround(x, z, 120)?.y ?? 0,
-      onDeliver: (credits, xp, x, y, z) => { this.addCredits(credits); this.awardXp(xp); this.popups.pop(x, y, z, `DELIVERED +${credits}c`, '#9bff6a') },
-      banner: (text) => { this.hud.banner = text; this.bannerTimer = 2.4 },
     }))
     // Rogue titan: a roaming multi-hit BOSS mech you chip down with net/missiles.
     this.systems.register(new RogueTitan(this.engine.scene, this.capturables, {
