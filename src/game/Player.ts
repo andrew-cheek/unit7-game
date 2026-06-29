@@ -84,6 +84,11 @@ export class Player {
   // Skydive lean: eased head-first tilt (radians) applied while falling fast on
   // foot, so a freefall reads as a dive instead of an upright drop. Visual only.
   private diveLean = 0
+  // Skydive glide 0..1: how hard the stick is pulled DOWN during a free-fall.
+  // Pulling down flattens the dive into a glide - the robot stands upright, the
+  // descent eases to a slow sink, and you drift forward along the camera heading.
+  // 0 = a normal head-first plunge. Set in updateRobot, read by the pose + facing.
+  private glide = 0
   // Counts down after a hop is tapped a hair too early (airborne, past coyote);
   // the hop fires on the next grounded step while it's still > 0.
   private jumpBufferT = 0
@@ -408,6 +413,7 @@ export class Player {
     if (!this.grappling && !this.grinding && this.boarding && this.mode === 'robot') this.maybeStartGrind()
 
     const dancing = this.dancing && this.grounded && this.mode === 'robot'
+    this.glide = 0 // skydive glide only lives in the free-fall robot path (set in updateRobot)
     if (this.grappling) this.updateGrapple(dt, input, physics, gravity)
     else if (this.grinding) this.updateGrind(dt, input)
     else if (dancing) this.updateDance(dt, gravity)
@@ -435,6 +441,12 @@ export class Player {
       const targetBank = damp(this.object.rotation.z, -input.moveX * config.plane.bank, 6, dt)
       const targetPitch = damp(this.object.rotation.x, clamp(-this.velocity.y * 0.03, -0.5, 0.5), 6, dt)
       this.object.rotation.set(targetPitch, this.yaw, targetBank)
+    } else if (this.glide > 0.02 && this.mode === 'robot') {
+      // Gliding: face + drift the way the CAMERA looks, not the pulled-down stick
+      // (down on the stick means "flatten", not "turn around"). Steer the glide by
+      // dragging the camera. rotation.x (the upright/flat tilt) is set by the pose.
+      this.yaw = dampAngle(this.yaw, input.yaw, config.player.turnLerp, dt)
+      this.object.rotation.set(0, this.yaw, 0)
     } else if (moving && this.mode === 'robot') {
       const targetYaw = Math.atan2(this.moveDir.x, this.moveDir.z)
       const prevYaw = this.yaw
@@ -461,11 +473,16 @@ export class Player {
     const diveAir = this.mode === 'robot' && !this.grounded && !this.boarding && !this.grinding && !dancing
     const fallSpd = diveAir ? Math.max(0, -this.velocity.y) : 0
     const dive01 = clamp((fallSpd - 7) / 36, 0, 1) // 0 below ~7m/s, full by ~43m/s
-    this.diveLean = damp(this.diveLean, diveAir ? dive01 * 1.9 : 0, diveAir ? 5 : 9, dt) // up to ~109deg: head-first
-    if (diveAir && dive01 > 0.001) {
-      this.object.rotation.x = this.diveLean      // tip head-first into the dive
-      this.model.setFlyPose(dive01)               // arms up/limbs trailing
-      this.model.setWings(dive01 * 0.7)           // a little wing for speed read
+    // Pulling the stick down (glide) cancels the head-first lean: the harder you
+    // pull, the more upright the robot stands, so a full pull is a level glide.
+    const leanTarget = diveAir ? dive01 * 1.9 * (1 - this.glide) : 0
+    this.diveLean = damp(this.diveLean, leanTarget, diveAir ? 5 : 9, dt) // up to ~109deg: head-first
+    // Hold the flight pose while diving fast OR while gliding (a slow glide drops
+    // below dive speed, but the wings should stay out and the body stay tilted).
+    if (diveAir && (dive01 > 0.001 || this.glide > 0.02)) {
+      this.object.rotation.x = this.diveLean                       // head-first dive .. upright glide
+      this.model.setFlyPose(Math.max(dive01, this.glide * 0.6))    // arms up/limbs trailing
+      this.model.setWings(Math.max(dive01 * 0.7, this.glide))      // wings out for the glide
     } else if (this.mode === 'robot' && !this.boarding) {
       this.model.setFlyPose(0)
       this.model.setWings(0)
@@ -738,6 +755,12 @@ export class Player {
     const accelV = board ? config.hoverboard.accel : config.player.accel
     const decelV = board ? config.hoverboard.decel : config.player.decel
     const jetting = input.held.jet
+    // Skydive glide 0..1: how hard the stick is pulled DOWN during an unpowered
+    // free-fall. Pulling down flattens the dive into a glide (handled below); a
+    // gliding frame steers off the camera heading, not the pulled-down stick, so
+    // the normal (backward) air-control is skipped while gliding.
+    const freefall = !this.grounded && !this.boarding && !jetting && this.airTime > 0.25
+    this.glide = freefall ? clamp(-input.moveY, 0, 1) : 0
     // Sub-frame tap recovery: consume the one-shot jet edge latched in Input so a
     // tap whose press+release fell entirely between fixed steps still hops.
     const jetEdge = input.consumeEdge('jet')
@@ -745,8 +768,10 @@ export class Player {
     // while the jetpack is actively thrusting, since flight is a primary traversal.
     const air = jetting ? config.player.airControlJet : config.player.airControl
     const rate = (intent > 0.1 ? accelV : decelV) * (this.grounded ? 1 : air)
-    this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
-    this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
+    if (this.glide <= 0.02) {
+      this.velocity.x = approach(this.velocity.x, this.moveDir.x * maxSpeed * intent, rate * dt)
+      this.velocity.z = approach(this.velocity.z, this.moveDir.z * maxSpeed * intent, rate * dt)
+    }
 
     // Jetpack: hold to fly. Unlimited — it never runs out and always gives full
     // lift; the fuel meter stays topped up. Re-pressing in mid-air fires a pulse
@@ -794,6 +819,23 @@ export class Player {
     this.fuel = config.jetpack.fuelMax
     this.prevJet = input.held.jet
     this.model.setFlyPose(this.grounded ? 0 : 0.7)
+
+    // --- skydive glide -----------------------------------------------------
+    // Pulling the stick DOWN in a free-fall (this.glide, set above) flattens the
+    // dive into a glide. A small pull = a shallow, fast forward glide; pulling all
+    // the way flattens you right out (the pose stands upright) and you hang in a
+    // slow glide that drifts forward along the camera heading. The stronger the
+    // pull, the slower both the descent and the forward drift - so a flat attitude
+    // glides slowly. The eased sink replaces gravity for the frame.
+    if (this.glide > 0.02) {
+      const yaw = input.yaw
+      const fwd = THREE.MathUtils.lerp(16, 5, this.glide) // shallow glide fast, flat glide slow
+      this.velocity.x = approach(this.velocity.x, Math.sin(yaw) * fwd, 18 * dt)
+      this.velocity.z = approach(this.velocity.z, Math.cos(yaw) * fwd, 18 * dt)
+      const sink = THREE.MathUtils.lerp(-20, -4, this.glide) // ease the fall toward a slow sink
+      this.velocity.y = approach(this.velocity.y, sink, 26 * dt)
+      applyGravity = false // the eased sink stands in for gravity while gliding
+    }
 
     // Heavier gravity on the way down kills floaty hang-time so jumps land with
     // weight. Skipped while actively thrusting (handled by the eased cruise above).
