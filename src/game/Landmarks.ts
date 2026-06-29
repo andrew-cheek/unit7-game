@@ -28,6 +28,7 @@ export interface LandmarksResult {
   arcadePortals: ArcadeCabinet[]
   plazaHub: PlazaHub
   plazaMars: { pos: THREE.Vector3; radius: number }
+  mathPortal: { pos: THREE.Vector3; radius: number; group: THREE.Group; ring: THREE.Mesh }
   rocketGate: THREE.Group
   mats: THREE.Material[]
   geos: THREE.BufferGeometry[]
@@ -604,6 +605,46 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
   }
 
   // ===========================================================================
+  // MATH WORLDS portal — a standout walk-through gateway right in the spawn
+  // plaza that opens the intElla math-worlds platform (routed in Game.checkPortals).
+  // ===========================================================================
+  let mathPortal: { pos: THREE.Vector3; radius: number; group: THREE.Group; ring: THREE.Mesh }
+  {
+    const cx = -14, cz = 20
+    const g = new THREE.Group()
+    const gy = physics.sampleGround(cx, cz, 40)?.y ?? 0
+    g.position.set(cx, gy, cz)
+    const mw = 0x4ad7ff
+    const ring = new THREE.Mesh(ownG(new THREE.TorusGeometry(3, 0.34, 16, 48)), own(new THREE.MeshBasicMaterial({ color: mw, fog: false })))
+    ring.position.y = 3.4
+    g.add(ring)
+    const ring2 = new THREE.Mesh(ownG(new THREE.TorusGeometry(2.1, 0.18, 14, 40)), own(new THREE.MeshBasicMaterial({ color: 0xd6f6ff, fog: false })))
+    ring2.position.y = 3.4
+    g.add(ring2)
+    const disc = new THREE.Mesh(ownG(new THREE.CircleGeometry(2.8, 36)), own(new THREE.MeshBasicMaterial({ color: mw, transparent: true, opacity: 0.2, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    disc.position.y = 3.4
+    g.add(disc)
+    const labelTex = makeLabelTexture('MATH WORLDS', mw)
+    texs.push(labelTex)
+    const label = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthWrite: false })))
+    label.position.set(0, 8, 0)
+    label.scale.set(9, 2.25, 1)
+    g.add(label)
+    const decal = new THREE.Mesh(ownG(new THREE.RingGeometry(3.4, 4.4, 44)), own(new THREE.MeshBasicMaterial({ color: mw, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+    decal.rotation.x = -Math.PI / 2
+    decal.position.y = 0.15
+    g.add(decal)
+    if (config.tier.fxScale >= 0.6) {
+      const beam = new THREE.Mesh(ownG(new THREE.CylinderGeometry(0.8, 1.6, 160, 18, 1, true)), own(new THREE.MeshBasicMaterial({ color: mw, transparent: true, opacity: 0.1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      beam.position.y = 80
+      beam.renderOrder = 4
+      g.add(beam)
+    }
+    scene.add(g)
+    mathPortal = { pos: new THREE.Vector3(cx, gy, cz), radius: 3.4, group: g, ring }
+  }
+
+  // ===========================================================================
   // ROCKET launch gate.
   // ===========================================================================
   let rocketGate: THREE.Group
@@ -626,5 +667,5 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     rocketGate = g
   }
 
-  return { arcadePortals, plazaHub, plazaMars, rocketGate, mats, geos, texs, screenUpdate }
+  return { arcadePortals, plazaHub, plazaMars, mathPortal, rocketGate, mats, geos, texs, screenUpdate }
 }

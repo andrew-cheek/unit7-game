@@ -322,6 +322,10 @@ export class Game {
   // The central plaza hero ring doubles as the Mars gateway: step into it to
   // travel. Stored as a plain trigger so checkPortals can route it like a ring.
   private plazaMars: { pos: THREE.Vector3; radius: number } | null = null
+  // Standout walk-through portal in the spawn plaza that opens the Math Worlds
+  // platform. Edge-triggered (only fires on entry) so it can't re-fire on exit.
+  private mathPortal: { pos: THREE.Vector3; radius: number; group: THREE.Group; ring: THREE.Mesh } | null = null
+  private inMathPortalZone = false
   private rocketGate: THREE.Group | null = null
   // Browser-automation ("synthetic input") mode: set by the debug-gated test
   // harness so an agent can drive the game without pointer lock. When true, the
@@ -962,6 +966,7 @@ export class Game {
     this.arcadePortals = lm.arcadePortals
     this.plazaHub = lm.plazaHub
     this.plazaMars = lm.plazaMars
+    this.mathPortal = lm.mathPortal
     this.rocketGate = lm.rocketGate
     this.arcadeMats.push(...lm.mats)
     this.arcadeGeos.push(...lm.geos)
@@ -2877,6 +2882,14 @@ export class Game {
     if (this.zone === 'earth' && this.plazaMars && Math.hypot(px - this.plazaMars.pos.x, pz - this.plazaMars.pos.z) < this.plazaMars.radius) {
       this.requestTravel('mars')
     }
+    // The MATH WORLDS plaza portal opens the math-worlds platform overlay.
+    // Edge-triggered: fire only when entering the ring, never on the frame the
+    // player is stepped back out, so it can't immediately re-launch.
+    if (this.zone === 'earth' && this.mathPortal) {
+      const inMath = Math.hypot(px - this.mathPortal.pos.x, pz - this.mathPortal.pos.z) < this.mathPortal.radius
+      if (inMath && !this.inMathPortalZone && !this.inMinigame) this.enterMinigame('mathworlds', this.mathPortal.pos)
+      this.inMathPortalZone = inMath
+    }
   }
 
   /**
@@ -3835,6 +3848,11 @@ export class Game {
         this.plazaHub.ring2.rotation.z -= dt * 0.8
         if (this.plazaHub.beamMat) this.plazaHub.beamMat.opacity = 0.1 + Math.sin(_elapsed * 1.5) * 0.03
       }
+    }
+    // Math Worlds spawn portal: Earth-only, slowly spinning gateway ring.
+    if (this.mathPortal) {
+      this.mathPortal.group.visible = onEarth
+      if (onEarth) this.mathPortal.ring.rotation.z += dt * 0.6
     }
 
     if (this.netTimer > 0) {
