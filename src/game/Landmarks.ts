@@ -269,7 +269,7 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
   // ===========================================================================
   {
     const CX = 0, CZ = 46 // building center
-    const W = 44, D = 36, H = 14, t = 0.7 // bigger hall so the games read + you have room to walk
+    const W = 44, D = 36, H = 20, t = 0.7 // tall hall so the games read, you have room to walk, and the follow camera isn't jammed low under the ceiling indoors
     const gy = physics.sampleGround(CX, CZ, 60)?.y ?? 0
     const frontZ = CZ - D / 2, backZ = CZ + D / 2
     const leftX = CX - W / 2, rightX = CX + W / 2
@@ -307,8 +307,10 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     scene.add(lintel)
     // Invisible ceiling slab over the hall, added to the camera solids only: the
     // roof is an open beam frame, so without this the follow camera punches up
-    // through it (out the top) whenever you look up indoors. Not a physics
-    // collider - the tower mass above already blocks the player.
+    // through it (out the top) whenever you look up indoors. It sits at the full
+    // (now taller) hall height H so the indoor camera has real headroom instead of
+    // being pinned to a steep, cramped angle. Not a physics collider - the tower
+    // mass above already blocks the player.
     const ceilCollider = new THREE.Mesh(ownG(new THREE.BoxGeometry(W, t, D)), wallMat)
     ceilCollider.position.set(CX, gy + H, CZ)
     ceilCollider.visible = false

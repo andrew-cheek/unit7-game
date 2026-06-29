@@ -594,7 +594,7 @@ function JoinWorld({ onJoin, onSolo, touch }: { onJoin: (name: string) => void; 
             onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
             style={welcomeInput}
           />
-          <button data-testid="join-world" style={welcomeBtnPrimary} onClick={submit} disabled={!name.trim()}>JOIN WORLD ▸</button>
+          <button data-testid="join-world" style={welcomeBtnPrimary} onClick={submit}>JOIN WORLD ▸</button>
           <button style={welcomeBtnGhost} onClick={() => setMode('choice')}>◂ BACK</button>
         </>
       )}

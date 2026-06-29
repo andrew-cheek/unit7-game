@@ -22,9 +22,8 @@ interface BtnDef {
   color: string
 }
 
-// JUMP is the primary button (tap = jump, hold = jetpack/fly), in the spot a
+// JET is the primary button (tap = hop, hold = jetpack/fly), in the spot a
 // Roblox player reaches for. The rest are secondary and only shown when useful.
-const JUMP: BtnDef = { label: 'JUMP', action: 'jet', type: 'hold', color: '#27e7ff' }
 const JET: BtnDef = { label: 'JET', action: 'jet', type: 'hold', color: '#27e7ff' }
 const RUN: BtnDef = { label: 'SPRINT', action: 'sprint', type: 'sprint', color: '#9bff4d' }
 const BOOST: BtnDef = { label: 'BOOST', action: 'boost', type: 'hold', color: '#ff8a1e' }
@@ -42,7 +41,7 @@ const WARP: BtnDef = { label: 'WARP', action: 'warp', type: 'tap', color: '#b46b
 
 /**
  * Touch controls in the shape a Roblox player expects: a floating left thumb-stick
- * that appears wherever you press, a big JUMP button bottom-right (tap to jump,
+ * that appears wherever you press, a big JET button bottom-right (tap to hop,
  * hold to fly), a small secondary cluster that only shows relevant actions, and
  * two-finger pinch-to-zoom on the camera side. The right side of the screen is
  * the camera-drag area.
@@ -89,7 +88,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
   const inMech = inVehicle && !!hud.vehicle && hud.vehicle.startsWith('MECH')
 
   // Primary button + a trimmed secondary set (contextual only).
-  let primary: BtnDef = JUMP
+  let primary: BtnDef = JET
   let secondary: BtnDef[]
   if (inVehicle) {
     primary = inMech ? JET : BOOST
@@ -122,7 +121,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
         ? 'WARP: SWITCH / RETURN'
         : hud.warp.ready
           ? 'WARP READY'
-          : 'TAP JUMP · HOLD TO FLY'
+          : 'TAP JET · HOLD TO FLY'
 
   // --- floating joystick (left half) ---
   const onJoyDown = (e: RPointerEvent) => {
@@ -221,7 +220,7 @@ export function MobileControls({ controls, hud }: { controls: GameControls; hud:
     }
   }
 
-  // CHUTE / CUT stacks directly above JUMP (right side) while airborne, so it's a
+  // CHUTE / CUT stacks directly above JET (right side) while airborne, so it's a
   // prominent second action under the right thumb and never overlaps the floating
   // joystick on the left. Label + color flip once the canopy is open.
   const showChuteBtn = !inVehicle && airborne
@@ -321,7 +320,7 @@ const cluster: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'flex-end',
-  // Generous separation between the secondary cluster, CHUTE and the big JUMP so
+  // Generous separation between the secondary cluster, CHUTE and the big JET so
   // reaching for one can't clip another (the main fat-finger complaint).
   gap: 16,
   pointerEvents: 'none',
