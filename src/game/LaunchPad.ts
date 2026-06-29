@@ -4,6 +4,7 @@ import { PlatformAirshow } from './PlatformAirshow'
 import { SkyElevator } from './SkyElevator'
 import { FactoryEscalator } from './FactoryEscalator'
 import { RetroDeco } from './RetroDeco'
+import { ParachuteDropZone } from './ParachuteDropZone'
 
 /**
  * The opening you stand on, not fall into: a big floating robot FACTORY high above
@@ -40,6 +41,7 @@ export class LaunchPad {
   private skyElevator2!: SkyElevator // decorative twin on the opposite side
   private escalators!: FactoryEscalator // robots ride down from the towers, then chute off / lift up
   private retroDeco!: RetroDeco
+  private arrivals!: ParachuteDropZone // second drop zone on the far rim: robots parachute in + dive off
 
   private units: {
     g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Object3D; legR: THREE.Object3D
@@ -138,6 +140,10 @@ export class LaunchPad {
       elevators: [{ x: -this.radius * 0.36, z: this.radius * 0.58 }, { x: this.radius * 0.36, z: -this.radius * 0.58 }],
     })
     this.retroDeco = new RetroDeco(this.group, { radius: this.radius })
+    // The mirror DROP ZONE on the far (-Z) rim: finished Unit 7 robots parachute
+    // onto a marked landing pad, cut the canopy, then walk off the back edge to
+    // dive - so turning around shows a busy arrivals drop zone, not dead deck.
+    this.arrivals = new ParachuteDropZone(this.group, { radius: this.radius })
 
     // Circular collider with enough segments to read as a true circle, matching the
     // visual floor radius exactly - so you fall off right at the visible edge.
@@ -1237,6 +1243,7 @@ export class LaunchPad {
     this.skyElevator2.update(dt)
     this.escalators.update(dt)
     this.retroDeco.update(dt)
+    this.arrivals.update(dt)
     // Item 4: on 'low' ONLY, skip the distant-backdrop opacity sweeps on 2 of every
     // 3 frames - they rewrite a uniform every frame yet read identically at a third
     // the rate this far away. Medium/high leave `lowSkip` false, so they stay
@@ -1563,6 +1570,7 @@ export class LaunchPad {
     this.skyElevator2?.dispose()
     this.escalators?.dispose()
     this.retroDeco?.dispose()
+    this.arrivals?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
     this.texs.forEach((t) => t.dispose())
