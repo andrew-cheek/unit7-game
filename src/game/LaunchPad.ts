@@ -4,6 +4,7 @@ import { PlatformAirshow } from './PlatformAirshow'
 import { SkyElevator } from './SkyElevator'
 import { FactoryEscalator } from './FactoryEscalator'
 import { RetroDeco } from './RetroDeco'
+import { ParachuteDropZone } from './ParachuteDropZone'
 
 /**
  * The opening you stand on, not fall into: a big floating robot FACTORY high above
@@ -40,6 +41,7 @@ export class LaunchPad {
   private skyElevator2!: SkyElevator // decorative twin on the opposite side
   private escalators!: FactoryEscalator // robots ride down from the towers, then chute off / lift up
   private retroDeco!: RetroDeco
+  private arrivals!: ParachuteDropZone // second drop zone on the far rim: robots parachute in + dive off
 
   private units: {
     g: THREE.Group; parts: THREE.Object3D[]; legL: THREE.Object3D; legR: THREE.Object3D
@@ -115,7 +117,9 @@ export class LaunchPad {
     this.buildForgeMachine()
     this.buildAssemblyHangar()
     this.buildArms()
+    this.buildWorkLights()
     this.buildSign()
+    this.buildSideSigns()
     this.buildGuidance()
     this.buildProps()
     this.buildSciFi()
@@ -136,6 +140,10 @@ export class LaunchPad {
       elevators: [{ x: -this.radius * 0.36, z: this.radius * 0.58 }, { x: this.radius * 0.36, z: -this.radius * 0.58 }],
     })
     this.retroDeco = new RetroDeco(this.group, { radius: this.radius })
+    // The mirror DROP ZONE on the far (-Z) rim: finished Unit 7 robots parachute
+    // onto a marked landing pad, cut the canopy, then walk off the back edge to
+    // dive - so turning around shows a busy arrivals drop zone, not dead deck.
+    this.arrivals = new ParachuteDropZone(this.group, { radius: this.radius })
 
     // Circular collider with enough segments to read as a true circle, matching the
     // visual floor radius exactly - so you fall off right at the visible edge.
@@ -481,11 +489,19 @@ export class LaunchPad {
     )
     floor.rotation.x = -Math.PI / 2; floor.position.y = 0.02
     this.group.add(floor)
-    // Lighting so it isn't dark up at altitude.
-    const key = new THREE.PointLight(0xdcecff, 4.6, 180, 2); key.position.set(0, 26, this.beltZ - 4); this.group.add(key)
-    const fill = new THREE.PointLight(0x6fa8ff, 2.4, 140, 2); fill.position.set(0, 12, R * 0.5); this.group.add(fill)
+    // Lighting so it isn't dark up at altitude. Brightened to read as a lit factory
+    // INTERIOR (the muddy old values left the assembly bays in shadow): a strong cool
+    // key over the line, a wide blue fill, the forge's warm spill, plus a dedicated
+    // white work-light over the belt so the robots being built are clearly lit. The
+    // hemisphere floor is lifted so nothing on the deck sits in pure shadow.
+    const key = new THREE.PointLight(0xeaf4ff, 6.2, 190, 2); key.position.set(0, 26, this.beltZ - 4); this.group.add(key)
+    const fill = new THREE.PointLight(0x86b6ff, 3.2, 150, 2); fill.position.set(0, 12, R * 0.5); this.group.add(fill)
     const forge = new THREE.PointLight(0xff8a3c, 2.2, 42, 2); forge.position.set(this.beltX0, 6, this.beltZ); this.group.add(forge)
-    const ambient = new THREE.HemisphereLight(0x9fc0ff, 0x0a1020, 0.7); this.group.add(ambient)
+    // White work-light directly over the assembly line picks the units out of the
+    // backdrop. One light (not per-station) keeps it cheap; the per-station glow
+    // strips below (buildWorkLights) are emissive, not dynamic lights.
+    const work = new THREE.PointLight(0xffffff, config.tier.name === 'low' ? 2.4 : 3.4, 70, 2); work.position.set(0, 11, this.beltZ); this.group.add(work)
+    const ambient = new THREE.HemisphereLight(0xb6d2ff, 0x16243c, 1.05); this.group.add(ambient)
 
     // Raised rim wall + glowing top lip (so the edge is unmistakable).
     const wall = new THREE.Mesh(
@@ -530,8 +546,15 @@ export class LaunchPad {
       const st = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.6, 0.02, 6.4)), stripeMat)
       st.position.set(this.beltX0 + (i / 12) * len, 0.92, Z); this.group.add(st); this.beltSeams.push(st)
     }
+    // Side curbs of the belt, kept LOW + slim with a cyan top strip so they read as
+    // an intentional rail edge instead of a dark bar that hides the robots' legs.
+    // (Was a chunky 1.3-high box that walled off the line in the old screenshot.)
     const railMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2438, metalness: 0.7, roughness: 0.4 }))
-    for (const sz of [-3.6, 3.6]) { const rail = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(len, 1.3, 0.5)), railMat); rail.position.set(cx, 0.85, Z + sz); this.group.add(rail) }
+    const railTrim = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    for (const sz of [-3.6, 3.6]) {
+      const rail = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(len, 0.55, 0.35)), railMat); rail.position.set(cx, 0.55, Z + sz); this.group.add(rail)
+      const trim = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(len, 0.07, 0.12)), railTrim); trim.position.set(cx, 0.84, Z + sz); this.group.add(trim)
+    }
     // (the exposed overhead truss "gantry" was retired - the belt now sits inside
     //  the vaulted assembly hangar built in buildAssemblyHangar)
     // Hot forge arch at the head where raw chassis drop in.
@@ -541,9 +564,11 @@ export class LaunchPad {
     forgeGlow.position.set(this.beltX0 - 0.4, 2.4, Z); forgeGlow.rotation.y = Math.PI / 2; this.group.add(forgeGlow)
     // (the big girder status screens were removed - they blocked the HUMANOID
     //  ROBOTS sign on the tower; the tower's own wall screens cover that detail)
-    // Conduits running along the gantry.
+    // Conduits running along the line. ONLY the back run (sz > 0, behind the units)
+    // is drawn now: the old front pair sat at head height directly between the spawn
+    // and the assembly bays and read as a dark bar slashing across the robots.
     const pipeMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.75, roughness: 0.35, emissive: 0x112233, emissiveIntensity: 0.3 }))
-    for (const sz of [-6.85, 6.85]) for (const yy of [2.4, 3.4]) { const pipe = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.18, 0.18, len + 4, 8)), pipeMat); pipe.rotation.z = Math.PI / 2; pipe.position.set(cx, yy, Z + sz); this.group.add(pipe) }
+    for (const yy of [2.4, 3.4]) { const pipe = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.18, 0.18, len + 4, 8)), pipeMat); pipe.rotation.z = Math.PI / 2; pipe.position.set(cx, yy, Z + 6.85); this.group.add(pipe) }
   }
 
   /** The assembly building over the conveyor line, styled after the concept art:
@@ -702,6 +727,27 @@ export class LaunchPad {
     }
   }
 
+  /** White overhead work-lights above each assembly station: a slim fixture bar
+   *  hung over the line with a soft additive light-pool fanning down onto the belt.
+   *  Pure emissive + additive (no dynamic lights), so it reads as bright "baked"
+   *  factory lighting that picks each robot out of the backdrop, cheap on mobile. */
+  private buildWorkLights() {
+    const Z = this.beltZ
+    const fixtureMat = this.own(new THREE.MeshStandardMaterial({ color: 0x0c1422, metalness: 0.6, roughness: 0.5 }))
+    const tubeMat = this.own(new THREE.MeshBasicMaterial({ color: 0xeaf6ff, fog: false }))
+    const poolMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }))
+    const stations = 4
+    const fixGeo = this.ownG(new THREE.BoxGeometry(1.2, 0.4, 5))
+    const tubeGeo = this.ownG(new THREE.BoxGeometry(0.7, 0.12, 4.4))
+    const poolGeo = this.ownG(new THREE.ConeGeometry(2.6, 5.2, 14, 1, true))
+    for (let i = 0; i < stations; i++) {
+      const x = this.beltX0 + 5 + (i / (stations - 1)) * (this.lenX - 10)
+      const fixture = new THREE.Mesh(fixGeo, fixtureMat); fixture.position.set(x, 7.4, Z); this.group.add(fixture)
+      const tube = new THREE.Mesh(tubeGeo, tubeMat); tube.position.set(x, 7.18, Z); this.group.add(tube)
+      const pool = new THREE.Mesh(poolGeo, poolMat); pool.position.set(x, 4.6, Z); this.group.add(pool)
+    }
+  }
+
   /** Neon DROP ZONE billboard + a big animated down-arrow at the ledge. */
   private buildSign() {
     const R = this.radius
@@ -723,6 +769,45 @@ export class LaunchPad {
       chev.rotation.x = Math.PI; chev.rotation.y = Math.PI / 4
       chev.position.set(0, 6 - i * 2.3, R - 3); this.group.add(chev); this.arrowChevs.push(chev)
     }
+  }
+
+  /** Secondary station signage that builds the "this is a working assembly line"
+   *  read: clean cyan/white neon labels flanking and over the belt, each on a slim
+   *  post, all facing the spawn. Hierarchy below the big magenta DROP ZONE sign;
+   *  cyan only (magenta is reserved for the hero sign per the art direction). */
+  private buildSideSigns() {
+    const Z = this.beltZ
+    const postMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1b2336, metalness: 0.6, roughness: 0.45 }))
+    const frameMat = this.own(new THREE.MeshBasicMaterial({ color: 0x27e7ff, transparent: true, opacity: 0.85, fog: false }))
+    // [text, x, y, z, width, height, withPost]
+    const specs: [string, number, number, number, number, number, boolean][] = [
+      ['ASSEMBLY LINE 07', -15, 5.2, 1.5, 8, 1.7, true],
+      ['QUALITY CHECK', 15, 5.2, 1.5, 7, 1.7, true],
+      ['BUILD PHASE 02', 0, 9.6, 2.2, 8.5, 1.8, false],
+    ]
+    for (const [text, x, y, z, w, h, withPost] of specs) {
+      const tex = this.labelSignTex(text); this.texs.push(tex)
+      const panel = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(w, h)), this.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide })))
+      panel.position.set(x, y, z); panel.rotation.y = Math.PI // face the spawn (-z)
+      this.group.add(panel)
+      // Slim glowing frame bars top + bottom.
+      for (const ey of [y + h / 2 + 0.15, y - h / 2 - 0.15]) { const bar = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(w + 0.3, 0.12, 0.12)), frameMat); bar.position.set(x, ey, z); this.group.add(bar) }
+      if (withPost) { const post = new THREE.Mesh(this.ownG(new THREE.BoxGeometry(0.4, y - h / 2, 0.4)), postMat); post.position.set(x, (y - h / 2) / 2, z); this.group.add(post) }
+    }
+  }
+
+  /** A clean cyan-on-dark neon label panel drawn to a canvas (station signage). */
+  private labelSignTex(text: string): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#060b14'; ctx.fillRect(0, 0, 512, 128)
+    ctx.fillStyle = 'rgba(39,231,255,0.06)'; for (let y = 0; y < 128; y += 5) ctx.fillRect(0, y, 512, 2)
+    ctx.strokeStyle = 'rgba(39,231,255,0.35)'; ctx.lineWidth = 3; ctx.strokeRect(6, 6, 500, 116)
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.shadowColor = '#27e7ff'; ctx.shadowBlur = 16; ctx.fillStyle = '#dffaff'
+    ctx.font = '800 58px ui-monospace, Menlo, monospace'; ctx.fillText(text, 256, 70)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   /** "Walk this way" guidance over the deck so a first-time player instantly reads
@@ -823,7 +908,9 @@ export class LaunchPad {
 
   private buildProps() {
     const R = this.radius
-    const coreMat = this.own(new THREE.MeshBasicMaterial({ color: 0x9b6bff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+    // Cyan-blue, not purple: the art direction limits purple/magenta, so the deck
+    // accent cores read in the cool steel/cyan family with the rest of the plant.
+    const coreMat = this.own(new THREE.MeshBasicMaterial({ color: 0x36b6ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
     const coreGeo = this.ownG(new THREE.IcosahedronGeometry(1.6, 0))
     const cageMat = this.own(new THREE.MeshStandardMaterial({ color: 0x2a3550, metalness: 0.7, roughness: 0.4, emissive: 0x27e7ff, emissiveIntensity: 0.4 }))
     const cageGeo = this.ownG(new THREE.TorusGeometry(2.1, 0.12, 6, 16))
@@ -1069,8 +1156,8 @@ export class LaunchPad {
     const poleMat = this.own(new THREE.MeshStandardMaterial({ color: 0x1a2336, metalness: 0.7, roughness: 0.4 }))
     for (const sx of [-R * 0.66, R * 0.66]) {
       const pole = new THREE.Mesh(this.ownG(new THREE.CylinderGeometry(0.35, 0.5, 9, 10)), poleMat); pole.position.set(sx, 4.5, -R * 0.5); this.group.add(pole)
-      const cage = new THREE.Mesh(this.ownG(new THREE.IcosahedronGeometry(1.1, 0)), this.own(new THREE.MeshBasicMaterial({ color: 0x9b6bff, wireframe: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))); cage.position.set(sx, 9.4, -R * 0.5); this.group.add(cage); this.holos.push({ o: cage, sp: 1.4 })
-      const orbMat = this.own(new THREE.MeshBasicMaterial({ color: 0xbf9bff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
+      const cage = new THREE.Mesh(this.ownG(new THREE.IcosahedronGeometry(1.1, 0)), this.own(new THREE.MeshBasicMaterial({ color: 0x36e0ff, wireframe: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))); cage.position.set(sx, 9.4, -R * 0.5); this.group.add(cage); this.holos.push({ o: cage, sp: 1.4 })
+      const orbMat = this.own(new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }))
       const orb = new THREE.Mesh(this.ownG(new THREE.SphereGeometry(0.6, 12, 10)), orbMat); orb.position.set(sx, 9.4, -R * 0.5); this.group.add(orb); this.pylons.push(orbMat)
     }
 
@@ -1156,6 +1243,7 @@ export class LaunchPad {
     this.skyElevator2.update(dt)
     this.escalators.update(dt)
     this.retroDeco.update(dt)
+    this.arrivals.update(dt)
     // Item 4: on 'low' ONLY, skip the distant-backdrop opacity sweeps on 2 of every
     // 3 frames - they rewrite a uniform every frame yet read identically at a third
     // the rate this far away. Medium/high leave `lowSkip` false, so they stay
@@ -1482,6 +1570,7 @@ export class LaunchPad {
     this.skyElevator2?.dispose()
     this.escalators?.dispose()
     this.retroDeco?.dispose()
+    this.arrivals?.dispose()
     this.geos.forEach((g) => g.dispose())
     this.mats.forEach((m) => m.dispose())
     this.texs.forEach((t) => t.dispose())
