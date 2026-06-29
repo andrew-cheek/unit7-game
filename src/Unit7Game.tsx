@@ -389,6 +389,9 @@ export default function Unit7Game({ config, className, style }: Unit7GameProps) 
           <DriveMad touch={touch} onExit={() => controlsRef.current?.exitMinigame()} />
         </Suspense>
       )}
+      {hud?.minigame === 'mathworlds' && controlsRef.current && (
+        <MathWorldsOverlay onExit={() => controlsRef.current?.exitMinigame()} />
+      )}
       {hud?.match && controlsRef.current && (
         <Suspense fallback={null}>
           <BeamWarsLive
@@ -837,6 +840,36 @@ function PlatformCta() {
   return (
     <div style={platformCta}>
       <span style={{ color: '#27e7ff' }}>Use the stick to walk to the glowing edge, then step off!</span>
+    </div>
+  )
+}
+
+/** Full-screen "Math Worlds" portal: an iframe to the self-hosted intElla
+ * platform, opened like any arcade cabinet. The engine is already frozen and
+ * pointer lock released by enterMinigame, so the iframe is fully interactive.
+ * The BACK button is a sibling of the iframe (not inside it) so it stays
+ * clickable even though the cross-origin frame captures focus. */
+function MathWorldsOverlay({ onExit }: { onExit: () => void }) {
+  // Esc returns to the city while focus is still on the page chrome. Once focus
+  // is inside the cross-origin iframe key events stop bubbling, so BACK is the
+  // primary exit (and the only one on touch).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { onExit(); e.preventDefault() } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onExit])
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: '#05060b', pointerEvents: 'auto' }}>
+      <iframe
+        src="https://intella-worlds.netlify.app"
+        title="Math Worlds"
+        style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+        allow="autoplay; fullscreen; clipboard-write"
+      />
+      <button
+        onClick={onExit}
+        style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', zIndex: 61, cursor: 'pointer', padding: '12px 22px', font: '800 13px/1 ui-monospace, Menlo, monospace', letterSpacing: '0.16em', color: '#04121a', background: 'linear-gradient(180deg,#5cf0ff,#27e7ff)', border: 'none', borderRadius: 999, boxShadow: '0 0 18px rgba(39,231,255,0.5)' }}
+      >◂ BACK TO CITY</button>
     </div>
   )
 }

@@ -143,7 +143,7 @@ export interface PlayerProfile {
   games: { game: string; played: number; won: number; lost: number; best: number }[]
 }
 
-export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena' | 'drivemad'
+export type MinigameKind = 'beamwars' | 'digduel' | 'merge2048' | 'invaders' | 'snake' | 'raceloop' | 'mecharena' | 'drivemad' | 'mathworlds'
 
 /** Minimal command surface the HUD / mobile controls use to talk back to the engine. */
 export interface GameControls {

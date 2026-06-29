@@ -1806,7 +1806,7 @@ export class Game {
    */
   private installNav() {
     const ACTIONS: GameAction[] = ['sprint', 'jet', 'net', 'enter', 'boost', 'morph', 'chute', 'dance', 'bubble', 'board', 'warp', 'grapple']
-    const MINIGAMES: MinigameKind[] = ['beamwars', 'digduel', 'merge2048', 'invaders', 'snake', 'raceloop', 'mecharena', 'drivemad']
+    const MINIGAMES: MinigameKind[] = ['beamwars', 'digduel', 'merge2048', 'invaders', 'snake', 'raceloop', 'mecharena', 'drivemad', 'mathworlds']
     const ZONES: Zone[] = ['earth', 'moon', 'mars']
 
     const nav = {

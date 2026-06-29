@@ -36,7 +36,7 @@ export interface LandmarksResult {
   screenUpdate: ((dt: number) => void) | null
 }
 
-/** The eight cabinet games, in door order (kind, accent color, marquee name). */
+/** The nine cabinet games, in door order (kind, accent color, marquee name). */
 const GAMES: { kind: MinigameKind; color: number; name: string }[] = [
   { kind: 'beamwars', color: 0x27e7ff, name: 'BEAM WARS' },
   { kind: 'snake', color: 0x8a5cff, name: 'SNAKE' },
@@ -46,6 +46,7 @@ const GAMES: { kind: MinigameKind; color: number; name: string }[] = [
   { kind: 'mecharena', color: 0xff8a1e, name: 'MECH ARENA' },
   { kind: 'merge2048', color: 0xff2bd0, name: '2048' },
   { kind: 'drivemad', color: 0x9bff4d, name: 'DRIVE FRENZY' },
+  { kind: 'mathworlds', color: 0x4ad7ff, name: 'MATH WORLDS' },
 ]
 
 /** A neon text label baked to a canvas texture for a billboard sprite. */
@@ -243,6 +244,13 @@ function arcadeThumbnail(kind: MinigameKind, color: number): THREE.CanvasTexture
       ctx.beginPath(); ctx.moveTo(-90, 60); ctx.lineTo(-30, -60); ctx.moveTo(90, 60); ctx.lineTo(30, -60); ctx.stroke() // road
       ctx.setLineDash([14, 14]); ctx.beginPath(); ctx.moveTo(0, 60); ctx.lineTo(0, -60); ctx.stroke(); ctx.setLineDash([])
       ctx.fillStyle = col; box(-18, 12, 36, 40) // car
+      break
+    }
+    case 'mathworlds': {
+      ctx.font = '800 64px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = col; ctx.fillText('7', -64, -18); ctx.fillText('8', 0, -18)
+      ctx.fillStyle = '#eaf6ff'; ctx.fillText('+', -32, -18); ctx.fillText('=', 48, -18)
+      ctx.strokeStyle = col; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(-90, 48); ctx.lineTo(90, 48); ctx.stroke()
       break
     }
   }
@@ -472,16 +480,18 @@ export function buildLandmarks(scene: THREE.Scene, physics: Physics, solids: THR
     header.position.set(CX, gy + H - 2.4, backZ - 1.2)
     header.scale.set(20, 5, 1); scene.add(header)
 
-    // ---- doors: 4 on each side wall, facing inward. Big lit preview screens. ----
-    const perSide = 4
+    // ---- doors: split across the two side walls, facing inward. Big lit preview screens. ----
+    // Count-driven so any number of GAMES lays out cleanly (ceil on the left wall).
+    const perSide = Math.ceil(GAMES.length / 2)
     const z0 = frontZ + 5, z1 = backZ - 4
     const doorThumbGeo = ownG(new THREE.PlaneGeometry(4.8, 3.6))
     const padGeo = ownG(new THREE.RingGeometry(1.8, 2.4, 28))
     for (let i = 0; i < GAMES.length; i++) {
       const g = GAMES[i]
       const side = i < perSide ? -1 : 1 // left wall first, then right
+      const onThisSide = side === -1 ? Math.min(perSide, GAMES.length) : GAMES.length - perSide
       const idx = i % perSide
-      const z = THREE.MathUtils.lerp(z0, z1, idx / (perSide - 1))
+      const z = onThisSide > 1 ? THREE.MathUtils.lerp(z0, z1, idx / (onThisSide - 1)) : (z0 + z1) / 2
       const wallX = side === -1 ? leftX + t / 2 : rightX - t / 2
       const inward = -side // doors on the left wall face +X, etc.
       const door = new THREE.Group()
