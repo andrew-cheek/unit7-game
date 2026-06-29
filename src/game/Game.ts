@@ -220,6 +220,9 @@ export class Game {
   // launch pad and travel off-world to `dest`. Scratch vector reused for the
   // elevator world-centre proximity test (no per-frame allocation).
   private elevatorBoard: { t: number; dest: Zone } | null = null
+  // Same idea for the two boardable rockets (left = moon, right = mars): once a
+  // launch is in progress, fade out and travel off-world.
+  private rocketBoard: { t: number; dest: Zone } | null = null
   private elevScratch = new THREE.Vector3()
   private dropLand = new THREE.Vector3() // where the drop-in steers + hands off (arcade plaza)
   private savedFogDensity: number | null = null
@@ -1252,6 +1255,8 @@ export class Game {
   private endLaunchPad() {
     if (!this.launchPad) return
     this.launchCineT = -1
+    this.elevatorBoard = null
+    this.rocketBoard = null
     this.physics.removeGroundMesh(this.launchPad.collider)
     for (const m of this.launchPad.extraGroundMeshes()) this.physics.removeGroundMesh(m)
     for (const b of this.launchPadColliders) { const i = this.physics.colliders.indexOf(b); if (i >= 0) this.physics.colliders.splice(i, 1) }
@@ -3443,6 +3448,22 @@ export class Game {
         return
       }
 
+      // Rocket launch in progress: hold the player while the rocket ignites + climbs
+      // (LaunchPad.update animates it), fade out, then travel to the chosen world.
+      if (this.rocketBoard) {
+        this.rocketBoard.t += dt
+        this.hud.fade = Math.min(1, this.rocketBoard.t / 1.3)
+        if (this.rocketBoard.t >= 1.3) {
+          const dest = this.rocketBoard.dest
+          this.rocketBoard = null
+          this.endLaunchPad()
+          this.doTravel(dest)
+          this.trans = { phase: 'in', t: 0, target: dest }
+        }
+        this.pushHud(dt)
+        return
+      }
+
       // Near the elevator: prompt, and step into the car footprint to ride. The
       // destination is whatever the sign is showing as you enter (it cycles
       // MOON/MARS, so you "catch the lift" to where you want).
@@ -3466,6 +3487,27 @@ export class Game {
         // ENTER button on the platform. Boarding is walk-in.
       } else {
         this.launchPad.elevatorSetBoarding(false)
+      }
+
+      // Rockets: walk onto a launch pad to blast off to its world. A short banner on
+      // approach makes them discoverable; stepping inside the pad footprint launches.
+      if (!this.vehicles.current) {
+        for (const spot of this.launchPad.rocketSpots()) {
+          const rd = Math.hypot(p.x - spot.x, p.z - spot.z)
+          if (rd >= spot.radius + 4) continue
+          if (rd < spot.radius) {
+            this.launchPad.igniteRocket(spot.dest)
+            this.rocketBoard = { t: 0, dest: spot.dest }
+            this.hud.banner = `LAUNCH · ${spot.dest.toUpperCase()}`
+            this.bannerTimer = 2.6
+            this.audio.play('portal')
+            this.pushHud(dt)
+            return
+          }
+          // Within approach range: nudge the "step on to launch" banner.
+          this.hud.banner = `ROCKET · ${spot.dest.toUpperCase()} ▲`
+          this.bannerTimer = 0.3
+        }
       }
 
       // On foot: walk off the ledge -> normal skydive. (Driving off in a vehicle is

@@ -58,7 +58,8 @@ export class LaunchPad {
   private holos: { o: THREE.Object3D; sp: number }[] = []
   private pylons: THREE.MeshBasicMaterial[] = []
   private cargo: { o: THREE.Object3D; ph: number; baseY: number }[] = []
-  private rockets: { g: THREE.Group; flame: THREE.Mesh; flameMat: THREE.MeshBasicMaterial; glowMat: THREE.MeshBasicMaterial; smokeMat: THREE.SpriteMaterial; armL: THREE.Group; armR: THREE.Group; bx: number; bz: number; t: number; vy: number; y: number; ph: number }[] = []
+  private rockets: { g: THREE.Group; flame: THREE.Mesh; flameMat: THREE.MeshBasicMaterial; glowMat: THREE.MeshBasicMaterial; smokeMat: THREE.SpriteMaterial; armL: THREE.Group; armR: THREE.Group; bx: number; bz: number; t: number; vy: number; y: number; ph: number; dest: 'moon' | 'mars'; launching: boolean; launchT: number }[] = []
+  private rocketSpotsCache: { x: number; z: number; radius: number; dest: 'moon' | 'mars' }[] | null = null
   private arrowMat!: THREE.MeshBasicMaterial
   private arrowChevs: THREE.Mesh[] = []
   private edgeGlow!: THREE.MeshBasicMaterial
@@ -923,14 +924,16 @@ export class LaunchPad {
     }
   }
 
-  /** Two rockets on launch gantries at the sides that ignite, shake and blast off
-   *  on a staggered loop. */
+  /** Two BOARDABLE rockets on launch gantries at the sides: the left one flies to
+   *  the MOON, the right one to MARS. They idle cradled on the pad until the player
+   *  steps onto the pad footprint (see rocketSpots/igniteRocket + Game's launchPad
+   *  loop), then ignite and climb as the screen fades and the trip begins. */
   private buildRockets() {
     const R = this.radius
     const smokeTex = this.smokeTexture(); this.texs.push(smokeTex)
-    const specs: { x: number; z: number; off: number }[] = [
-      { x: -R * 0.66, z: this.beltZ + 2, off: 0 },
-      { x: R * 0.66, z: this.beltZ - 4, off: 6.5 },
+    const specs: { x: number; z: number; off: number; dest: 'moon' | 'mars' }[] = [
+      { x: -R * 0.66, z: this.beltZ + 2, off: 0, dest: 'moon' },
+      { x: R * 0.66, z: this.beltZ - 4, off: 6.5, dest: 'mars' },
     ]
     // Shared clean low-poly materials: white hull, dark nose/nozzles, glowing blue.
     const hullMat = this.own(new THREE.MeshStandardMaterial({ color: 0xeef2f8, metalness: 0.4, roughness: 0.38 }))
@@ -1011,8 +1014,38 @@ export class LaunchPad {
       // Ground smoke sprites at the base.
       const smokeMat = this.own(new THREE.SpriteMaterial({ map: smokeTex, color: 0xcdd6e2, transparent: true, opacity: 0, depthWrite: false, fog: false }))
       for (let i = 0; i < 5; i++) { const sp = new THREE.Sprite(smokeMat); sp.position.set(s.x + (Math.random() - 0.5) * 5, 0.6, s.z + (Math.random() - 0.5) * 5); sp.scale.set(6, 6, 1); this.group.add(sp) }
-      this.rockets.push({ g, flame, flameMat, glowMat, smokeMat, armL, armR, bx: s.x, bz: s.z, t: s.off, vy: 0, y: 0, ph: s.off })
+
+      // Destination billboard on the gantry, facing the deck centre so the player
+      // reads where this rocket goes (MOON cool-cyan, MARS warm-orange).
+      const destTex = this.rocketSignTex(s.dest); this.texs.push(destTex)
+      const destPanel = new THREE.Mesh(this.ownG(new THREE.PlaneGeometry(6, 3)), this.own(new THREE.MeshBasicMaterial({ map: destTex, transparent: true, toneMapped: false, side: THREE.DoubleSide })))
+      destPanel.position.set(s.x + 3.2, 13.6, s.z)
+      destPanel.rotation.y = Math.atan2(-(s.x + 3.2), -s.z) // face deck centre
+      this.group.add(destPanel)
+      // Glowing landing-pad ring of the dest colour ringing the launch pad.
+      const ringCol = s.dest === 'moon' ? 0x9fe6ff : 0xff8a3c
+      const destRing = new THREE.Mesh(this.ownG(new THREE.TorusGeometry(5.2, 0.18, 8, 36)), this.own(new THREE.MeshBasicMaterial({ color: ringCol, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })))
+      destRing.rotation.x = -Math.PI / 2; destRing.position.set(s.x, 0.08, s.z); this.group.add(destRing)
+
+      this.rockets.push({ g, flame, flameMat, glowMat, smokeMat, armL, armR, bx: s.x, bz: s.z, t: s.off, vy: 0, y: 0, ph: s.off, dest: s.dest, launching: false, launchT: 0 })
     }
+  }
+
+  /** A bold destination sign for a rocket ("▲ MOON" / "▲ MARS") drawn to a canvas. */
+  private rocketSignTex(dest: 'moon' | 'mars'): THREE.CanvasTexture {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#070b14'; ctx.fillRect(0, 0, 512, 256)
+    const accent = dest === 'moon' ? '#9fe6ff' : '#ff8a3c'
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'; for (let y = 0; y < 256; y += 6) ctx.fillRect(0, y, 512, 2)
+    ctx.strokeStyle = accent; ctx.lineWidth = 4; ctx.strokeRect(8, 8, 496, 240)
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.shadowColor = accent; ctx.shadowBlur = 22; ctx.fillStyle = '#eef7ff'
+    ctx.font = '900 64px ui-monospace, Menlo, monospace'; ctx.fillText('▲ LAUNCH ▲', 256, 70)
+    ctx.font = '900 120px ui-monospace, Menlo, monospace'; ctx.fillStyle = accent
+    ctx.fillText(dest.toUpperCase(), 256, 168)
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace
+    return tex
   }
 
   private buildClouds() {
@@ -1321,15 +1354,27 @@ export class LaunchPad {
       d.g.rotation.y = -d.a
       for (const r of d.rotors) r.rotation.z += dt * 40
     }
-    // Launching rockets: idle -> ignite -> blast off on a staggered loop.
-    const CYCLE = 13, IGNITE = 4.2, LIFT = 5.8
+    // Boardable rockets: cradled + idling on the pad until the player boards (see
+    // igniteRocket), then arms swing open, engines ignite and it climbs away while
+    // the screen fades and the trip to the moon/mars begins.
     for (const r of this.rockets) {
       r.t += dt
-      if (r.t > CYCLE) { r.t -= CYCLE; r.y = 0; r.vy = 0 }
-      let flame = 0, shake = 0, smoke = 0
-      if (r.t < IGNITE) { flame = 0; r.y = 0 }
-      else if (r.t < LIFT) { const f = (r.t - IGNITE) / (LIFT - IGNITE); flame = f; shake = f * 0.14; smoke = f }
-      else { r.vy += 17 * dt; r.y += r.vy * dt; flame = 1; smoke = Math.max(0, 1 - (r.t - LIFT) * 0.5) }
+      let flame = 0, shake = 0, smoke = 0, armClose = 1
+      if (r.launching) {
+        r.launchT += dt
+        if (r.launchT < 0.55) {
+          // Arms swing clear, engines spin up.
+          armClose = 1 - THREE.MathUtils.smoothstep(r.launchT, 0, 0.55)
+          flame = THREE.MathUtils.smoothstep(r.launchT, 0.12, 0.55); shake = flame * 0.18; smoke = flame; r.y = 0
+        } else {
+          // Liftoff: climb under thrust.
+          armClose = 0; r.vy += 22 * dt; r.y += r.vy * dt
+          flame = 1; shake = 0.18; smoke = Math.max(0, 1 - (r.launchT - 0.55) * 0.5)
+        }
+      } else {
+        // Idle, fuelled and ready: a soft vapour wisp + a small pilot flame.
+        armClose = 1; r.y = 0; smoke = 0.12; flame = 0.05
+      }
       // reducedMotion: tame the very-fast (38 rad/s) flame flicker to a calm shimmer.
       const flickFreq = config.reducedMotion ? 3 : 38
       const flickAmp = config.reducedMotion ? 0.12 : 0.3
@@ -1339,18 +1384,7 @@ export class LaunchPad {
       r.glowMat.opacity = flame * 0.5 * flick
       r.smokeMat.opacity = smoke * 0.55
       r.g.position.set(r.bx + (Math.random() - 0.5) * shake, r.y, r.bz + (Math.random() - 0.5) * shake)
-      // Mechazilla catch arms: armClose 0..1 (0 = open/clear, 1 = cradling).
-      // Slow, weighty motion driven entirely off r.t (no allocation, smoothstep eased):
-      //   - rocket lands at the CYCLE wrap (r.t=0): arms ease CLOSED over ~1.5s
-      //   - they hold closed through the idle middle
-      //   - they ease OPEN over the ~1s just before IGNITE so they're clear of flame
-      //   - through ignite / lift / climb (r.t >= IGNITE - 1): fully OPEN
-      const closeIn = THREE.MathUtils.smoothstep(r.t, 0, 1.5)            // 0 -> 1 as it settles
-      const openOut = 1 - THREE.MathUtils.smoothstep(r.t, IGNITE - 1, IGNITE) // 1 -> 0 before ignite
-      const armClose = r.t < IGNITE ? closeIn * openOut : 0
-      // Map to each pivot's Y-rotation (per-side magnitude; arms mirror in z).
-      // CLOSED ~0.85 rad: tips cradle ~1.9 from the core (gap over the 1.5-1.7 hull).
-      // OPEN  ~1.70 rad: beams swing ~97 deg out, well clear of the launching stack.
+      // Mechazilla catch arms: CLOSED ~0.85 rad cradles the hull, OPEN ~1.7 swings clear.
       const CLOSED = 0.85, OPEN = 1.7
       const ang = OPEN + (CLOSED - OPEN) * armClose
       r.armL.rotation.y = -ang  // side -1 pivot
@@ -1484,6 +1518,27 @@ export class LaunchPad {
   elevatorDest(): 'moon' | 'mars' { return this.skyElevator.currentDest() }
   /** Lock the sign + ramp the boarding visual on/off. */
   elevatorSetBoarding(on: boolean): void { this.skyElevator.setBoarding(on) }
+
+  // --- Rocket proxies (the two boardable off-world rockets at the deck sides) ----
+  /** World-space boarding footprints for the rockets: step inside `radius` of one
+   *  to launch to its `dest`. The pad is static after build, so the world centres
+   *  are computed once and cached (this loop runs every frame in Game). */
+  rocketSpots(): { x: number; z: number; radius: number; dest: 'moon' | 'mars' }[] {
+    if (!this.rocketSpotsCache) {
+      const v = new THREE.Vector3()
+      this.rocketSpotsCache = this.rockets.map((r) => {
+        v.set(r.bx, 0, r.bz).applyMatrix4(this.group.matrixWorld)
+        return { x: v.x, z: v.z, radius: 5.5, dest: r.dest }
+      })
+    }
+    return this.rocketSpotsCache
+  }
+
+  /** Kick the rocket bound for `dest` into its ignition + climb (called on board). */
+  igniteRocket(dest: 'moon' | 'mars'): void {
+    const r = this.rockets.find((rk) => rk.dest === dest)
+    if (r && !r.launching) { r.launching = true; r.launchT = 0; r.vy = 0 }
+  }
 
   /** Left the deck - off the edge of the (circular) floor, which the collider and
    *  this test now share a radius with, so there's no invisible lip to walk on. */
